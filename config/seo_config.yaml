@@ -1,0 +1,36 @@
+seo_thresholds:
+  title_length:
+    min: 30
+    max: 60
+  meta_description_length:
+    min: 120
+    max: 160
+  content_length:
+    min: 300
+  sentence_length:
+    max: 20
+  keyword_density:
+    max: 3.0
+
+readability_thresholds:
+  flesch_reading_ease:
+    min: 60
+  gunning_fog:
+    max: 12
+
+crawling:
+  timeout: 30
+  max_retries: 3
+  user_agent: "TFQ0SEO/1.0"
+  
+cache:
+  enabled: true
+  expiration: 3600  # Cache expiration in seconds
+  directory: ".tfq0seo_cache"
+
+logging:
+  level: INFO
+  file: "tfq0seo.log"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  max_size: 10485760  # 10MB
+  backup_count: 5 
