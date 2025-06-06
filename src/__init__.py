@@ -18,8 +18,8 @@ Features:
 For more information, visit: https://github.com/tfq66/tfq0seo
 """
 
-__version__ = '1.0.0'
-__author__ = 'tfq66'
+__version__ = '1.0.1'
+__author__ = 'TFQ0'
 __license__ = 'MIT'
 
 from .seo_analyzer_app import SEOAnalyzerApp

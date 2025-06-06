@@ -8,7 +8,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="tfq0seo",
-    version="1.0.0",
+    version="1.0.1",
     author="tfq0",
     description="Modern SEO analysis and optimization toolkit",
     long_description=long_description,
