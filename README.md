@@ -1,183 +1,165 @@
-# SEO Analyzer Tool
+# tfq0seo 🔍
 
-A comprehensive SEO analysis tool that helps you analyze websites and content while learning SEO best practices. This tool provides detailed insights into various SEO aspects and teaches you the principles behind each recommendation.
+[![PyPI version](https://badge.fury.io/py/tfq0seo.svg)](https://badge.fury.io/py/tfq0seo)
+[![Python Versions](https://img.shields.io/pypi/pyversions/tfq0seo.svg)](https://pypi.org/project/tfq0seo/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Downloads](https://pepy.tech/badge/tfq0seo)](https://pepy.tech/project/tfq0seo)
 
-## Features
+A modern, comprehensive SEO analysis and optimization toolkit that helps you improve your website's search engine visibility and performance. 🚀
 
-### URL Analysis
-- Meta tags evaluation
-  - Title and description optimization
-  - Open Graph and Twitter Cards
-  - Schema.org markup validation
-- HTML structure analysis
-  - Heading hierarchy
-  - Content structure
-  - Internal linking
-- Mobile-friendliness checks
-  - Viewport configuration
-  - Touch element spacing
-  - Font size validation
-- Performance analysis
-  - Resource optimization
-  - Load time metrics
-  - Compression checks
-- Security assessment
-  - HTTPS implementation
-  - Security headers
-  - Mixed content detection
+## ✨ Features
+
+- 🌐 **URL Analysis**: Complete SEO audit of web pages
+- 📝 **Content Analysis**: Text content optimization and recommendations
+- 📱 **Mobile-Friendly Check**: Ensure your site works well on all devices
+- 🏃 **Performance Metrics**: Speed and performance analysis
+- 🔒 **Security Analysis**: Check for common security issues
+- 📚 **Educational Resources**: Built-in SEO learning materials
+- 💾 **Multiple Export Formats**: JSON, HTML, and Markdown support
+- ⚡ **Caching Support**: For improved performance
+
+## 🛠️ Installation
+
+```bash
+pip install tfq0seo
+```
+
+## 🚀 Quick Start
+
+### Analyze a URL
+
+```bash
+tfq0seo analyze-url https://example.com --keyword "your target keyword"
+```
+
+### Analyze Content
+
+```bash
+# From a file
+tfq0seo analyze-content --file content.txt --keyword "your keyword"
+
+# Direct text input
+tfq0seo analyze-content --text "Your content here" --keyword "your keyword"
+```
+
+### Access Educational Resources
+
+```bash
+# Get all resources
+tfq0seo education
+
+# Get specific topic
+tfq0seo education --topic meta_tags
+```
+
+## 📊 Output Formats
+
+Choose your preferred output format with the `--format` flag:
+
+```bash
+tfq0seo analyze-url https://example.com --format json
+tfq0seo analyze-url https://example.com --format html
+tfq0seo analyze-url https://example.com --format markdown  # default
+```
+
+## 🔧 Configuration
+
+Create a `seo_config.yaml` file to customize the analysis:
+
+```yaml
+cache:
+  enabled: true
+  directory: ".cache"
+  expiration: 3600  # seconds
+
+analysis:
+  meta_tags:
+    title_length: [30, 60]
+    description_length: [120, 160]
+  
+  content:
+    min_word_count: 300
+    keyword_density: [1, 3]  # percentage
+```
+
+## 📋 Analysis Areas
+
+### Meta Analysis
+- Title tag optimization
+- Meta description validation
+- Robots directives
+- Open Graph tags
+- Twitter Cards
 
 ### Content Analysis
 - Keyword optimization
-  - Density and distribution
-  - Natural language processing
-  - Semantic analysis
-- Readability assessment
-  - Multiple readability scores
-  - Sentence structure analysis
-  - Content complexity metrics
-- Content quality checks
-  - Duplicate content detection
-  - Grammar and style analysis
-  - Transition word usage
-- Structure evaluation
-  - Paragraph length
-  - Content sectioning
-  - Formatting consistency
+- Content structure
+- Readability metrics
+- Internal linking
+- Image optimization
 
-### Educational Components
-- Detailed explanations for each recommendation
-- Current SEO best practices
-- Implementation guides
-- Topic-specific resources
-- Interactive learning elements
+### Modern SEO Features
+- Mobile responsiveness
+- Page speed insights
+- Core Web Vitals
+- Security headers
+- Schema markup
 
-## Installation
+## 🎯 Scoring System
 
-### Using pip
-```bash
-pip install seo-analyzer
-```
+The tool provides a comprehensive SEO score (0-100) based on:
+- Technical SEO implementation (30%)
+- Content optimization (40%)
+- User experience factors (30%)
 
-### From source
-1. Clone this repository
-```bash
-git clone https://github.com/yourusername/seo-analyzer.git
-cd seo-analyzer
-```
-
-2. Install dependencies
-```bash
-pip install -e .
-```
-
-## Usage
-
-### Command Line Interface
-
-1. Analyze a URL:
-```bash
-seo-analyzer analyze-url https://example.com --keyword "target keyword" --format markdown
-```
-
-2. Analyze text content:
-```bash
-seo-analyzer analyze-content --file content.txt --keyword "target keyword"
-# or
-seo-analyzer analyze-content --text "Your content here" --keyword "target keyword"
-```
-
-3. Get educational resources:
-```bash
-seo-analyzer education --topic meta_tags
-```
-
-### Python API
+## 💻 API Usage
 
 ```python
-from seo_analyzer import SEOAnalyzerApp
+from tfq0seo import SEOAnalyzerApp
 
 # Initialize the analyzer
 analyzer = SEOAnalyzerApp()
 
 # Analyze a URL
-analysis = analyzer.analyze_url('https://example.com', target_keyword='keyword')
+results = analyzer.analyze_url(
+    url="https://example.com",
+    target_keyword="example keyword"
+)
 
 # Analyze content
-content_analysis = analyzer.analyze_content('Your content here', target_keyword='keyword')
+content_results = analyzer.analyze_content(
+    content="Your content here",
+    target_keyword="example keyword"
+)
 
 # Get educational resources
-resources = analyzer.get_educational_resources(topic='meta_tags')
-
-# Export report
-report = analyzer.export_report(analysis, format='markdown')
+resources = analyzer.get_educational_resources(topic="meta_tags")
 ```
 
-## Configuration
+## 🤝 Contributing
 
-The tool can be configured using a YAML file. Default configuration is in `config/seo_config.yaml`:
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
 
-```yaml
-seo_thresholds:
-  title_length:
-    min: 30
-    max: 60
-  meta_description_length:
-    min: 120
-    max: 160
-  content_length:
-    min: 300
-  sentence_length:
-    max: 20
-  keyword_density:
-    max: 3.0
-
-# ... more configuration options
-```
-
-## Analysis Report Sections
-
-The tool provides a comprehensive report with these main sections:
-
-1. **Strengths** ✅
-   - What's working well
-   - SEO best practices in place
-   - Positive metrics
-
-2. **Weaknesses** ⚠️
-   - Areas needing improvement
-   - Missing SEO elements
-   - Performance issues
-
-3. **Recommendations** 📝
-   - Actionable improvement steps
-   - Prioritized suggestions
-   - Implementation guidance
-
-4. **SEO Education** 📚
-   - Explanations of SEO principles
-   - Best practices
-   - Learning resources
-
-## Development
-
-### Running Tests
-```bash
-pytest tests/
-```
-
-### Contributing
 1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests
-5. Submit a pull request
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-## Requirements
+## 📝 License
 
-- Python 3.7+
-- Internet connection (for URL analysis)
-- Required Python packages (see requirements.txt)
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## License
+## 🙏 Acknowledgments
 
-MIT License - see LICENSE file for details 
+- Built with modern Python best practices
+- Inspired by the SEO community
+- Powered by various open-source tools and libraries
+
+## 📬 Contact
+
+- GitHub: [Your GitHub Profile](https://github.com/TFQ0)
+
+---
+
+Made with ❤️ by [TFQ0] 
