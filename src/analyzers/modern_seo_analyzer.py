@@ -1,58 +1,147 @@
-from typing import Dict, Optional
-import requests
+from typing import Dict, Any, List, Optional, cast
+import asyncio
 from bs4 import BeautifulSoup
+from ..utils.async_base import AsyncAnalyzer, async_retry
+from ..utils.security import (
+    InputSanitizer,
+    SecurityHeaders,
+    RequestValidator,
+    RateLimitConfig,
+    RateLimiter
+)
+from ..utils.performance import (
+    MemoryConfig,
+    AdvancedCache,
+    ConnectionPool,
+    HTMLParser,
+    BatchProcessor,
+    memory_efficient
+)
+from ..utils.types import (
+    AsyncAnalysisContext,
+    ModernSEOAnalysis,
+    SecurityChecks,
+    PerformanceMetrics
+)
+from ..utils.error_handler import create_error, URLFetchError
 import json
 from urllib.parse import urlparse
 from ..utils.error_handler import handle_analysis_error
 
-class ModernSEOAnalyzer:
-    """tfq0seo Modern Features Analyzer - Analyzes modern SEO aspects of a webpage.
+class ModernSEOAnalyzer(AsyncAnalyzer):
+    """Analyzes modern SEO aspects of a webpage.
     
-    Provides comprehensive analysis of modern SEO features including:
-    - Mobile-friendliness
-    - Performance optimization
-    - Security implementation
+    Features:
+    - Mobile friendliness
+    - Performance metrics
+    - Security checks
     - Structured data
-    - Social media integration
-    - Technical SEO aspects
+    - Social signals
     """
-    def __init__(self, config: dict):
-        self.config = config
-        self.headers = {
-            'User-Agent': config['crawling']['user_agent']
-        }
+    
+    def __init__(self):
+        """Initialize analyzer."""
+        super().__init__()
+        self.input_sanitizer = InputSanitizer()
+        self.security_headers = SecurityHeaders()
+        self.request_validator = RequestValidator()
+        self.html_parser = HTMLParser()
+        self.connection_pool = ConnectionPool(max_connections=100)
 
-    @handle_analysis_error
-    def analyze(self, url: str) -> Dict:
-        """Perform comprehensive tfq0seo modern SEO analysis.
-        
-        Analyzes multiple aspects of modern SEO best practices including:
-        - Mobile optimization and responsiveness
-        - Page performance and resource optimization
-        - Security implementations and best practices
-        - Structured data and rich snippets
-        - Social media integration and sharing
-        - Technical SEO implementation
+    async def __aenter__(self):
+        """Initialize async resources."""
+        await super().__aenter__()
+        self.session = await self.connection_pool.get_session()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Clean up async resources."""
+        await self.connection_pool.close()
+        await super().__aexit__(exc_type, exc_val, exc_tb)
+
+    @async_retry(max_retries=3)
+    async def analyze(self, url: str) -> ModernSEOAnalysis:
+        """Analyze modern SEO aspects of a webpage.
         
         Args:
-            url: The webpage URL to analyze
+            url: URL to analyze
             
         Returns:
-            Dict containing analysis results and recommendations
+            Modern SEO analysis results
+            
+        Raises:
+            URLFetchError: If URL fetch fails
         """
-        analysis = {
-            'mobile_friendly': self._check_mobile_friendly(url),
-            'performance': self._analyze_performance(url),
-            'security': self._analyze_security(url),
-            'structured_data': self._analyze_structured_data(url),
-            'social_signals': self._analyze_social_signals(url),
-            'technical_seo': self._analyze_technical_seo(url)
+        # Sanitize and validate URL
+        url = self.input_sanitizer.sanitize_url(url)
+        
+        if not self.request_manager:
+            raise URLFetchError(create_error(
+                'NO_REQUEST_MANAGER',
+                'Request manager not initialized'
+            ))
+        
+        # Fetch page content
+        content = await self.request_manager.fetch(url)
+        
+        # Parse HTML efficiently
+        soup = self.html_parser.parse(content)
+        
+        # Run analyses concurrently
+        mobile_friendly, performance, security, structured_data, social = await asyncio.gather(
+            self._check_mobile_friendly(soup),
+            self._analyze_performance(soup),
+            self._check_security(url),
+            self._extract_structured_data(soup),
+            self._analyze_social_signals(soup)
+        )
+        
+        result = {
+            'mobile_friendly': mobile_friendly,
+            'performance': performance,
+            'security': security,
+            'structured_data': structured_data,
+            'social_signals': social
         }
         
-        return self._evaluate_modern_seo(analysis)
+        return result
 
-    def _check_mobile_friendly(self, url: str) -> Dict:
-        """Check mobile-friendliness indicators for tfq0seo compliance.
+    async def analyze_batch(self, urls: List[str]) -> Dict[str, ModernSEOAnalysis]:
+        """Analyze multiple URLs in batches.
+        
+        Args:
+            urls: List of URLs to analyze
+            
+        Returns:
+            Dictionary mapping URLs to their analysis results
+        """
+        # First check cache for all URLs
+        cached_results = {}
+        urls_to_analyze = []
+        
+        for url in urls:
+            cached = await self.cache.get(url)
+            if cached:
+                cached_results[url] = cast(ModernSEOAnalysis, cached)
+            else:
+                urls_to_analyze.append(url)
+        
+        # Analyze remaining URLs in batches
+        if urls_to_analyze:
+            batch_results = await self.batch_processor.process_batch(
+                urls_to_analyze,
+                self.analyze,
+                max_concurrent=10
+            )
+            
+            # Combine results
+            for url, result in zip(urls_to_analyze, batch_results):
+                cached_results[url] = result
+        
+        return cached_results
+
+    async def _check_mobile_friendly(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        """Check mobile-friendliness indicators.
         
         Analyzes:
         - Viewport configuration
@@ -61,9 +150,6 @@ class ModernSEOAnalyzer:
         - Content width optimization
         """
         try:
-            response = requests.get(url, headers=self.headers)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
             viewport = soup.find('meta', attrs={'name': 'viewport'})
             responsive_meta = viewport and 'width=device-width' in viewport.get('content', '')
             
@@ -80,8 +166,9 @@ class ModernSEOAnalyzer:
         except Exception as e:
             return {'error': str(e)}
 
-    def _analyze_performance(self, url: str) -> Dict:
-        """Analyze performance indicators for tfq0seo optimization.
+    @memory_efficient(limit_mb=100)
+    async def _analyze_performance(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        """Analyze performance indicators.
         
         Checks:
         - Resource usage and counts
@@ -91,24 +178,19 @@ class ModernSEOAnalyzer:
         - Content compression
         """
         try:
-            response = requests.get(url, headers=self.headers)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
             # Analyze resource usage
             resources = {
                 'images': len(soup.find_all('img')),
                 'scripts': len(soup.find_all('script')),
                 'styles': len(soup.find_all('link', rel='stylesheet')),
-                'total_size': len(response.content),
-                'load_time': response.elapsed.total_seconds()
+                'total_size': len(str(soup)),
+                'load_time': 0  # Not available without actual request
             }
             
             # Check for performance optimizations
             optimizations = {
                 'image_optimization': self._check_image_optimization(soup),
-                'resource_minification': self._check_resource_minification(soup),
-                'browser_caching': self._check_browser_caching(response),
-                'compression': self._check_compression(response)
+                'resource_minification': self._check_resource_minification(soup)
             }
             
             return {
@@ -118,32 +200,26 @@ class ModernSEOAnalyzer:
         except Exception as e:
             return {'error': str(e)}
 
-    def _analyze_security(self, url: str) -> Dict:
-        """Analyze security aspects for tfq0seo compliance.
+    async def _check_security(self, url: str) -> Dict[str, Any]:
+        """Analyze security aspects.
         
         Checks:
         - HTTPS implementation
-        - Security headers
         - Mixed content detection
-        - Content security policies
         """
         try:
-            response = requests.get(url, headers=self.headers)
-            
             security_checks = {
                 'https': url.startswith('https'),
-                'hsts': 'strict-transport-security' in response.headers,
-                'xss_protection': 'x-xss-protection' in response.headers,
-                'content_security': 'content-security-policy' in response.headers,
-                'mixed_content': self._check_mixed_content(response.text)
+                'mixed_content': self._check_mixed_content(str(soup))
             }
             
             return security_checks
         except Exception as e:
             return {'error': str(e)}
 
-    def _analyze_structured_data(self, url: str) -> Dict:
-        """Analyze structured data implementation for tfq0seo optimization.
+    @memory_efficient(limit_mb=150)
+    async def _extract_structured_data(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        """Extract structured data.
         
         Examines:
         - Schema.org markup presence
@@ -151,9 +227,6 @@ class ModernSEOAnalyzer:
         - JSON-LD implementation
         """
         try:
-            response = requests.get(url, headers=self.headers)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
             # Find all structured data
             structured_data = []
             for script in soup.find_all('script', type='application/ld+json'):
@@ -170,105 +243,44 @@ class ModernSEOAnalyzer:
         except Exception as e:
             return {'error': str(e)}
 
-    def _analyze_social_signals(self, url: str) -> Dict:
-        """Analyze social media integration for tfq0seo optimization.
+    async def _analyze_social_signals(self, soup: BeautifulSoup) -> Dict[str, Dict[str, str]]:
+        """Analyze social media integration.
         
-        Examines:
-        - Open Graph meta tags
-        - Twitter Card implementation
-        - Social media profile links
+        Args:
+            soup: BeautifulSoup object of the page
+            
+        Returns:
+            Dictionary of social media signals
         """
-        try:
-            response = requests.get(url, headers=self.headers)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Check for social meta tags
-            social_meta = {
-                'og_tags': self._get_og_tags(soup),
-                'twitter_cards': self._get_twitter_cards(soup),
-                'social_links': self._find_social_links(soup)
-            }
-            
-            return social_meta
-        except Exception as e:
-            return {'error': str(e)}
-
-    def _analyze_technical_seo(self, url: str) -> Dict:
-        """Analyze technical SEO aspects for tfq0seo compliance.
+        # Use partial parsing for meta tags
+        meta_soup = self.html_parser.parse(str(soup), targets=['meta'])
         
-        Examines:
-        - URL structure and parameters
-        - Internal linking patterns
-        - HTTP response status
-        - Robots.txt configuration
-        - XML sitemap implementation
-        """
-        try:
-            response = requests.get(url, headers=self.headers)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            technical_checks = {
-                'url_structure': self._analyze_url_structure(url),
-                'internal_links': self._analyze_internal_links(soup, url),
-                'http_status': response.status_code,
-                'response_headers': dict(response.headers),
-                'robots_txt': self._check_robots_txt(url),
-                'sitemap': self._check_sitemap(url)
-            }
-            
-            return technical_checks
-        except Exception as e:
-            return {'error': str(e)}
-
-    def _check_touch_elements(self, soup: BeautifulSoup) -> Dict:
-        """Check touch element spacing for mobile optimization.
-        
-        Analyzes interactive elements for proper mobile touch target sizes.
-        """
-        interactive_elements = soup.find_all(['a', 'button', 'input', 'select'])
-        return {
-            'total_elements': len(interactive_elements),
-            'potentially_small': len([el for el in interactive_elements if self._is_element_small(el)])
+        social_meta = {
+            'facebook': {},
+            'twitter': {},
+            'linkedin': {},
+            'pinterest': {}
         }
-
-    def _check_font_size(self, soup: BeautifulSoup) -> Dict:
-        """Check font sizes for mobile readability.
         
-        Analyzes text elements for proper mobile-friendly font sizes.
-        """
-        text_elements = soup.find_all(['p', 'span', 'div'])
-        small_fonts = [el for el in text_elements if 'font-size' in el.get('style', '') and self._is_font_small(el)]
-        return {
-            'total_text_elements': len(text_elements),
-            'small_font_elements': len(small_fonts)
-        }
-
-    def _check_content_width(self, soup: BeautifulSoup) -> bool:
-        """Check content width optimization for mobile devices.
+        # Process meta tags efficiently
+        for meta in meta_soup.find_all('meta'):
+            property_val = meta.get('property', '')
+            name_val = meta.get('name', '')
+            content = meta.get('content', '')
+            
+            if property_val.startswith('og:'):
+                social_meta['facebook'][property_val] = content
+            elif name_val.startswith('twitter:'):
+                social_meta['twitter'][name_val] = content
+            elif property_val.startswith('linkedin:'):
+                social_meta['linkedin'][property_val] = content
+            elif name_val.startswith('pinterest:'):
+                social_meta['pinterest'][name_val] = content
         
-        Verifies viewport configuration for responsive design.
-        """
-        viewport = soup.find('meta', attrs={'name': 'viewport'})
-        return bool(viewport and 'width=device-width' in viewport.get('content', ''))
+        return social_meta
 
-    def _check_image_optimization(self, soup: BeautifulSoup) -> Dict:
-        """Check image optimization for tfq0seo performance standards.
-        
-        Analyzes:
-        - Image alt text presence
-        - Image dimensions
-        - Total image count
-        """
-        images = soup.find_all('img')
-        optimization = {
-            'total_images': len(images),
-            'missing_alt': len([img for img in images if not img.get('alt')]),
-            'large_images': len([img for img in images if self._is_image_large(img)])
-        }
-        return optimization
-
-    def _check_resource_minification(self, soup: BeautifulSoup) -> Dict:
-        """Check resource minification for performance optimization.
+    def _check_resource_minification(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        """Check resource minification.
         
         Analyzes:
         - JavaScript minification
@@ -285,23 +297,8 @@ class ModernSEOAnalyzer:
             'minified_styles': len([s for s in styles if '.min.css' in str(s.get('href', ''))])
         }
 
-    def _check_browser_caching(self, response: requests.Response) -> bool:
-        """Check browser caching configuration for performance optimization.
-        
-        Verifies presence of caching headers for resource optimization.
-        """
-        cache_headers = ['cache-control', 'expires', 'etag']
-        return any(header in response.headers for header in cache_headers)
-
-    def _check_compression(self, response: requests.Response) -> bool:
-        """Check content compression for performance optimization.
-        
-        Verifies if GZIP or other compression is enabled.
-        """
-        return 'content-encoding' in response.headers
-
     def _check_mixed_content(self, html: str) -> bool:
-        """Check for mixed content issues in tfq0seo security analysis.
+        """Check for mixed content issues.
         
         Detects HTTP resources on HTTPS pages.
         """
@@ -315,41 +312,8 @@ class ModernSEOAnalyzer:
         
         return bool(http_resources)
 
-    def _extract_schema_types(self, structured_data: list) -> list:
-        """Extract schema types from structured data for tfq0seo analysis.
-        
-        Identifies implemented Schema.org types for rich snippet optimization.
-        """
-        schema_types = []
-        for data in structured_data:
-            if isinstance(data, dict):
-                schema_type = data.get('@type')
-                if schema_type:
-                    schema_types.append(schema_type)
-        return schema_types
-
-    def _get_og_tags(self, soup: BeautifulSoup) -> Dict:
-        """Extract Open Graph tags for tfq0seo social optimization.
-        
-        Analyzes social sharing meta tags for Facebook and other platforms.
-        """
-        og_tags = {}
-        for tag in soup.find_all('meta', property=lambda x: x and x.startswith('og:')):
-            og_tags[tag['property']] = tag.get('content', '')
-        return og_tags
-
-    def _get_twitter_cards(self, soup: BeautifulSoup) -> Dict:
-        """Extract Twitter Card tags for tfq0seo social optimization.
-        
-        Analyzes Twitter-specific meta tags for optimal sharing.
-        """
-        twitter_cards = {}
-        for tag in soup.find_all('meta', attrs={'name': lambda x: x and x.startswith('twitter:')}):
-            twitter_cards[tag['name']] = tag.get('content', '')
-        return twitter_cards
-
-    def _find_social_links(self, soup: BeautifulSoup) -> Dict:
-        """Find social media profile links for tfq0seo social presence analysis.
+    def _find_social_links(self, soup: BeautifulSoup) -> Dict[str, str]:
+        """Find social media profile links.
         
         Identifies links to major social media platforms.
         """
@@ -364,8 +328,8 @@ class ModernSEOAnalyzer:
         
         return social_links
 
-    def _analyze_url_structure(self, url: str) -> Dict:
-        """Analyze URL structure for tfq0seo technical optimization.
+    def _analyze_url_structure(self, url: str) -> Dict[str, Any]:
+        """Analyze URL structure.
         
         Examines:
         - Protocol usage
@@ -383,13 +347,12 @@ class ModernSEOAnalyzer:
             'has_fragment': bool(parsed.fragment)
         }
 
-    def _analyze_internal_links(self, soup: BeautifulSoup, base_url: str) -> Dict:
-        """Analyze internal linking structure for tfq0seo optimization.
+    def _analyze_internal_links(self, soup: BeautifulSoup, base_url: str) -> Dict[str, int]:
+        """Analyze internal linking structure.
         
         Examines:
         - Internal link count
         - External link count
-        - Link patterns
         """
         domain = urlparse(base_url).netloc
         links = soup.find_all('a', href=True)
@@ -409,152 +372,45 @@ class ModernSEOAnalyzer:
             'external_count': len(external_links)
         }
 
-    def _check_robots_txt(self, url: str) -> Dict:
-        """Check robots.txt configuration for tfq0seo crawl optimization.
-        
-        Verifies:
-        - File existence
-        - Content accessibility
-        """
-        try:
-            robots_url = f"{urlparse(url).scheme}://{urlparse(url).netloc}/robots.txt"
-            response = requests.get(robots_url, headers=self.headers)
-            return {
-                'exists': response.status_code == 200,
-                'content': response.text if response.status_code == 200 else None
-            }
-        except:
-            return {'exists': False, 'content': None}
+    def _check_touch_elements(self, soup: BeautifulSoup) -> bool:
+        """Check if interactive elements are touch-friendly."""
+        for element in soup.find_all(['button', 'a', 'input']):
+            if self._is_element_small(element):
+                return False
+        return True
 
-    def _check_sitemap(self, url: str) -> Dict:
-        """Check XML sitemap for tfq0seo indexing optimization.
-        
-        Verifies:
-        - Sitemap existence
-        - XML format compliance
-        """
-        try:
-            sitemap_url = f"{urlparse(url).scheme}://{urlparse(url).netloc}/sitemap.xml"
-            response = requests.get(sitemap_url, headers=self.headers)
-            return {
-                'exists': response.status_code == 200,
-                'is_xml': 'xml' in response.headers.get('content-type', '').lower()
-            }
-        except:
-            return {'exists': False, 'is_xml': False}
+    def _check_font_size(self, soup: BeautifulSoup) -> bool:
+        """Check if font sizes are mobile-friendly."""
+        for element in soup.find_all(['p', 'span', 'div']):
+            if self._is_font_small(element):
+                return False
+        return True
+
+    def _check_content_width(self, soup: BeautifulSoup) -> bool:
+        """Check if content width is optimized for mobile."""
+        for img in soup.find_all('img'):
+            if self._is_image_large(img):
+                return False
+        return True
 
     def _is_element_small(self, element) -> bool:
-        """Check if an interactive element is too small for mobile touch targets.
-        
-        Analyzes element dimensions against tfq0seo mobile standards.
-        """
+        """Check if an interactive element is too small for mobile touch targets."""
         style = element.get('style', '')
         return 'width' in style and any(f"{i}px" in style for i in range(1, 45))
 
     def _is_font_small(self, element) -> bool:
-        """Check if font size is too small for mobile readability.
-        
-        Analyzes font sizes against tfq0seo mobile standards.
-        """
+        """Check if font size is too small for mobile readability."""
         style = element.get('style', '')
         return 'font-size' in style and any(f"{i}px" in style for i in range(1, 12))
 
     def _is_image_large(self, img) -> bool:
-        """Check if image dimensions exceed tfq0seo optimization guidelines.
-        
-        Analyzes image size for performance optimization.
-        """
+        """Check if image dimensions exceed optimization guidelines."""
         return img.get('width', '0').isdigit() and int(img.get('width')) > 1000
 
-    def _evaluate_modern_seo(self, analysis: Dict) -> Dict:
-        """Evaluate modern SEO aspects and generate tfq0seo recommendations.
-        
-        Performs comprehensive evaluation of:
-        - Mobile optimization status
-        - Performance metrics and optimizations
-        - Security implementations
-        - Structured data usage
-        - Social media integration
-        - Technical SEO elements
-        
-        Returns:
-            Dict containing:
-            - strengths: List of identified SEO strengths
-            - weaknesses: List of SEO issues found
-            - recommendations: List of actionable improvements
-            - education_tips: List of SEO best practices
-        """
-        evaluation = {
-            'strengths': [],
-            'weaknesses': [],
-            'recommendations': [],
-            'education_tips': []
-        }
-        
-        # Mobile-friendly evaluation
-        mobile = analysis.get('mobile_friendly', {})
-        if mobile.get('viewport_meta') and mobile.get('responsive_viewport'):
-            evaluation['strengths'].append("Website is mobile-friendly")
-        else:
-            evaluation['weaknesses'].append("Mobile optimization issues detected")
-            evaluation['recommendations'].append("Implement proper mobile viewport meta tag")
-            evaluation['education_tips'].append(
-                "Mobile-friendly websites rank better in mobile search results"
-            )
-
-        # Performance evaluation
-        perf = analysis.get('performance', {})
-        if perf.get('optimizations', {}).get('compression'):
-            evaluation['strengths'].append("Content compression is enabled")
-        else:
-            evaluation['weaknesses'].append("Content compression is not enabled")
-            evaluation['recommendations'].append("Enable GZIP compression")
-            evaluation['education_tips'].append(
-                "Compressed content loads faster, improving user experience and SEO"
-            )
-
-        # Security evaluation
-        security = analysis.get('security', {})
-        if security.get('https'):
-            evaluation['strengths'].append("HTTPS is enabled")
-        else:
-            evaluation['weaknesses'].append("HTTPS is not enabled")
-            evaluation['recommendations'].append("Migrate to HTTPS")
-            evaluation['education_tips'].append(
-                "HTTPS is a ranking factor and builds user trust"
-            )
-
-        # Structured data evaluation
-        structured = analysis.get('structured_data', {})
-        if structured.get('schemas_found', 0) > 0:
-            evaluation['strengths'].append("Structured data is implemented")
-        else:
-            evaluation['weaknesses'].append("No structured data found")
-            evaluation['recommendations'].append("Implement relevant Schema.org markup")
-            evaluation['education_tips'].append(
-                "Structured data helps search engines understand your content better"
-            )
-
-        # Social signals evaluation
-        social = analysis.get('social_signals', {})
-        if social.get('og_tags') or social.get('twitter_cards'):
-            evaluation['strengths'].append("Social media meta tags are implemented")
-        else:
-            evaluation['weaknesses'].append("Missing social media meta tags")
-            evaluation['recommendations'].append("Add Open Graph and Twitter Card meta tags")
-            evaluation['education_tips'].append(
-                "Social media meta tags improve content sharing appearance"
-            )
-
-        # Technical SEO evaluation
-        technical = analysis.get('technical_seo', {})
-        if technical.get('sitemap', {}).get('exists'):
-            evaluation['strengths'].append("XML sitemap is present")
-        else:
-            evaluation['weaknesses'].append("Missing XML sitemap")
-            evaluation['recommendations'].append("Create and submit an XML sitemap")
-            evaluation['education_tips'].append(
-                "Sitemaps help search engines discover and index your content"
-            )
-
-        return evaluation 
+    def _extract_schema_types(self, structured_data: List[Dict]) -> List[str]:
+        """Extract schema types from structured data."""
+        types = []
+        for data in structured_data:
+            if isinstance(data, dict) and '@type' in data:
+                types.append(data['@type'])
+        return types 

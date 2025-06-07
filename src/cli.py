@@ -21,14 +21,6 @@ def create_parser() -> argparse.ArgumentParser:
         description='tfq0seo - Modern SEO analysis and optimization toolkit'
     )
     
-    # Main arguments
-    parser.add_argument(
-        '--config',
-        type=str,
-        default='config/seo_config.yaml',
-        help='Path to configuration file (default: config/seo_config.yaml)'
-    )
-    
     # Subcommands
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     
@@ -202,7 +194,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         sys.exit(1)
     
     try:
-        app = SEOAnalyzerApp(args.config)
+        app = SEOAnalyzerApp()
         
         if args.command == 'analyze-url':
             analyze_url(app, args)

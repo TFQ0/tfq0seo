@@ -29,9 +29,9 @@ class MetaAnalysis:
 
 class MetaAnalyzer:
     """tfq0seo Meta Tag Analyzer - Analyzes meta tags and SEO-critical HTML elements"""
-    def __init__(self, config: dict):
-        self.config = config
-        self.thresholds = config['seo_thresholds']
+    def __init__(self):
+        """Initialize analyzer."""
+        pass
 
     @handle_analysis_error
     def analyze(self, soup: BeautifulSoup) -> Dict:

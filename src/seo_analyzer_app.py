@@ -1,14 +1,12 @@
-import yaml
 import logging
-import json
 from typing import Dict, Optional, Union
 from pathlib import Path
 
 from .analyzers.meta_analyzer import MetaAnalyzer
 from .analyzers.content_analyzer import ContentAnalyzer
 from .analyzers.modern_seo_analyzer import ModernSEOAnalyzer
-from .utils.cache_manager import cache_manager
 from .utils.error_handler import setup_logging, TFQ0SEOError, handle_analysis_error
+from .utils.validators import InputValidator
 
 class SEOAnalyzerApp:
     """tfq0seo main application class.
@@ -20,55 +18,16 @@ class SEOAnalyzerApp:
     - Modern SEO features
     - Performance analysis
     - Educational resources
-    
-    Features:
-    - Caching support
-    - Multiple export formats
-    - Detailed recommendations
-    - Educational content
     """
     
-    def __init__(self, config_path: Union[str, Path] = 'config/seo_config.yaml'):
-        """Initialize the tfq0seo application.
-        
-        Args:
-            config_path: Path to YAML configuration file
-        
-        Raises:
-            TFQ0SEOError: If configuration loading fails
-        """
-        self.config = self._load_config(config_path)
-        setup_logging(self.config)
+    def __init__(self):
+        """Initialize the tfq0seo application."""
         self.logger = logging.getLogger('tfq0seo')
         
-        # Initialize cache
-        cache_manager.configure(self.config)
-        
         # Initialize analyzers
-        self.meta_analyzer = MetaAnalyzer(self.config)
-        self.content_analyzer = ContentAnalyzer(self.config)
-        self.modern_analyzer = ModernSEOAnalyzer(self.config)
-
-    def _load_config(self, config_path: Union[str, Path]) -> Dict:
-        """Load tfq0seo configuration from YAML file.
-        
-        Args:
-            config_path: Path to configuration file
-            
-        Returns:
-            Dictionary containing configuration settings
-            
-        Raises:
-            TFQ0SEOError: If configuration file cannot be loaded
-        """
-        try:
-            with open(config_path, 'r') as f:
-                return yaml.safe_load(f)
-        except Exception as e:
-            raise TFQ0SEOError(
-                error_code='CONFIG_ERROR',
-                message=f"Failed to load configuration: {str(e)}"
-            )
+        self.meta_analyzer = MetaAnalyzer()
+        self.content_analyzer = ContentAnalyzer()
+        self.modern_analyzer = ModernSEOAnalyzer()
 
     @handle_analysis_error
     def analyze_url(self, url: str, target_keyword: Optional[str] = None) -> Dict:
@@ -88,12 +47,18 @@ class SEOAnalyzerApp:
         Returns:
             Dictionary containing analysis results and recommendations
         """
-        # Check cache first
-        cache_key = f"url_analysis_{url}_{target_keyword}"
-        cached_result = cache_manager.get(cache_key)
-        if cached_result:
-            self.logger.info(f"Retrieved cached analysis for URL: {url}")
-            return cached_result
+        # Validate URL
+        url = InputValidator.validate_url(url)
+        
+        # Validate target keyword if provided
+        if target_keyword:
+            target_keyword = InputValidator.validate_parameter(
+                'target_keyword',
+                target_keyword,
+                str,
+                min_value=1,  # Minimum length
+                max_value=100  # Maximum length
+            )
 
         self.logger.info(f"Starting analysis for URL: {url}")
         
@@ -105,12 +70,6 @@ class SEOAnalyzerApp:
             'content_analysis': self.content_analyzer.analyze(url, target_keyword),
             'modern_seo_analysis': self.modern_analyzer.analyze(url)
         }
-        
-        # Combine recommendations
-        analysis['combined_report'] = self._combine_reports(analysis)
-        
-        # Cache the result
-        cache_manager.set(cache_key, analysis)
         
         return analysis
 
@@ -131,87 +90,27 @@ class SEOAnalyzerApp:
         Returns:
             Dictionary containing content analysis results
         """
+        # Validate content
+        if not content:
+            raise TFQ0SEOError(
+                error_code='EMPTY_CONTENT',
+                message='Content cannot be empty'
+            )
+        
+        # Validate target keyword if provided
+        if target_keyword:
+            target_keyword = InputValidator.validate_parameter(
+                'target_keyword',
+                target_keyword,
+                str,
+                min_value=1,  # Minimum length
+                max_value=100  # Maximum length
+            )
+        
         self.logger.info("Starting content analysis")
         
-        # Perform content analysis
-        analysis = {
-            'content_length': len(content),
-            'target_keyword': target_keyword,
-            'content_analysis': self.content_analyzer.analyze(content, target_keyword)
-        }
-        
-        return analysis
-
-    def _combine_reports(self, analysis: Dict) -> Dict:
-        """Combine analyzer reports into unified tfq0seo report.
-        
-        Merges results from:
-        - Meta analysis
-        - Content analysis
-        - Modern SEO analysis
-        
-        Args:
-            analysis: Dictionary containing individual analysis results
-            
-        Returns:
-            Combined report with unified recommendations
-        """
-        combined = {
-            'strengths': [],
-            'weaknesses': [],
-            'recommendations': [],
-            'education_tips': []
-        }
-        
-        # Collect all findings
-        for key in ['meta_analysis', 'content_analysis', 'modern_seo_analysis']:
-            if key in analysis and isinstance(analysis[key], dict):
-                report = analysis[key]
-                for category in combined.keys():
-                    if category in report:
-                        combined[category].extend(report[category])
-        
-        # Remove duplicates while preserving order
-        for category in combined.keys():
-            combined[category] = list(dict.fromkeys(combined[category]))
-        
-        # Add summary
-        combined['summary'] = {
-            'total_strengths': len(combined['strengths']),
-            'total_weaknesses': len(combined['weaknesses']),
-            'total_recommendations': len(combined['recommendations']),
-            'seo_score': self._calculate_seo_score(combined)
-        }
-        
-        return combined
-
-    def _calculate_seo_score(self, report: Dict) -> int:
-        """Calculate overall tfq0seo score.
-        
-        Scoring factors:
-        - Number of strengths (+2 points each, max 20)
-        - Number of weaknesses (-5 points each, max -70)
-        - Base score of 100 points
-        
-        Args:
-            report: Combined analysis report
-            
-        Returns:
-            Integer score between 0 and 100
-        """
-        total_points = 100
-        deductions = 0
-        
-        # Calculate deductions based on weaknesses
-        weakness_count = len(report['weaknesses'])
-        if weakness_count > 0:
-            deductions = min(weakness_count * 5, 70)  # Cap deductions at 70 points
-        
-        # Add bonus points for strengths
-        strength_bonus = min(len(report['strengths']) * 2, 20)  # Cap bonus at 20 points
-        
-        final_score = max(0, min(100, total_points - deductions + strength_bonus))
-        return final_score
+        # Perform analysis
+        return self.content_analyzer.analyze(content, target_keyword)
 
     def get_educational_resources(self, topic: Optional[str] = None) -> Dict:
         """Get tfq0seo educational resources.

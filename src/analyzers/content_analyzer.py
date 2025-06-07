@@ -10,9 +10,8 @@ from ..utils.error_handler import handle_analysis_error
 
 class ContentAnalyzer:
     """TFQ0SEO Content Analyzer - Analyzes content for SEO optimization"""
-    def __init__(self, config: dict):
-        self.config = config
-        self.thresholds = config['seo_thresholds']
+    def __init__(self):
+        """Initialize analyzer."""
         self.stop_words = set(stopwords.words('english'))
         
         # Download required NLTK data
