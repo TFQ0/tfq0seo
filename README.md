@@ -14,7 +14,6 @@ A modern, comprehensive SEO analysis and optimization toolkit that helps you imp
 - 🏃 **Performance Metrics**: Speed and performance analysis
 - 💾 **Multiple Export Formats**: JSON, HTML, and Markdown support
 
-
 ## 🛠️ Installation
 
 ```bash
@@ -59,49 +58,9 @@ tfq0seo analyze-url https://example.com --format html
 tfq0seo analyze-url https://example.com --format markdown  # default
 ```
 
-## 🔧 Configuration
-
-Create a `seo_config.yaml` file to customize the analysis:
-
-```yaml
-cache:
-  enabled: true
-  directory: ".cache"
-  expiration: 3600  # seconds
-
-analysis:
-  meta_tags:
-    title_length: [30, 60]
-    description_length: [120, 160]
-  
-  content:
-    min_word_count: 300
-    keyword_density: [1, 3]  # percentage
-```
-
-## 📋 Analysis Areas
-
-### Meta Analysis
-- Title tag optimization
-- Meta description validation
-
-### Content Analysis
-- Keyword optimization
-- Content structure
-- Readability metrics
-
-### Modern SEO Features
-- Mobile responsiveness
-- Page speed insights
-- Schema markup
-
-
-
-
 ## 📝 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
 
 ## 📬 Contact
 

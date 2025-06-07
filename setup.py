@@ -43,8 +43,5 @@ setup(
             "tfq0seo=src.cli:main",
         ],
     },
-    package_data={
-        "src": ["config/*.yaml"],
-    },
     include_package_data=True,
 ) 
