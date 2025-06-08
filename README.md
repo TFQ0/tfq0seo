@@ -11,9 +11,13 @@ A modern, comprehensive SEO analysis and optimization toolkit that helps you imp
 - 🌐 **URL Analysis**: Complete SEO audit of web pages
 - 📝 **Content Analysis**: Text content optimization and recommendations
 - 📱 **Mobile-Friendly Check**: Ensure your site works well on all devices
-- 🏃 **Performance Metrics**: Speed and performance analysis
+- 🔒 **Security Analysis**: HTTPS and security header validation
+- 🏗️ **HTML Structure**: Comprehensive HTML validation and optimization
+- 🔄 **Competitive Analysis**: Compare your site against competitors
+- 🎯 **Advanced SEO**: User experience and progressive enhancement analysis
 - 💾 **Multiple Export Formats**: JSON, HTML, and Markdown support
-
+- 🔄 **Built-in Caching**: Automatic caching for faster repeated analysis
+- 📊 **Smart Logging**: Comprehensive logging with rotation support
 
 ## 🛠️ Installation
 
@@ -26,7 +30,51 @@ pip install tfq0seo
 ### Analyze a URL
 
 ```bash
-tfq0seo analyze-url https://example.com --keyword "your target keyword"
+# Basic analysis
+tfq0seo analyze https://example.com
+
+# Analysis with multiple URLs
+tfq0seo analyze https://example.com https://another-site.com --format html
+
+# Advanced analysis with custom options
+tfq0seo analyze https://example.com --depth 3 --competitors 5 --format json
+```
+
+### View Available Features
+
+```bash
+# Show features in rich format (default)
+tfq0seo list
+
+# Show features in plain text
+tfq0seo list --format plain
+```
+
+### Output Formats
+
+Choose your preferred output format with the `--format` flag:
+
+```bash
+tfq0seo analyze https://example.com --format html  # Interactive HTML report (default)
+tfq0seo analyze https://example.com --format json  # Structured JSON data
+tfq0seo analyze https://example.com --format csv   # Tabular CSV format
+```
+
+### CLI Options
+
+```bash
+# Show help
+tfq0seo --help
+
+# Show command-specific help
+tfq0seo analyze --help
+tfq0seo list --help
+
+# Suppress progress output
+tfq0seo analyze https://example.com --quiet
+
+# Specify output location
+tfq0seo analyze https://example.com --output reports/
 ```
 
 ### Analyze Content
@@ -49,59 +97,218 @@ tfq0seo education
 tfq0seo education --topic meta_tags
 ```
 
+### Comprehensive Analysis
+```bash
+# Run comprehensive analysis with all features
+tfq0seo analyze --url https://example.com --comprehensive
+
+# Run analysis with custom options
+tfq0seo analyze --url https://example.com --comprehensive \
+  --target-keyword "your keyword" \
+  --competitors "https://competitor1.com,https://competitor2.com" \
+  --depth complete \
+  --format json
+```
+
+The comprehensive analysis includes:
+
+#### Analysis Modules
+- **Basic SEO**
+  - Meta tags analysis
+  - Content optimization
+  - HTML structure
+  - Keyword optimization
+- **Modern SEO Features**
+  - Schema markup
+  - Social media integration
+  - Mobile optimization
+  - Rich snippets
+- **Competitive Analysis**
+  - Content comparison
+  - Feature comparison
+  - Market positioning
+  - Competitive advantages
+- **Advanced SEO**
+  - User experience
+  - Content clustering
+  - Link architecture
+  - Progressive features
+- **Performance**
+  - Load time metrics
+  - Resource optimization
+  - Caching implementation
+  - Compression analysis
+- **Security**
+  - SSL implementation
+  - Security headers
+  - Content security
+  - Vulnerability checks
+- **Mobile Optimization**
+  - Responsive design
+  - Touch elements
+  - Viewport configuration
+  - Mobile performance
+
+#### Analysis Results
+The comprehensive analysis provides:
+
+1. **Detailed Insights**
+   - Critical issues
+   - Major improvements
+   - Minor improvements
+   - Positive aspects
+   - Competitive edges
+   - Market opportunities
+
+2. **Scoring**
+   - Overall SEO score
+   - Category-specific scores
+   - Comparative metrics
+   - Performance indicators
+
+3. **Action Plan**
+   - Critical actions
+   - High priority tasks
+   - Medium priority tasks
+   - Low priority tasks
+   - Monitoring tasks
+
+4. **Impact Analysis**
+   - Traffic impact estimates
+   - Conversion impact
+   - Implementation complexity
+   - Resource requirements
+   - Timeline estimates
+
+#### Configuration Options
+- **depth**: Analysis depth level
+  - `basic`: Core SEO elements
+  - `advanced`: Including modern features
+  - `complete`: All analysis modules
+- **format**: Output format
+  - `json`: Detailed JSON report
+  - `html`: Interactive HTML report
+  - `markdown`: Formatted markdown
+- **cache_results**: Enable/disable caching
+- **custom_thresholds**: Custom analysis thresholds
+
 ## 📊 Output Formats
 
-Choose your preferred output format with the `--format` flag:
+The tool supports three output formats, each optimized for different use cases:
 
-```bash
-tfq0seo analyze-url https://example.com --format json
-tfq0seo analyze-url https://example.com --format html
-tfq0seo analyze-url https://example.com --format markdown  # default
-```
+### HTML Report
+- Interactive and visually appealing
+- Clear visualization of metrics
+- Color-coded status indicators
+- Mobile-responsive design
+- Easy to share and view in browsers
 
-## 🔧 Configuration
+### JSON Format
+- Structured data format
+- Perfect for programmatic processing
+- Complete analysis details
+- Easy to parse and integrate
+- Ideal for automation workflows
 
-Create a `seo_config.yaml` file to customize the analysis:
+### CSV Format
+- Tabular data representation
+- Easy to import into spreadsheets
+- Simple to analyze in tools like Excel
+- Good for data aggregation
+- Compatible with data analysis tools
 
-```yaml
-cache:
-  enabled: true
-  directory: ".cache"
-  expiration: 3600  # seconds
+## 🎯 Default Settings
 
-analysis:
-  meta_tags:
-    title_length: [30, 60]
-    description_length: [120, 160]
-  
-  content:
-    min_word_count: 300
-    keyword_density: [1, 3]  # percentage
-```
+tfq0seo comes with carefully tuned default settings for optimal SEO analysis:
+
+### SEO Thresholds
+- **Title Length**: 30-60 characters
+- **Meta Description**: 120-160 characters
+- **Minimum Content Length**: 300 words
+- **Maximum Sentence Length**: 20 words
+- **Keyword Density**: Maximum 3%
+
+### Readability Standards
+- **Flesch Reading Ease**: Minimum score of 60
+- **Gunning Fog Index**: Maximum score of 12
+
+### System Settings
+- **Cache Location**: `~/.tfq0seo/cache`
+- **Log Files**: `~/.tfq0seo/tfq0seo.log`
+- **Cache Expiration**: 1 hour
+- **Log Rotation**: 10MB max file size, keeps 5 backups
 
 ## 📋 Analysis Areas
 
 ### Meta Analysis
 - Title tag optimization
 - Meta description validation
+- Open Graph meta tags
+- Canonical URL verification
+- Language declaration
 
 ### Content Analysis
-- Keyword optimization
-- Content structure
+- Keyword optimization and placement
+- Content structure analysis
 - Readability metrics
+- Heading hierarchy check
+- Image alt text validation
 
-### Modern SEO Features
+### Technical SEO
 - Mobile responsiveness
-- Page speed insights
-- Schema markup
+- HTML structure validation
+- Security implementation
+- Schema markup validation
+- Robots.txt and sitemap checks
 
+### Competitive Analysis
+- Content comparison metrics
+- Feature set comparison
+- Semantic keyword analysis
+- Technical implementation comparison
+- Market positioning insights
+- Framework and technology detection
+- Performance feature analysis
+- SEO feature implementation check
 
+### Advanced SEO Features
+- User Experience Analysis
+  - Navigation structure
+  - Accessibility implementation
+  - Interactive elements
+  - Content layout optimization
+- Content Clustering
+  - Topic hierarchy analysis
+  - Related content detection
+  - Semantic structure
+  - Content relationships
+- Link Architecture
+  - Internal linking patterns
+  - Link depth analysis
+  - Anchor text quality
+  - Link distribution
+- Rich Results Optimization
+  - Schema.org implementation
+  - Rich snippet potential
+  - Meta enhancements
+  - Structured data types
+- Progressive Enhancement
+  - Offline support
+  - Performance features
+  - Enhancement layers
+  - Progressive loading
 
+## 🗄️ Data Storage
+
+tfq0seo stores its data in the following locations:
+- **Cache**: `~/.tfq0seo/cache/`
+- **Logs**: `~/.tfq0seo/tfq0seo.log`
+
+These directories are created automatically when needed.
 
 ## 📝 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
 
 ## 📬 Contact
 

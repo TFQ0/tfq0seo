@@ -1,217 +1,206 @@
+#!/usr/bin/env python3
+
 import argparse
 import sys
-from typing import List, Optional
 from pathlib import Path
+from typing import List, Optional
+from colorama import init, Fore, Style
+from rich.console import Console
+from rich.table import Table
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.panel import Panel
 
-from .seo_analyzer_app import SEOAnalyzerApp
-from .utils.error_handler import TFQ0SEOError
+from seo_analyzer_app import SEOAnalyzerApp
+from reporting.report_formatter import ReportFormatter
 
 def create_parser() -> argparse.ArgumentParser:
-    """Create command line argument parser for tfq0seo.
-    
-    Sets up the CLI interface with commands for:
-    - URL analysis
-    - Content analysis
-    - Educational resources
-    
-    Returns:
-        Configured argument parser with all commands and options
-    """
+    """Create and configure the argument parser with all available options."""
     parser = argparse.ArgumentParser(
-        description='tfq0seo - Modern SEO analysis and optimization toolkit'
+        description="Advanced SEO Analysis Tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Analyze a single URL and generate an HTML report
+  %(prog)s analyze https://example.com --format html --output report.html
+
+  # Analyze multiple URLs and generate JSON reports
+  %(prog)s analyze https://site1.com https://site2.com --format json --output reports/
+
+  # Analyze a URL with custom options
+  %(prog)s analyze https://example.com --depth 3 --competitors 5 --format html
+        """
     )
-    
-    # Main arguments
-    parser.add_argument(
-        '--config',
-        type=str,
-        default='config/seo_config.yaml',
-        help='Path to configuration file (default: config/seo_config.yaml)'
-    )
-    
-    # Subcommands
+
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
-    
-    # URL analysis command
-    url_parser = subparsers.add_parser(
-        'analyze-url',
-        help='Analyze a URL for SEO optimization'
+
+    # Analyze command
+    analyze_parser = subparsers.add_parser(
+        'analyze', 
+        help='Analyze URLs for SEO optimization'
     )
-    url_parser.add_argument('url', help='Target URL to analyze')
-    url_parser.add_argument(
-        '--keyword',
-        help='Focus keyword for targeted analysis'
+    analyze_parser.add_argument(
+        'urls',
+        nargs='+',
+        help='One or more URLs to analyze'
     )
-    url_parser.add_argument(
+    analyze_parser.add_argument(
         '--format',
-        choices=['json', 'html', 'markdown'],
-        default='markdown',
-        help='Output format (default: markdown)'
+        choices=['html', 'json', 'csv'],
+        default='html',
+        help='Output format for the report (default: html)'
     )
-    
-    # Content analysis command
-    content_parser = subparsers.add_parser(
-        'analyze-content',
-        help='Analyze text content for SEO optimization'
+    analyze_parser.add_argument(
+        '--output',
+        help='Output file or directory for the report(s)'
     )
-    content_parser.add_argument(
-        '--file',
-        type=str,
-        help='Path to file containing content to analyze'
+    analyze_parser.add_argument(
+        '--depth',
+        type=int,
+        default=2,
+        help='Maximum crawl depth for analysis (default: 2)'
     )
-    content_parser.add_argument(
-        '--text',
-        type=str,
-        help='Direct text input for analysis'
+    analyze_parser.add_argument(
+        '--competitors',
+        type=int,
+        default=3,
+        help='Number of competitors to analyze (default: 3)'
     )
-    content_parser.add_argument(
-        '--keyword',
-        help='Focus keyword for targeted analysis'
+    analyze_parser.add_argument(
+        '--quiet',
+        action='store_true',
+        help='Suppress progress output'
     )
-    content_parser.add_argument(
+
+    # List command for showing available features
+    list_parser = subparsers.add_parser(
+        'list',
+        help='List available analysis features'
+    )
+    list_parser.add_argument(
         '--format',
-        choices=['json', 'html', 'markdown'],
-        default='markdown',
-        help='Output format (default: markdown)'
+        choices=['plain', 'rich'],
+        default='rich',
+        help='Output format for the feature list'
     )
-    
-    # Educational resources command
-    edu_parser = subparsers.add_parser(
-        'education',
-        help='Access SEO educational resources and best practices'
-    )
-    edu_parser.add_argument(
-        '--topic',
-        choices=['meta_tags', 'content_optimization', 'technical_seo'],
-        help='Specific SEO topic to learn about'
-    )
-    
+
     return parser
 
-def analyze_url(app: SEOAnalyzerApp, args: argparse.Namespace) -> None:
-    """Handle URL analysis command for tfq0seo.
+def format_output_path(url: str, base_path: Optional[str], format: str) -> Path:
+    """Generate an appropriate output path for the report."""
+    if not base_path:
+        # Use current directory if no output path specified
+        base_path = '.'
     
-    Performs comprehensive SEO analysis on the specified URL:
-    - Technical SEO validation
-    - Content optimization check
-    - Mobile-friendliness
-    - Performance metrics
-    - Security analysis
+    base = Path(base_path)
     
-    Args:
-        app: SEOAnalyzerApp instance
-        args: Command line arguments
+    # If base_path is a directory or doesn't have an extension, create a filename
+    if base.is_dir() or not base.suffix:
+        from urllib.parse import urlparse
+        domain = urlparse(url).netloc
+        filename = f"seo_report_{domain}_{format}"
+        return base / f"{filename}.{format}"
     
-    Exits with status code 1 on error
-    """
-    try:
-        analysis = app.analyze_url(args.url, args.keyword)
-        print(app.export_report(analysis, args.format))
-    except TFQ0SEOError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    return base
 
-def analyze_content(app: SEOAnalyzerApp, args: argparse.Namespace) -> None:
-    """Handle content analysis command for tfq0seo.
+def display_features(format: str = 'rich'):
+    """Display available analysis features in a formatted table."""
+    features = [
+        ("Technical SEO", "Meta tags, URLs, sitemaps, robots.txt"),
+        ("Content Analysis", "Keywords, readability, structure"),
+        ("Performance", "Load time, resources, optimization"),
+        ("User Experience", "Mobile-friendly, navigation, accessibility"),
+        ("Competitive Analysis", "Feature comparison, market positioning"),
+        ("Security", "HTTPS, certificates, vulnerabilities"),
+        ("Rich Results", "Schema markup, structured data"),
+        ("Link Architecture", "Internal/external links, anchor text")
+    ]
     
-    Analyzes content for SEO optimization:
-    - Keyword optimization
-    - Readability analysis
-    - Content structure
-    - SEO best practices
-    
-    Args:
-        app: SEOAnalyzerApp instance
-        args: Command line arguments
-    
-    Exits with status code 1 on error
-    """
-    try:
-        # Get content from file or direct input
-        if args.file:
-            with open(args.file, 'r') as f:
-                content = f.read()
-        elif args.text:
-            content = args.text
-        else:
-            print("Error: Either --file or --text must be provided", file=sys.stderr)
-            sys.exit(1)
+    if format == 'rich':
+        console = Console()
+        table = Table(title="Available Analysis Features")
+        table.add_column("Category", style="cyan", no_wrap=True)
+        table.add_column("Description", style="white")
         
-        analysis = app.analyze_content(content, args.keyword)
-        print(app.export_report(analysis, args.format))
-    except TFQ0SEOError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-    except FileNotFoundError:
-        print(f"Error: File not found: {args.file}", file=sys.stderr)
-        sys.exit(1)
-
-def show_education(app: SEOAnalyzerApp, args: argparse.Namespace) -> None:
-    """Handle educational resources command for tfq0seo.
-    
-    Provides access to SEO learning resources:
-    - Best practices
-    - Implementation guides
-    - Optimization tips
-    - Technical explanations
-    
-    Args:
-        app: SEOAnalyzerApp instance
-        args: Command line arguments
-    """
-    resources = app.get_educational_resources(args.topic)
-    
-    if args.topic:
-        # Show specific topic
-        topic_resources = resources[args.topic]
-        print(f"\n{args.topic.replace('_', ' ').title()} Resources:")
-        for resource in topic_resources:
-            print(f"\n{resource['title']}")
-            print(f"Description: {resource['description']}")
-            print("Key Points:")
-            for point in resource['key_points']:
-                print(f"  • {point}")
+        for category, description in features:
+            table.add_row(category, description)
+        
+        console.print(Panel.fit(table, title="SEO Analyzer Features", border_style="cyan"))
     else:
-        # Show all topics
-        print("\ntfq0seo Educational Resources:")
-        for topic, topic_resources in resources.items():
-            print(f"\n{topic.replace('_', ' ').title()}:")
-            for resource in topic_resources:
-                print(f"  • {resource['title']}")
-                print(f"    {resource['description']}")
+        # Plain text output
+        print("\nAvailable Analysis Features:")
+        print("-" * 50)
+        for category, description in features:
+            print(f"\n{category}:")
+            print(f"  {description}")
 
-def main(argv: Optional[List[str]] = None) -> None:
-    """Main entry point for tfq0seo CLI.
+def run_analysis(args: argparse.Namespace):
+    """Run the SEO analysis with progress reporting."""
+    console = Console()
+    analyzer = SEOAnalyzerApp()
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        disable=args.quiet
+    ) as progress:
+        for url in args.urls:
+            try:
+                # Show analysis progress
+                if not args.quiet:
+                    console.print(f"\n[cyan]Analyzing[/cyan] {url}")
+                
+                task_id = progress.add_task(f"Analyzing {url}...", total=None)
+                
+                # Run the analysis
+                results = analyzer.analyze_url(
+                    url,
+                    max_depth=args.depth,
+                    num_competitors=args.competitors
+                )
+                
+                progress.update(task_id, completed=True)
+                
+                # Format and save the report
+                formatter = ReportFormatter(results)
+                output_path = format_output_path(url, args.output, args.format)
+                
+                # Ensure output directory exists
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Generate the report
+                report = formatter.format_report(args.format, str(output_path))
+                
+                if not args.quiet:
+                    console.print(f"[green]Report saved:[/green] {output_path}")
+                
+            except Exception as e:
+                console.print(f"[red]Error analyzing {url}:[/red] {str(e)}")
+                continue
+
+def main():
+    """Main entry point for the SEO analyzer CLI."""
+    # Initialize colorama for Windows color support
+    init()
     
-    Handles command line interface:
-    - Argument parsing
-    - Command routing
-    - Error handling
-    - Output formatting
-    
-    Args:
-        argv: Optional list of command line arguments
-    
-    Exits with status code 1 on error
-    """
+    # Parse command line arguments
     parser = create_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args()
     
     if not args.command:
         parser.print_help()
         sys.exit(1)
     
     try:
-        app = SEOAnalyzerApp(args.config)
-        
-        if args.command == 'analyze-url':
-            analyze_url(app, args)
-        elif args.command == 'analyze-content':
-            analyze_content(app, args)
-        elif args.command == 'education':
-            show_education(app, args)
+        if args.command == 'analyze':
+            run_analysis(args)
+        elif args.command == 'list':
+            display_features(args.format)
+    except KeyboardInterrupt:
+        print("\nAnalysis cancelled by user")
+        sys.exit(1)
     except Exception as e:
-        print(f"Error: {str(e)}", file=sys.stderr)
+        print(f"{Fore.RED}Error: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
 if __name__ == '__main__':

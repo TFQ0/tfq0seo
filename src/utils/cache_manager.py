@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import threading
 from dataclasses import dataclass
+import logging
+import shutil
 
 @dataclass
 class CacheEntry:
@@ -42,10 +44,10 @@ class CacheManager:
             return cls._instance
 
     def __init__(self):
-        self.cache_dir = Path('.tfq0seo_cache')
-        self.cache_dir.mkdir(exist_ok=True)
+        self.logger = logging.getLogger('tfq0seo.cache')
         self.memory_cache = {}
         self.config = None
+        self.cache_dir = None
 
     def configure(self, config: dict) -> None:
         """Configure tfq0seo cache settings.
@@ -54,10 +56,20 @@ class CacheManager:
             config: Dictionary containing cache configuration:
                 - enabled: Boolean to enable/disable caching
                 - expiration: Cache entry lifetime in seconds
+                - directory: Path to cache directory
         """
         self.config = config
         self.enabled = config['cache']['enabled']
         self.expiration = config['cache']['expiration']
+        
+        # Set up cache directory
+        try:
+            self.cache_dir = Path(config['cache']['directory'])
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            self.logger.info(f"Cache directory set to: {self.cache_dir}")
+        except Exception as e:
+            self.logger.error(f"Failed to create cache directory: {e}")
+            self.enabled = False  # Disable caching on error
 
     def _get_cache_key(self, data: str) -> str:
         """Generate a unique cache key using MD5 hashing.
@@ -79,6 +91,8 @@ class CacheManager:
         Returns:
             Path object pointing to the cache file location
         """
+        if not self.cache_dir:
+            raise RuntimeError("Cache directory not configured")
         return self.cache_dir / f"{key}.json"
 
     def get(self, key_data: str) -> Optional[Any]:
@@ -97,35 +111,39 @@ class CacheManager:
         if not self.enabled:
             return None
 
-        key = self._get_cache_key(key_data)
-        
-        # Check memory cache first
-        if key in self.memory_cache:
-            entry = self.memory_cache[key]
-            if datetime.now() < entry.expiration:
-                return entry.data
-            else:
-                del self.memory_cache[key]
+        try:
+            key = self._get_cache_key(key_data)
+            
+            # Check memory cache first
+            if key in self.memory_cache:
+                entry = self.memory_cache[key]
+                if datetime.now() < entry.expiration:
+                    return entry.data
+                else:
+                    del self.memory_cache[key]
 
-        # Check file cache
-        cache_path = self._get_cache_path(key)
-        if cache_path.exists():
-            try:
-                with cache_path.open('r') as f:
-                    cached_data = json.load(f)
-                    expiration = datetime.fromisoformat(cached_data['expiration'])
-                    
-                    if datetime.now() < expiration:
-                        # Update memory cache
-                        self.memory_cache[key] = CacheEntry(
-                            data=cached_data['data'],
-                            expiration=expiration
-                        )
-                        return cached_data['data']
-                    else:
-                        cache_path.unlink()
-            except (json.JSONDecodeError, KeyError):
-                cache_path.unlink()
+            # Check file cache
+            cache_path = self._get_cache_path(key)
+            if cache_path.exists():
+                try:
+                    with cache_path.open('r') as f:
+                        cached_data = json.load(f)
+                        expiration = datetime.fromisoformat(cached_data['expiration'])
+                        
+                        if datetime.now() < expiration:
+                            # Update memory cache
+                            self.memory_cache[key] = CacheEntry(
+                                data=cached_data['data'],
+                                expiration=expiration
+                            )
+                            return cached_data['data']
+                        else:
+                            cache_path.unlink(missing_ok=True)
+                except (json.JSONDecodeError, KeyError, OSError) as e:
+                    self.logger.warning(f"Cache read error: {e}")
+                    cache_path.unlink(missing_ok=True)
+        except Exception as e:
+            self.logger.error(f"Cache get error: {e}")
         
         return None
 
@@ -143,24 +161,27 @@ class CacheManager:
         if not self.enabled:
             return
 
-        key = self._get_cache_key(key_data)
-        expiration = datetime.now() + timedelta(seconds=self.expiration)
-        
-        # Update memory cache
-        self.memory_cache[key] = CacheEntry(
-            data=value,
-            expiration=expiration
-        )
-        
-        # Update file cache
-        cache_path = self._get_cache_path(key)
-        cache_data = {
-            'data': value,
-            'expiration': expiration.isoformat()
-        }
-        
-        with cache_path.open('w') as f:
-            json.dump(cache_data, f)
+        try:
+            key = self._get_cache_key(key_data)
+            expiration = datetime.now() + timedelta(seconds=self.expiration)
+            
+            # Update memory cache
+            self.memory_cache[key] = CacheEntry(
+                data=value,
+                expiration=expiration
+            )
+            
+            # Update file cache
+            cache_path = self._get_cache_path(key)
+            cache_data = {
+                'data': value,
+                'expiration': expiration.isoformat()
+            }
+            
+            with cache_path.open('w') as f:
+                json.dump(cache_data, f)
+        except Exception as e:
+            self.logger.error(f"Cache set error: {e}")
 
     def clear(self) -> None:
         """Clear all tfq0seo cached data.
@@ -170,7 +191,12 @@ class CacheManager:
         - File-based cache
         """
         self.memory_cache.clear()
-        for cache_file in self.cache_dir.glob('*.json'):
-            cache_file.unlink()
+        try:
+            if self.cache_dir and self.cache_dir.exists():
+                shutil.rmtree(self.cache_dir)
+                self.cache_dir.mkdir(exist_ok=True)
+                self.logger.info("Cache cleared successfully")
+        except Exception as e:
+            self.logger.error(f"Failed to clear cache: {e}")
 
 cache_manager = CacheManager() 
