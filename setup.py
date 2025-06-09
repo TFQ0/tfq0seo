@@ -8,15 +8,14 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="tfq0seo",
-    version="1.0.1",
+    version="1.0.3",
     author="tfq0",
-    description="Modern SEO analysis and optimization toolkit",
+    description="Modern SEO analysis and optimization toolkit with advanced reporting",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/tfq0/tfq0seo",
     project_urls={
         "Bug Tracker": "https://github.com/tfq0/tfq0seo/issues",
-        "Documentation": "https://github.com/tfq0/tfq0seo/wiki",
         "Source Code": "https://github.com/tfq0/tfq0seo",
     },
     packages=find_packages(),
@@ -34,17 +33,23 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Environment :: Console",
+        "Operating System :: OS Independent",
     ],
-    keywords="seo, analysis, optimization, web, content, meta tags, technical seo",
+    keywords="seo, analysis, optimization, web, content, meta tags, technical seo, reporting, analytics",
     python_requires=">=3.7",
     install_requires=requirements,
     entry_points={
         "console_scripts": [
-            "tfq0seo=src.cli:main",
+            "tfq0seo=tfq0seo.cli:main",
         ],
     },
-    package_data={
-        "src": ["config/*.yaml"],
-    },
     include_package_data=True,
+    package_data={
+        "tfq0seo": [
+            "templates/*.html",
+            "static/css/*.css",
+            "static/js/*.js",
+        ],
+    },
 ) 

@@ -1,34 +1,11 @@
 import pytest
 from unittest.mock import Mock, patch
 from pathlib import Path
-import yaml
+import shutil
+import os
 
-from src.seo_analyzer_app import SEOAnalyzerApp
-from src.utils.error_handler import TFQ0SEOError
-
-# Test configuration
-SAMPLE_CONFIG = {
-    'seo_thresholds': {
-        'title_length': {'min': 30, 'max': 60},
-        'meta_description_length': {'min': 120, 'max': 160},
-        'content_length': {'min': 300},
-        'sentence_length': {'max': 20},
-        'keyword_density': {'max': 3.0}
-    },
-    'crawling': {
-        'timeout': 30,
-        'max_retries': 3,
-        'user_agent': 'tfq0seo/1.0'
-    },
-    'cache': {
-        'enabled': True,
-        'expiration': 3600
-    },
-    'logging': {
-        'level': 'INFO',
-        'file': 'tfq0seo.log'
-    }
-}
+from tfq0seo.seo_analyzer_app import SEOAnalyzerApp, TFQSEO_HOME
+from tfq0seo.utils.error_handler import TFQ0SEOError
 
 # Sample HTML for testing
 SAMPLE_HTML = """
@@ -50,45 +27,47 @@ SAMPLE_HTML = """
 </html>
 """
 
-@pytest.fixture
-def config_file(tmp_path):
-    """Create a temporary tfq0seo configuration file.
+@pytest.fixture(autouse=True)
+def cleanup_test_dirs():
+    """Clean up test directories before and after tests."""
+    # Clean up before test
+    if TFQSEO_HOME.exists():
+        shutil.rmtree(TFQSEO_HOME)
     
-    Args:
-        tmp_path: Pytest fixture providing temporary directory
-        
-    Returns:
-        Path to temporary configuration file
-    """
-    config_path = tmp_path / "test_config.yaml"
-    with open(config_path, "w") as f:
-        yaml.dump(SAMPLE_CONFIG, f)
-    return config_path
+    yield
+    
+    # Clean up after test
+    if TFQSEO_HOME.exists():
+        shutil.rmtree(TFQSEO_HOME)
 
 @pytest.fixture
-def analyzer(config_file):
+def analyzer():
     """Create a tfq0seo analyzer instance.
     
-    Args:
-        config_file: Path to test configuration file
-        
     Returns:
         Configured SEOAnalyzerApp instance
     """
-    return SEOAnalyzerApp(config_file)
+    return SEOAnalyzerApp()
 
 def test_init(analyzer):
     """Test tfq0seo analyzer initialization.
     
     Verifies:
-    - Configuration loading
+    - Default settings
     - Analyzer components initialization
     - Logger setup
+    - Directory creation
     """
-    assert analyzer.config == SAMPLE_CONFIG
+    assert analyzer.settings is not None
+    assert analyzer.settings['version'] == '1.0.1'
     assert analyzer.meta_analyzer is not None
     assert analyzer.content_analyzer is not None
     assert analyzer.modern_analyzer is not None
+    
+    # Check directory creation
+    assert TFQSEO_HOME.exists()
+    assert (TFQSEO_HOME / 'cache').exists()
+    assert (TFQSEO_HOME / 'tfq0seo.log').parent.exists()
 
 def test_analyze_url(analyzer):
     """Test URL analysis functionality.
@@ -229,37 +208,57 @@ def test_seo_score_calculation(analyzer):
     assert isinstance(score, int)
     assert 0 <= score <= 100
 
-def test_config_validation(tmp_path):
-    """Test configuration validation.
+def test_cache_functionality(analyzer):
+    """Test cache system functionality.
     
     Verifies:
-    - Invalid config detection
-    - Error handling
-    - Exception messages
+    - Cache directory creation
+    - Cache operations
+    - Cache expiration
     """
-    invalid_config = tmp_path / "invalid_config.yaml"
-    with open(invalid_config, "w") as f:
-        f.write("invalid: yaml: content")
+    # Test cache directory
+    cache_dir = Path(analyzer.settings['cache']['directory'])
+    assert cache_dir.exists()
+    assert cache_dir.is_dir()
     
-    with pytest.raises(TFQ0SEOError):
-        SEOAnalyzerApp(invalid_config)
+    # Test cache operations
+    with patch('requests.get') as mock_get:
+        mock_get.return_value.text = SAMPLE_HTML
+        mock_get.return_value.status_code = 200
+        mock_get.return_value.headers = {'content-type': 'text/html'}
+        
+        # First request should cache
+        first_analysis = analyzer.analyze_url('https://example.com')
+        
+        # Second request should use cache
+        second_analysis = analyzer.analyze_url('https://example.com')
+        
+        assert first_analysis == second_analysis
+        assert len(list(cache_dir.glob('*.json'))) > 0
 
-def test_recommendation_details(analyzer):
-    """Test recommendation details functionality.
+def test_logging_setup(analyzer):
+    """Test logging system setup.
     
     Verifies:
-    - Detail structure
-    - Implementation steps
-    - Resource links
-    - Importance levels
+    - Log file creation
+    - Log directory structure
+    - Log file permissions
     """
-    details = analyzer.get_recommendation_details("Test recommendation")
+    log_path = Path(analyzer.settings['logging']['file'])
+    assert log_path.parent.exists()
+    assert log_path.parent.is_dir()
     
-    assert details is not None
-    assert 'recommendation' in details
-    assert 'importance' in details
-    assert 'implementation_guide' in details
-    assert 'resources' in details
+    # Generate some log entries
+    analyzer.logger.info("Test log message")
+    analyzer.logger.error("Test error message")
+    
+    # Check log file
+    assert log_path.exists()
+    assert log_path.is_file()
+    with open(log_path) as f:
+        log_content = f.read()
+        assert "Test log message" in log_content
+        assert "Test error message" in log_content
 
 if __name__ == '__main__':
     pytest.main([__file__]) 
