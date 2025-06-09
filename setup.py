@@ -41,7 +41,7 @@ setup(
     install_requires=requirements,
     entry_points={
         "console_scripts": [
-            "tfq0seo=src.cli:main",
+            "tfq0seo=tfq0seo.cli:main",
         ],
     },
     include_package_data=True,
