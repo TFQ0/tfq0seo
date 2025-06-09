@@ -18,7 +18,7 @@ Features:
 For more information, visit: https://github.com/tfq66/tfq0seo
 """
 
-__version__ = '1.0.3'
+__version__ = '1.0.4'
 __author__ = 'TFQ0'
 __license__ = 'MIT'
 
