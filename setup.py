@@ -1,10 +1,40 @@
 from setuptools import setup, find_packages
+import os
+from pathlib import Path
 
-with open("README.md", "r", encoding="utf-8") as fh:
-    long_description = fh.read()
+# Get the directory containing setup.py
+here = Path(__file__).parent.resolve()
 
-with open("requirements.txt", "r", encoding="utf-8") as fh:
-    requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
+# Read the README file
+try:
+    long_description = (here / "README.md").read_text(encoding="utf-8")
+except FileNotFoundError:
+    long_description = "Modern SEO analysis and optimization toolkit with advanced reporting"
+
+# Read requirements
+try:
+    requirements = [
+        line.strip()
+        for line in (here / "requirements.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+except FileNotFoundError:
+    requirements = [
+        "requests>=2.31.0",
+        "beautifulsoup4>=4.12.2",
+        "nltk>=3.8.1",
+        "readability>=0.3.1",
+        "certifi>=2024.2.2",
+        "textblob>=0.17.1",
+        "pyyaml>=6.0.1",
+        "html5lib>=1.1",
+        "lxml>=4.9.3",
+        "colorama>=0.4.6",
+        "rich>=13.7.0",
+        "click>=8.1.7",
+        "pytest>=8.0.0",
+        "setuptools>=69.0.3"
+    ]
 
 setup(
     name="tfq0seo",
