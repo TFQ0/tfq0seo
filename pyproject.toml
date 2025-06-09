@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69.0.3", "wheel>=0.42.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tfq0seo"
+version = "1.0.4"
+description = "Modern SEO analysis and optimization toolkit with advanced reporting"
+authors = [
+    {name = "tfq0"}
+]
+readme = "README.md"
+requires-python = ">=3.7"
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Topic :: Internet :: WWW/HTTP :: Site Management",
+    "Topic :: Internet :: WWW/HTTP :: Site Management :: Link Checking",
+    "Topic :: Text Processing :: Markup :: HTML",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+] 
