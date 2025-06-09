@@ -21,7 +21,7 @@ TFQSEO_HOME.mkdir(exist_ok=True)
 
 # Default settings that were previously in config
 DEFAULT_SETTINGS = {
-    'version': '1.0.3',  # Track settings version
+    'version': '1.0.4',  # Track settings version
     'seo_thresholds': {
         'title_length': {'min': 30, 'max': 60},
         'meta_description_length': {'min': 120, 'max': 160},
