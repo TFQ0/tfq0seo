@@ -16,7 +16,6 @@ setup(
     url="https://github.com/tfq0/tfq0seo",
     project_urls={
         "Bug Tracker": "https://github.com/tfq0/tfq0seo/issues",
-        "Documentation": "https://github.com/tfq0/tfq0seo/wiki",
         "Source Code": "https://github.com/tfq0/tfq0seo",
     },
     packages=find_packages(),
