@@ -16,59 +16,23 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    
+    - uses: actions/checkout@v4
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.x'
-    
-    - name: Debug - Show current directory
-      run: |
-        pwd
-        echo "Current directory contents:"
-        ls -la
-    
-    - name: Verify requirements.txt
-      run: |
-        echo "Checking requirements.txt in root directory:"
-        ls -la requirements.txt || echo "Not found in root"
-        echo "Checking requirements.txt in possible subdirectories:"
-        find . -name requirements.txt
-    
-    - name: Install build dependencies
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install setuptools wheel twine build
-    
-    - name: Install project dependencies
-      working-directory: ./
-      run: |
-        echo "Current directory: $(pwd)"
-        echo "Directory contents:"
-        ls -la
-        if [ -f "requirements.txt" ]; then
-          echo "Found requirements.txt, contents:"
-          cat requirements.txt
-          pip install -r requirements.txt
-        else
-          echo "ERROR: requirements.txt not found in $(pwd)"
-          find . -name requirements.txt
-          exit 1
-        fi
-    
+        pip install build wheel
     - name: Build package
       run: |
-        python -m build
-        echo "Build output:"
-        ls -la dist/
-    
-    - name: Check package
-      run: twine check dist/*
-    
+        python -m build --sdist --wheel
+        ls -l dist/
+    - name: Verify package metadata
+      run: |
+        pip install twine
+        twine check dist/*
     - name: Publish package
       uses: pypa/gh-action-pypi-publish@v1.8.11
       with:
