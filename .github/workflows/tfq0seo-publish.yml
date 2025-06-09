@@ -26,8 +26,18 @@ jobs:
       with:
         python-version: '3.x'
     
-    - name: List directory contents
-      run: ls -la
+    - name: Debug - Show current directory
+      run: |
+        pwd
+        echo "Current directory contents:"
+        ls -la
+    
+    - name: Verify requirements.txt
+      run: |
+        echo "Checking requirements.txt in root directory:"
+        ls -la requirements.txt || echo "Not found in root"
+        echo "Checking requirements.txt in possible subdirectories:"
+        find . -name requirements.txt
     
     - name: Install build dependencies
       run: |
@@ -35,19 +45,25 @@ jobs:
         python -m pip install setuptools wheel twine build
     
     - name: Install project dependencies
+      working-directory: ./
       run: |
+        echo "Current directory: $(pwd)"
+        echo "Directory contents:"
+        ls -la
         if [ -f "requirements.txt" ]; then
-          echo "Installing requirements from requirements.txt"
+          echo "Found requirements.txt, contents:"
           cat requirements.txt
           pip install -r requirements.txt
         else
-          echo "requirements.txt not found!"
+          echo "ERROR: requirements.txt not found in $(pwd)"
+          find . -name requirements.txt
           exit 1
         fi
     
     - name: Build package
       run: |
         python -m build
+        echo "Build output:"
         ls -la dist/
     
     - name: Check package
