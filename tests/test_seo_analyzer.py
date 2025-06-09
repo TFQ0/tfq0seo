@@ -4,8 +4,8 @@ from pathlib import Path
 import shutil
 import os
 
-from src.seo_analyzer_app import SEOAnalyzerApp, TFQSEO_HOME
-from src.utils.error_handler import TFQ0SEOError
+from tfq0seo.seo_analyzer_app import SEOAnalyzerApp, TFQSEO_HOME
+from tfq0seo.utils.error_handler import TFQ0SEOError
 
 # Sample HTML for testing
 SAMPLE_HTML = """

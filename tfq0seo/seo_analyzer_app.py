@@ -13,7 +13,7 @@ from .analyzers.modern_seo_analyzer import ModernSEOAnalyzer
 from .analyzers.competitive_analyzer import CompetitiveAnalyzer
 from .analyzers.advanced_analyzer import AdvancedSEOAnalyzer
 from .utils.cache_manager import cache_manager
-from .utils.error_handler import setup_logging, TFQ0SEOError, handle_analysis_error
+from .utils.error_handler import setup_logging, handle_analysis_error
 
 # Get user's home directory and create tfq0seo directory
 TFQSEO_HOME = Path(os.path.expanduser('~')) / '.tfq0seo'
@@ -21,7 +21,7 @@ TFQSEO_HOME.mkdir(exist_ok=True)
 
 # Default settings that were previously in config
 DEFAULT_SETTINGS = {
-    'version': '1.0.1',  # Track settings version
+    'version': '1.0.3',  # Track settings version
     'seo_thresholds': {
         'title_length': {'min': 30, 'max': 60},
         'meta_description_length': {'min': 120, 'max': 160},
