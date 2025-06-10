@@ -1,17 +1,18 @@
 [build-system]
-requires = ["setuptools>=69.0.3", "wheel>=0.42.0"]
+requires = ["setuptools>=69.0.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "tfq0seo"
-version = "1.0.4"
+dynamic = ["version", "dependencies"]
 description = "Modern SEO analysis and optimization toolkit with advanced reporting"
-authors = [
-    {name = "tfq0"}
-]
 readme = "README.md"
 requires-python = ">=3.7"
 license = {text = "MIT"}
+keywords = ["seo", "analysis", "optimization", "web", "content", "meta tags", "technical seo", "reporting", "analytics"]
+authors = [
+    {name = "tfq0", email = "tfq0@users.noreply.github.com"}
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -28,4 +29,17 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Environment :: Console",
     "Operating System :: OS Independent",
-] 
+]
+
+[project.urls]
+Homepage = "https://github.com/tfq0/tfq0seo"
+Documentation = "https://github.com/tfq0/tfq0seo#readme"
+Repository = "https://github.com/tfq0/tfq0seo.git"
+"Bug Tracker" = "https://github.com/tfq0/tfq0seo/issues"
+
+[tool.setuptools]
+packages = ["tfq0seo"]
+
+[tool.setuptools.dynamic]
+version = {attr = "tfq0seo.__version__"}
+dependencies = {file = "requirements.txt"} 
