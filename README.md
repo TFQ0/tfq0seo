@@ -13,11 +13,8 @@ A modern, comprehensive SEO analysis and optimization toolkit that helps you imp
 - 📱 **Mobile-Friendly Check**: Ensure your site works well on all devices
 - 🔒 **Security Analysis**: HTTPS and security header validation
 - 🏗️ **HTML Structure**: Comprehensive HTML validation and optimization
-- 🔄 **Competitive Analysis**: Compare your site against competitors
-- 🎯 **Advanced SEO**: User experience and progressive enhancement analysis
+- 🎯 **SEO**: User experience and progressive enhancement analysis
 - 💾 **Multiple Export Formats**: JSON, HTML, and Markdown support
-- 🔄 **Built-in Caching**: Automatic caching for faster repeated analysis
-- 📊 **Smart Logging**: Comprehensive logging with rotation support
 
 ## 🛠️ Installation
 
@@ -297,23 +294,3 @@ tfq0seo comes with carefully tuned default settings for optimal SEO analysis:
   - Performance features
   - Enhancement layers
   - Progressive loading
-
-## 🗄️ Data Storage
-
-tfq0seo stores its data in the following locations:
-- **Cache**: `~/.tfq0seo/cache/`
-- **Logs**: `~/.tfq0seo/tfq0seo.log`
-
-These directories are created automatically when needed.
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 📬 Contact
-
-- GitHub: [Your GitHub Profile](https://github.com/TFQ0)
-
----
-
-Made with ❤️ by [TFQ0] 
