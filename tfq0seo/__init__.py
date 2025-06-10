@@ -1,9 +1,8 @@
 """
-tfq0seo
-=======
+tfq0seo - Modern SEO analysis and optimization toolkit
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A comprehensive SEO analysis tool that helps you analyze websites and content
-while learning SEO best practices.
+A comprehensive SEO analysis toolkit with advanced reporting capabilities.
 
 Features:
 - Modern SEO analysis and recommendations
@@ -15,11 +14,12 @@ Features:
 - Social media optimization
 - Educational insights
 
-For more information, visit: https://github.com/tfq66/tfq0seo
+For more information, visit: https://github.com/tfq0/tfq0seo
 """
 
+__title__ = 'tfq0seo'
 __version__ = '1.0.4'
-__author__ = 'TFQ0'
+__author__ = 'tfq0'
 __license__ = 'MIT'
 
 from .seo_analyzer_app import SEOAnalyzerApp
