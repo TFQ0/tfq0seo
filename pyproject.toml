@@ -31,6 +31,9 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+[project.scripts]
+tfq0seo = "tfq0seo.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/tfq0/tfq0seo"
 Documentation = "https://github.com/tfq0/tfq0seo#readme"

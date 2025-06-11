@@ -24,7 +24,7 @@ setup_logging(TFQSEO_HOME / 'tfq0seo.log')
 
 # Default settings that were previously in config
 DEFAULT_SETTINGS = {
-    'version': '1.0.6',  # Track settings version
+    'version': '1.0.7',  # Track settings version
     'seo_thresholds': {
         'title_length': {'min': 30, 'max': 60},
         'meta_description_length': {'min': 120, 'max': 160},
