@@ -3,6 +3,9 @@ from unittest.mock import Mock, patch
 from pathlib import Path
 import shutil
 import os
+import time
+import logging
+import tempfile
 
 from tfq0seo.seo_analyzer_app import SEOAnalyzerApp, TFQSEO_HOME
 from tfq0seo.utils.error_handler import TFQ0SEOError
@@ -32,13 +35,35 @@ def cleanup_test_dirs():
     """Clean up test directories before and after tests."""
     # Clean up before test
     if TFQSEO_HOME.exists():
-        shutil.rmtree(TFQSEO_HOME)
+        try:
+            # Close any open loggers
+            logger = logging.getLogger('tfq0seo')
+            for handler in logger.handlers[:]:
+                handler.close()
+                logger.removeHandler(handler)
+            
+            # Wait a bit for file handles to be released
+            time.sleep(0.1)
+            shutil.rmtree(TFQSEO_HOME)
+        except PermissionError:
+            pass  # Ignore permission errors during cleanup
     
     yield
     
     # Clean up after test
     if TFQSEO_HOME.exists():
-        shutil.rmtree(TFQSEO_HOME)
+        try:
+            # Close any open loggers
+            logger = logging.getLogger('tfq0seo')
+            for handler in logger.handlers[:]:
+                handler.close()
+                logger.removeHandler(handler)
+            
+            # Wait a bit for file handles to be released
+            time.sleep(0.1)
+            shutil.rmtree(TFQSEO_HOME)
+        except PermissionError:
+            pass  # Ignore permission errors during cleanup
 
 @pytest.fixture
 def analyzer():
@@ -59,7 +84,7 @@ def test_init(analyzer):
     - Directory creation
     """
     assert analyzer.settings is not None
-    assert analyzer.settings['version'] == '1.0.1'
+    assert analyzer.settings['version'] == '1.0.4'
     assert analyzer.meta_analyzer is not None
     assert analyzer.content_analyzer is not None
     assert analyzer.modern_analyzer is not None
@@ -174,20 +199,28 @@ def test_export_report_formats(analyzer):
         }
     }
     
-    # Test JSON export
-    json_report = analyzer.export_report(analysis, 'json')
-    assert isinstance(json_report, str)
-    
-    # Test HTML export
-    html_report = analyzer.export_report(analysis, 'html')
-    assert isinstance(html_report, str)
-    assert '<html>' in html_report
-    assert 'tfq0seo Analysis Report' in html_report
-    
-    # Test Markdown export
-    md_report = analyzer.export_report(analysis, 'markdown')
-    assert isinstance(md_report, str)
-    assert '# tfq0seo Analysis Report' in md_report
+    # Create a temporary directory for test reports
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Test JSON export
+        json_path = os.path.join(temp_dir, 'report.json')
+        json_report = analyzer.export_report(analysis, 'json', json_path)
+        assert isinstance(json_report, str)
+        assert os.path.exists(json_path)
+        
+        # Test HTML export
+        html_path = os.path.join(temp_dir, 'report.html')
+        html_report = analyzer.export_report(analysis, 'html', html_path)
+        assert isinstance(html_report, str)
+        assert os.path.exists(html_path)
+        assert '<html>' in html_report
+        assert 'tfq0seo Analysis Report' in html_report
+        
+        # Test Markdown export
+        md_path = os.path.join(temp_dir, 'report.md')
+        md_report = analyzer.export_report(analysis, 'markdown', md_path)
+        assert isinstance(md_report, str)
+        assert os.path.exists(md_path)
+        assert '# tfq0seo Analysis Report' in md_report
 
 def test_seo_score_calculation(analyzer):
     """Test SEO score calculation.

@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Optional, Union
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -7,7 +7,7 @@ import logging.handlers
 import os
 
 @dataclass
-class TFQ0SEOError:
+class TFQ0SEOError(Exception):
     """tfq0seo error data structure.
     
     Stores comprehensive error information for logging and handling.
@@ -22,6 +22,9 @@ class TFQ0SEOError:
     message: str
     timestamp: datetime = datetime.now()
     details: Optional[dict] = None
+
+    def __str__(self):
+        return f"{self.error_code}: {self.message}"
 
 class TFQ0SEOException(Exception):
     """Base exception class for tfq0seo errors.
@@ -59,54 +62,37 @@ class ContentAnalysisError(TFQ0SEOException):
     """
     pass
 
-def setup_logging(settings: dict) -> None:
-    """Configure tfq0seo logging system.
-    
-    Sets up logging with specified configuration:
-    - Log file location with rotation
-    - Logging level
-    - Message format
-    - File size limits
+def setup_logging(log_file: Union[str, Path]) -> None:
+    """Set up tfq0seo logging configuration.
     
     Args:
-        settings: Dictionary containing logging configuration:
-            - file: Path to log file
-            - level: Logging level (DEBUG, INFO, etc.)
-            - format: Log message format
-            - max_size: Maximum log file size
-            - backup_count: Number of backup files to keep
+        log_file: Path to log file
     """
-    try:
-        log_path = Path(settings['logging']['file'])
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        handler = logging.handlers.RotatingFileHandler(
-            filename=str(log_path),
-            maxBytes=settings['logging']['max_size'],
-            backupCount=settings['logging']['backup_count']
-        )
-        
-        formatter = logging.Formatter(settings['logging']['format'])
-        handler.setFormatter(formatter)
-        
-        logger = logging.getLogger('tfq0seo')
-        logger.setLevel(getattr(logging, settings['logging']['level']))
-        logger.addHandler(handler)
-        
-        # Add console handler for important messages
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.WARNING)
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
-        
-        logger.info("Logging system initialized successfully")
-    except Exception as e:
-        # Fallback to basic logging if setup fails
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        logging.error(f"Failed to setup logging: {e}")
+    log_file = Path(log_file)
+    os.makedirs(log_file.parent, exist_ok=True)
+    
+    # Configure root logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()
+        ]
+    )
+    
+    # Configure tfq0seo logger
+    logger = logging.getLogger('tfq0seo')
+    logger.setLevel(logging.INFO)
+    
+    # Add file handler if not already present
+    has_file_handler = any(isinstance(h, logging.FileHandler) for h in logger.handlers)
+    if not has_file_handler:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        logger.addHandler(file_handler)
+    
+    logger.info("Logging system initialized successfully")
 
 def log_error(error: TFQ0SEOError) -> None:
     """Log a tfq0seo error with detailed formatting.

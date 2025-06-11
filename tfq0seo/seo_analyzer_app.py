@@ -1,6 +1,7 @@
 import logging
 import json
-from typing import Dict, List, Optional
+import hashlib
+from typing import Dict, List, Optional, Any
 from pathlib import Path
 import os
 import time
@@ -12,16 +13,18 @@ from .analyzers.content_analyzer import ContentAnalyzer
 from .analyzers.modern_seo_analyzer import ModernSEOAnalyzer
 from .analyzers.competitive_analyzer import CompetitiveAnalyzer
 from .analyzers.advanced_analyzer import AdvancedSEOAnalyzer
-from .utils.cache_manager import cache_manager
-from .utils.error_handler import setup_logging, handle_analysis_error
+from .reporting.report_formatter import ReportFormatter
+from .reporting.detailed_report import DetailedReport
+from .utils.cache_manager import CacheManager
+from .utils.error_handler import setup_logging, handle_analysis_error, TFQ0SEOError
+from .utils.paths import TFQSEO_HOME
 
-# Get user's home directory and create tfq0seo directory
-TFQSEO_HOME = Path(os.path.expanduser('~')) / '.tfq0seo'
-TFQSEO_HOME.mkdir(exist_ok=True)
+# Setup logging
+setup_logging(TFQSEO_HOME / 'tfq0seo.log')
 
 # Default settings that were previously in config
 DEFAULT_SETTINGS = {
-    'version': '1.0.4',  # Track settings version
+    'version': '1.0.6',  # Track settings version
     'seo_thresholds': {
         'title_length': {'min': 30, 'max': 60},
         'meta_description_length': {'min': 120, 'max': 160},
@@ -74,11 +77,11 @@ class SEOAnalyzerApp:
     def __init__(self):
         """Initialize the tfq0seo application."""
         self.settings = DEFAULT_SETTINGS
-        setup_logging(self.settings)
-        self.logger = logging.getLogger('tfq0seo')
         
-        # Initialize cache
-        cache_manager.configure(self.settings)
+        # Set up logging
+        log_file = TFQSEO_HOME / 'tfq0seo.log'
+        setup_logging(log_file)
+        self.logger = logging.getLogger('tfq0seo')
         
         # Initialize analyzers
         self.meta_analyzer = MetaAnalyzer(self.settings)
@@ -86,61 +89,70 @@ class SEOAnalyzerApp:
         self.modern_analyzer = ModernSEOAnalyzer(self.settings)
         self.competitive_analyzer = CompetitiveAnalyzer(self.settings)
         self.advanced_analyzer = AdvancedSEOAnalyzer(self.settings)
-
-    @handle_analysis_error
-    def analyze_url(self, url: str, target_keyword: Optional[str] = None, competitor_urls: Optional[List[str]] = None, include_advanced: bool = False) -> Dict:
-        """Perform comprehensive tfq0seo analysis on a URL.
         
-        Analyzes multiple aspects:
-        - Meta tags and technical SEO
-        - Content optimization
-        - Modern SEO features
-        - Competitive analysis (if competitor URLs provided)
-        - Advanced SEO features (if enabled)
-        - Security implementation
+        # Initialize cache
+        self.cache = CacheManager(
+            self.settings['cache']['directory'], 
+            self.settings['cache']['expiration']
+        )
+
+    def analyze_url(self, url: str) -> Dict[str, Any]:
+        """Analyze a URL for SEO optimization.
         
         Args:
-            url: The URL to analyze
-            target_keyword: Optional focus keyword for analysis
-            competitor_urls: Optional list of competitor URLs for comparison
-            include_advanced: Whether to include advanced SEO analysis
+            url: URL to analyze
             
         Returns:
-            Dictionary containing analysis results and recommendations
+            Dictionary containing analysis results
+            
+        Raises:
+            TFQ0SEOError: If URL analysis fails
         """
+        self.logger.info(f"Starting analysis for URL: {url}")
+        
         # Check cache first
-        cache_key = f"url_analysis_{url}_{target_keyword}_{'-'.join(competitor_urls) if competitor_urls else ''}_{include_advanced}"
-        cached_result = cache_manager.get(cache_key)
+        cache_key = hashlib.md5(url.encode()).hexdigest()
+        cached_result = self.cache.get(cache_key)
         if cached_result:
             self.logger.info(f"Retrieved cached analysis for URL: {url}")
             return cached_result
-
-        self.logger.info(f"Starting analysis for URL: {url}")
         
-        # Perform analysis
+        # Fetch URL content
+        try:
+            response = requests.get(url, timeout=self.settings['crawling']['timeout'])
+            response.raise_for_status()
+        except Exception as e:
+            raise TFQ0SEOError(
+                error_code="URL_ERROR",
+                message=f"Failed to fetch URL: {url}",
+                details={'error': str(e)}
+            )
+        
+        if not response.headers.get('content-type', '').startswith('text/html'):
+            raise TFQ0SEOError(
+                error_code="INVALID_CONTENT_TYPE",
+                message=f"URL does not return HTML content: {url}",
+                details={'content_type': response.headers.get('content-type')}
+            )
+        
+        # Analyze content
+        content = response.text
+        soup = BeautifulSoup(content, 'html.parser')
+        
         analysis = {
             'url': url,
-            'target_keyword': target_keyword,
-            'meta_analysis': self.meta_analyzer.analyze(url),
-            'content_analysis': self.content_analyzer.analyze(url, target_keyword),
-            'modern_seo_analysis': self.modern_analyzer.analyze(url)
+            'meta_analysis': self.meta_analyzer.analyze(soup),
+            'content_analysis': self.content_analyzer.analyze(content),
+            'modern_seo_analysis': self.modern_analyzer.analyze(soup),
+            'combined_report': self._combine_reports({
+                'meta_analysis': self.meta_analyzer.analyze(soup),
+                'content_analysis': self.content_analyzer.analyze(content),
+                'modern_seo_analysis': self.modern_analyzer.analyze(soup)
+            })
         }
         
-        # Add competitive analysis if competitor URLs provided
-        if competitor_urls:
-            self.logger.info("Starting competitive analysis")
-            analysis['competitive_analysis'] = self.competitive_analyzer.analyze(url, competitor_urls)
-        
-        # Add advanced analysis if enabled
-        if include_advanced:
-            self.logger.info("Starting advanced SEO analysis")
-            analysis['advanced_analysis'] = self.advanced_analyzer.analyze(url)
-        
-        # Combine recommendations
-        analysis['combined_report'] = self._combine_reports(analysis)
-        
-        # Cache the result
-        cache_manager.set(cache_key, analysis)
+        # Cache results
+        self.cache.set(cache_key, analysis)
         
         return analysis
 
@@ -339,9 +351,6 @@ class SEOAnalyzerApp:
         Returns:
             Formatted report string
         """
-        from .reporting.detailed_report import DetailedReport
-        from .reporting.report_formatter import ReportFormatter
-        
         # Generate detailed report
         detailed_report = DetailedReport(analysis)
         report_data = detailed_report.generate_report(format)
@@ -350,16 +359,28 @@ class SEOAnalyzerApp:
         formatter = ReportFormatter(report_data)
         return formatter.format_report(format, output_path)
 
-    def export_report(self, analysis: Dict, format: str, output_path: str) -> None:
-        """Export analysis report to file.
+    def export_report(self, analysis: Dict[str, Any], format: str = 'markdown', output_path: Optional[str] = None) -> str:
+        """Export analysis report in specified format.
         
         Args:
-            analysis: Analysis results dictionary
-            format: Output format ('markdown', 'html', 'json', 'csv')
-            output_path: Path to save report
+            analysis: Analysis results to export
+            format: Report format ('markdown', 'html', or 'json')
+            output_path: Optional path to save report to
+        
+        Returns:
+            Formatted report string
         """
-        report = self.generate_report(analysis, format, output_path)
-        self.logger.info(f"Report exported to: {output_path}")
+        # Generate detailed report
+        detailed_report = DetailedReport(analysis)
+        report = detailed_report.generate_report(format)
+        
+        # Save to file if path provided
+        if output_path:
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(report)
+        
+        return report
 
     @handle_analysis_error
     def comprehensive_analysis(self, url: str, options: Dict = None) -> Dict:
@@ -403,7 +424,7 @@ class SEOAnalyzerApp:
         
         # Check cache if enabled
         if options['cache_results']:
-            cached_result = cache_manager.get(cache_key)
+            cached_result = self.cache.get(cache_key)
             if cached_result:
                 self.logger.info(f"Retrieved cached comprehensive analysis for URL: {url}")
                 return cached_result
@@ -466,7 +487,7 @@ class SEOAnalyzerApp:
         
         # Cache results if enabled
         if options['cache_results']:
-            cache_manager.set(cache_key, analysis)
+            self.cache.set(cache_key, analysis)
         
         return analysis
 
@@ -589,7 +610,7 @@ class SEOAnalyzerApp:
         """Measure page load time metrics."""
         try:
             start_time = time.time()
-            response = requests.get(url, headers=self.headers)
+            response = requests.get(url, headers=self.settings['crawling']['user_agent'])
             end_time = time.time()
             
             return {
@@ -604,7 +625,7 @@ class SEOAnalyzerApp:
     def _check_resource_optimization(self, url: str) -> Dict:
         """Check resource optimization implementation."""
         try:
-            response = requests.get(url, headers=self.headers)
+            response = requests.get(url, headers=self.settings['crawling']['user_agent'])
             soup = BeautifulSoup(response.text, 'html.parser')
             
             return {
