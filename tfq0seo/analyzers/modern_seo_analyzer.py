@@ -311,47 +311,45 @@ class ModernSEOAnalyzer:
         return any(dim and int(dim) > 1000 for dim in [img.get('width'), img.get('height')])
 
     def _evaluate_modern_seo(self, analysis: Dict) -> Dict:
-        """Evaluate modern SEO features and generate recommendations."""
+        """Evaluate modern SEO features and generate tfq0seo recommendations."""
         evaluation = {
             'strengths': [],
             'weaknesses': [],
             'recommendations': [],
             'education_tips': []
         }
-        
-        # Mobile-friendly evaluation
-        if analysis['mobile_friendly']['viewport_meta']:
-            evaluation['strengths'].append("Proper mobile viewport configuration")
+
+        # Mobile-friendliness evaluation
+        mobile_friendly_analysis = analysis.get('mobile_friendly', {})
+        if mobile_friendly_analysis.get('viewport_meta'):
+            evaluation['strengths'].append("Viewport meta tag is present")
         else:
-            evaluation['weaknesses'].append("Missing mobile viewport meta tag")
-            evaluation['recommendations'].append("Add proper viewport meta tag")
-        
-        # HTML structure evaluation
-        if analysis['html_structure']['optimizations']['html_validation']['has_doctype']:
-            evaluation['strengths'].append("Valid HTML structure with doctype")
-        else:
-            evaluation['weaknesses'].append("Missing HTML doctype declaration")
-            evaluation['recommendations'].append("Add proper HTML5 doctype")
-        
+            evaluation['weaknesses'].append("Missing viewport meta tag")
+            evaluation['recommendations'].append(
+                'Add a viewport meta tag to ensure proper rendering on mobile devices'
+            )
+
+        if mobile_friendly_analysis.get('responsive_viewport'):
+            evaluation['strengths'].append("Responsive viewport is configured")
+
         # Security evaluation
-        if analysis['security']['https']:
-            evaluation['strengths'].append("HTTPS implementation")
+        security_analysis = analysis.get('security', {})
+        if security_analysis.get('https'):
+            evaluation['strengths'].append("Site uses HTTPS")
         else:
-            evaluation['weaknesses'].append("Not using HTTPS")
-            evaluation['recommendations'].append("Implement HTTPS security")
-        
+            evaluation['weaknesses'].append("Site does not use HTTPS")
+            evaluation['recommendations'].append(
+                "Migrate to HTTPS to improve security and SEO"
+            )
+
         # Structured data evaluation
-        if analysis['structured_data']['schemas_found'] > 0:
-            evaluation['strengths'].append("Implemented structured data")
+        structured_data_analysis = analysis.get('structured_data', {})
+        if structured_data_analysis.get('schemas_found', 0) > 0:
+            evaluation['strengths'].append("Structured data (Schema.org) is implemented")
         else:
             evaluation['weaknesses'].append("Missing structured data")
-            evaluation['recommendations'].append("Add relevant Schema.org markup")
-        
-        # Technical SEO evaluation
-        if analysis['technical_seo']['robots_txt']['exists']:
-            evaluation['strengths'].append("Robots.txt implemented")
-        else:
-            evaluation['weaknesses'].append("Missing robots.txt")
-            evaluation['recommendations'].append("Add robots.txt file")
-        
+            evaluation['recommendations'].append(
+                "Implement structured data to improve search engine understanding"
+            )
+
         return evaluation 

@@ -504,4 +504,13 @@ class ReportFormatter:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
         with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(content) 
+            f.write(content)
+
+    def _get_status_badge(self, score: float) -> str:
+        """Generate a status badge based on the score."""
+        if score >= 80:
+            return "Excellent"
+        elif score >= 50:
+            return "Good"
+        else:
+            return "Needs Improvement" 

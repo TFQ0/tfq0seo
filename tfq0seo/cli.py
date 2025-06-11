@@ -11,7 +11,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.panel import Panel
 
 from .seo_analyzer_app import SEOAnalyzerApp
-from .reporting.report_formatter import ReportFormatter
+from .reporting.detailed_report import DetailedReport
 
 def create_parser() -> argparse.ArgumentParser:
     """Create and configure the argument parser with all available options."""
@@ -160,14 +160,18 @@ def run_analysis(args: argparse.Namespace):
                 progress.update(task_id, completed=True)
                 
                 # Format and save the report
-                formatter = ReportFormatter(results)
+                formatter = DetailedReport(results)
                 output_path = format_output_path(url, args.output, args.format)
                 
                 # Ensure output directory exists
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 
                 # Generate the report
-                report = formatter.format_report(args.format, str(output_path))
+                report = formatter.generate_report(args.format)
+                
+                # Manually save the report to a file
+                with open(output_path, "w", encoding="utf-8") as f:
+                    f.write(report)
                 
                 if not args.quiet:
                     console.print(f"[green]Report saved:[/green] {output_path}")
