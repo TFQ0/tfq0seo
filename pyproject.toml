@@ -40,9 +40,10 @@ Documentation = "https://github.com/tfq0/tfq0seo#readme"
 Repository = "https://github.com/tfq0/tfq0seo.git"
 "Bug Tracker" = "https://github.com/tfq0/tfq0seo/issues"
 
-[tool.setuptools]
-packages = ["tfq0seo"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tfq0seo*"]
 
 [tool.setuptools.dynamic]
 version = {attr = "tfq0seo.__version__"}
-dependencies = {file = "requirements.txt"} 
+dependencies = {file = "requirements.txt"}
