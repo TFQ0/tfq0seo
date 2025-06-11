@@ -38,7 +38,7 @@ except FileNotFoundError:
 
 setup(
     name="tfq0seo",
-    version="1.0.6",
+    version="1.0.8",
     author="tfq0",
     description="Modern SEO analysis and optimization toolkit with advanced reporting",
     long_description=long_description,
