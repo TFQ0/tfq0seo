@@ -10,8 +10,8 @@ from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.panel import Panel
 
-from seo_analyzer_app import SEOAnalyzerApp
-from reporting.report_formatter import ReportFormatter
+from .seo_analyzer_app import SEOAnalyzerApp
+from .reporting.report_formatter import ReportFormatter
 
 def create_parser() -> argparse.ArgumentParser:
     """Create and configure the argument parser with all available options."""
@@ -154,9 +154,7 @@ def run_analysis(args: argparse.Namespace):
                 
                 # Run the analysis
                 results = analyzer.analyze_url(
-                    url,
-                    max_depth=args.depth,
-                    num_competitors=args.competitors
+                    url
                 )
                 
                 progress.update(task_id, completed=True)

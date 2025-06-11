@@ -18,7 +18,7 @@ For more information, visit: https://github.com/tfq0/tfq0seo
 """
 
 __title__ = 'tfq0seo'
-__version__ = '1.0.6'
+__version__ = '1.0.7'
 __author__ = 'tfq0'
 __license__ = 'MIT'
 __copyright__ = 'Copyright 2024 tfq0'
