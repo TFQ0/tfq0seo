@@ -34,22 +34,25 @@ class ReportFormatter:
 
     def _format_json(self) -> str:
         """Format report as clean, well-structured JSON."""
+        if isinstance(self.data, str):
+            # If data is already a JSON string, parse it
+            try:
+                self.data = json.loads(self.data)
+            except json.JSONDecodeError:
+                raise ValueError("Invalid JSON data provided")
+            
         report_data = {
             'metadata': {
                 'generated_at': self.timestamp.isoformat(),
-                'version': '1.0.1'
+                'version': '1.0.4'
             },
-            'summary': {
-                'overall_score': self.data.get('scores', {}).get('overall_score', 0),
-                'critical_issues': len(self.data.get('insights', {}).get('critical_issues', [])),
-                'strengths': len(self.data.get('insights', {}).get('positive_aspects', [])),
-                'priority_actions': len(self.data.get('action_plan', {}).get('high_priority', []))
-            },
-            'analysis': {
-                'technical_seo': self._get_technical_data(),
-                'content': self._get_content_data(),
-                'performance': self._get_performance_data(),
-                'action_items': self._get_action_items()
+            'title': 'tfq0seo Analysis Report',
+            'summary': self.data.get('combined_report', {}).get('summary', {}),
+            'sections': {
+                'strengths': self.data.get('combined_report', {}).get('strengths', []),
+                'weaknesses': self.data.get('combined_report', {}).get('weaknesses', []),
+                'recommendations': self.data.get('combined_report', {}).get('recommendations', []),
+                'education_tips': self.data.get('combined_report', {}).get('education_tips', [])
             }
         }
         

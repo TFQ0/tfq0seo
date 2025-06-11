@@ -53,7 +53,7 @@ class DetailedReport:
         summary = self.analysis.get('summary', {})
         scores = self.analysis.get('scores', {})
         
-        return f"""# SEO Analysis Report
+        return f"""# tfq0seo Analysis Report
 Generated on: {self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}
 
 ## Executive Summary
@@ -105,7 +105,7 @@ Score: {content_score:.1f}/100
 {self._analyze_content_quality(content)}
 
 ### Keyword Analysis
-{self._analyze_keyword_usage(content)}
+{self._assess_keyword_usage(content)}
 
 ### Content Structure
 {self._analyze_content_structure(content)}
@@ -327,29 +327,25 @@ Score: {mobile_score:.1f}/100
 - Implement proper canonical tags to prevent duplicate content
 """
 
-    def _analyze_content_quality(self, content: Dict) -> str:
-        """Analyze content quality metrics."""
-        word_count = content.get('word_count', 0)
-        readability = content.get('readability_score', 0)
-        
-        quality_assessment = "Excellent" if word_count >= 1000 and readability >= 60 else \
-                           "Good" if word_count >= 500 and readability >= 50 else \
-                           "Needs Improvement"
-        
-        return f"""#### Content Metrics
-- Word Count: {word_count}
-- Readability Score: {readability}/100
-- Overall Quality: {quality_assessment}
+    def _analyze_content_quality(self, content: dict) -> str:
+        """Analyze content quality and return markdown."""
+        # This is a placeholder implementation.
+        return "Content quality analysis not fully implemented."
 
-#### Content Assessment
-{self._assess_content_quality(content)}
+    def _assess_keyword_usage(self, content: dict) -> str:
+        """Analyze keyword usage and return markdown."""
+        # This is a placeholder implementation.
+        return "Keyword usage analysis not fully implemented."
 
-#### Quality Factors
-{self._analyze_quality_factors(content)}
+    def _analyze_content_structure(self, content: dict) -> str:
+        """Analyze content structure and return markdown."""
+        # This is a placeholder implementation.
+        return "Content structure analysis not fully implemented."
 
-#### Improvement Opportunities
-{self._identify_content_opportunities(content)}
-"""
+    def _format_content_recommendations(self, content: dict) -> str:
+        """Format content recommendations into markdown."""
+        # This is a placeholder implementation.
+        return "No content recommendations."
 
     def _format_list(self, items: List[str], with_priority: bool = False) -> str:
         """Format list items with optional priority."""
@@ -423,16 +419,6 @@ Score: {mobile_score:.1f}/100
             
         return self._format_list(opportunities)
 
-    def _assess_keyword_usage(self, content: Dict) -> str:
-        """Assess keyword usage in content."""
-        keyword_density = content.get('keyword_density', 0)
-        return f"{'Optimal' if 0.5 <= keyword_density <= 2.5 else 'Needs optimization'} ({keyword_density:.1f}%)"
-
-    def _assess_content_structure(self, content: Dict) -> str:
-        """Assess content structure."""
-        has_structure = content.get('has_proper_hierarchy', False)
-        return "Well-structured" if has_structure else "Needs improvement"
-
     def _assess_media_usage(self, content: Dict) -> str:
         """Assess media usage in content."""
         has_media = content.get('has_images', False) or content.get('has_videos', False)
@@ -441,4 +427,194 @@ Score: {mobile_score:.1f}/100
     def _assess_internal_linking(self, content: Dict) -> str:
         """Assess internal linking."""
         internal_links = content.get('internal_links_count', 0)
-        return "Good" if internal_links >= 3 else "Could be improved" 
+        return "Good" if internal_links >= 3 else "Could be improved"
+
+    def _generate_json_report(self) -> str:
+        """Generate JSON format report."""
+        report_data = {
+            'title': 'tfq0seo Analysis Report',
+            'timestamp': datetime.now().isoformat(),
+            'summary': self.analysis['combined_report']['summary'],
+            'sections': {
+                'strengths': self.analysis['combined_report']['strengths'],
+                'weaknesses': self.analysis['combined_report']['weaknesses'],
+                'recommendations': self.analysis['combined_report']['recommendations'],
+                'education_tips': self.analysis['combined_report']['education_tips']
+            }
+        }
+        return json.dumps(report_data, indent=2)
+
+    def _generate_html_report(self) -> str:
+        """Generate HTML format report."""
+        html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>tfq0seo Analysis Report</title>
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }}
+        h1, h2 {{
+            color: #333;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }}
+        .summary {{
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }}
+        .section {{
+            margin: 30px 0;
+        }}
+        ul {{
+            list-style-type: none;
+            padding-left: 20px;
+        }}
+        li {{
+            margin: 10px 0;
+        }}
+        .score {{
+            font-size: 24px;
+            font-weight: bold;
+            color: #2196F3;
+        }}
+    </style>
+</head>
+<body>
+    <h1>tfq0seo Analysis Report</h1>
+    
+    <div class="summary">
+        <h2>Summary</h2>
+        <p class="score">SEO Score: {self.analysis['combined_report']['summary']['seo_score']}</p>
+        <p>Total Strengths: {self.analysis['combined_report']['summary']['total_strengths']}</p>
+        <p>Total Weaknesses: {self.analysis['combined_report']['summary']['total_weaknesses']}</p>
+        <p>Total Recommendations: {self.analysis['combined_report']['summary']['total_recommendations']}</p>
+    </div>
+    
+    <div class="section">
+        <h2>Strengths</h2>
+        <ul>
+            {''.join(f'<li>✓ {item}</li>' for item in self.analysis['combined_report']['strengths'])}
+        </ul>
+    </div>
+    
+    <div class="section">
+        <h2>Areas for Improvement</h2>
+        <ul>
+            {''.join(f'<li>⚠ {item}</li>' for item in self.analysis['combined_report']['weaknesses'])}
+        </ul>
+    </div>
+    
+    <div class="section">
+        <h2>Recommendations</h2>
+        <ul>
+            {''.join(f'<li>→ {item}</li>' for item in self.analysis['combined_report']['recommendations'])}
+        </ul>
+    </div>
+    
+    <div class="section">
+        <h2>Educational Tips</h2>
+        <ul>
+            {''.join(f'<li>💡 {item}</li>' for item in self.analysis['combined_report']['education_tips'])}
+        </ul>
+    </div>
+</body>
+</html>
+"""
+        return html
+
+    def _analyze_url_structure(self, url_analysis: dict) -> str:
+        """Analyze URL structure and return markdown."""
+        # This is a placeholder implementation.
+        return "URL Structure analysis not fully implemented."
+
+    def _analyze_indexation(self, indexation: dict) -> str:
+        """Analyze indexation and return markdown."""
+        # This is a placeholder implementation.
+        return "Indexation analysis not fully implemented."
+
+    def _format_technical_issues(self, issues: list) -> str:
+        """Format technical issues into markdown."""
+        if not issues:
+            return "No technical issues found."
+        return "\n".join(f"- {issue}" for issue in issues)
+
+    def _analyze_navigation(self, navigation: dict) -> str:
+        """Analyze navigation and return markdown."""
+        return "Navigation analysis not implemented."
+
+    def _analyze_accessibility(self, accessibility: dict) -> str:
+        """Analyze accessibility and return markdown."""
+        return "Accessibility analysis not implemented."
+
+    def _analyze_interaction_elements(self, interaction: dict) -> str:
+        """Analyze interaction elements and return markdown."""
+        return "Interaction elements analysis not implemented."
+
+    def _format_ux_recommendations(self, ux: dict) -> str:
+        """Format UX recommendations into markdown."""
+        return "No UX recommendations."
+
+    def _analyze_load_time(self, load_time: dict) -> str:
+        """Analyze load time and return markdown."""
+        return "Load time analysis not implemented."
+
+    def _analyze_resource_optimization(self, perf: dict) -> str:
+        """Analyze resource optimization and return markdown."""
+        return "Resource optimization analysis not implemented."
+
+    def _analyze_ssl(self, ssl: dict) -> str:
+        """Analyze SSL and return markdown."""
+        return "SSL analysis not implemented."
+
+    def _analyze_security_headers(self, security: dict) -> str:
+        """Analyze security headers and return markdown."""
+        return "Security headers analysis not implemented."
+
+    def _analyze_content_security(self, security: dict) -> str:
+        """Analyze content security and return markdown."""
+        return "Content security analysis not implemented."
+
+    def _format_performance_recommendations(self, perf: dict) -> str:
+        """Format performance recommendations into markdown."""
+        return "No performance recommendations."
+
+    def _analyze_performance_impact(self) -> str:
+        """Analyze performance impact and return markdown."""
+        return "Performance impact analysis not implemented."
+
+    def _format_security_recommendations(self, security: dict) -> str:
+        """Format security recommendations into markdown."""
+        return "No security recommendations."
+
+    def _analyze_mobile_friendliness(self, mobile: dict) -> str:
+        """Analyze mobile friendliness and return markdown."""
+        # This is a placeholder implementation.
+        return "Mobile friendliness analysis not fully implemented."
+
+    def _analyze_responsive_design(self, mobile: dict) -> str:
+        """Analyze responsive design and return markdown."""
+        # This is a placeholder implementation.
+        return "Responsive design analysis not fully implemented."
+
+    def _analyze_mobile_performance(self, mobile: dict) -> str:
+        """Analyze mobile performance and return markdown."""
+        # This is a placeholder implementation.
+        return "Mobile performance analysis not fully implemented."
+
+    def _format_mobile_recommendations(self, mobile: dict) -> str:
+        """Format mobile recommendations into markdown."""
+        # This is a placeholder implementation.
+        return "No mobile recommendations."
+
+    def _format_competitive_recommendations(self, competitive: dict) -> str:
+        """Format competitive recommendations into markdown."""
+        # This is a placeholder implementation.
+        return "No competitive recommendations."
