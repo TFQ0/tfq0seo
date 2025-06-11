@@ -1,6 +1,6 @@
 # tfq0seo 🔍
 
-[![PyPI version](https://badge.fury.io/py/tfq0seo.svg)](https://badge.fury.io/py/tfq0seo)
+[![PyPI version](https://img.shields.io/pypi/v/tfq0seo.svg)](https://pypi.org/project/tfq0seo/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/tfq0seo.svg)](https://pypi.org/project/tfq0seo/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
