@@ -7,7 +7,7 @@ Analyzes URL structure, parameters, and SEO implications.
 """
 
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from urllib.parse import urlparse, parse_qs, unquote
 from dataclasses import dataclass
 import tldextract
