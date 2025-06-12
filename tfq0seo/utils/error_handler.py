@@ -1,30 +1,30 @@
 import logging
-from typing import Optional, Union
+from typing import Optional, Union, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import logging.handlers
 import os
+import traceback
+from functools import wraps
+import re
+from urllib.parse import urlparse
+import requests
 
 @dataclass
 class TFQ0SEOError(Exception):
-    """tfq0seo error data structure.
-    
-    Stores comprehensive error information for logging and handling.
-    
-    Attributes:
-        error_code: Unique identifier for the error type
-        message: Human-readable error description
-        timestamp: When the error occurred
-        details: Optional dictionary with additional error context
-    """
+    """Enhanced TFQ0SEO Error with detailed context."""
     error_code: str
     message: str
-    timestamp: datetime = datetime.now()
-    details: Optional[dict] = None
-
-    def __str__(self):
-        return f"{self.error_code}: {self.message}"
+    details: Optional[Dict[str, Any]] = None
+    url: Optional[str] = None
+    timestamp: Optional[str] = None
+    
+    def __post_init__(self):
+        """Initialize the exception with proper message."""
+        super().__init__(self.message)
+        if not self.timestamp:
+            self.timestamp = datetime.now().isoformat()
 
 class TFQ0SEOException(Exception):
     """Base exception class for tfq0seo errors.
@@ -114,39 +114,134 @@ def log_error(error: TFQ0SEOError) -> None:
     logger.error(error_message)
 
 def handle_analysis_error(func):
-    """Decorator for handling tfq0seo analysis errors.
-    
-    Provides consistent error handling across analysis functions:
-    - Catches and logs specific tfq0seo exceptions
-    - Handles unexpected errors
-    - Returns structured error responses
-    
-    Returns:
-        Dictionary containing:
-        - error: Boolean indicating error status
-        - message: Human-readable error description
-        - code: Error code for programmatic handling
-    """
+    """Enhanced decorator for handling analysis errors with detailed logging."""
+    @wraps(func)
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
-        except TFQ0SEOException as e:
-            log_error(e.error)
+        except TFQ0SEOError:
+            # Re-raise TFQ0SEO errors as-is
+            raise
+        except requests.exceptions.SSLError as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"SSL Error in {func.__name__}: {str(e)}")
             return {
-                'error': True,
-                'message': str(e),
-                'code': e.error.error_code
+                'error': 'SSL certificate verification failed',
+                'error_type': 'SSL_ERROR',
+                'details': str(e),
+                'recommendations': [
+                    'Check if the SSL certificate is valid and properly configured',
+                    'Verify the certificate chain is complete',
+                    'Consider using a different SSL certificate provider'
+                ]
+            }
+        except requests.exceptions.ConnectionError as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Connection Error in {func.__name__}: {str(e)}")
+            return {
+                'error': 'Failed to connect to the website',
+                'error_type': 'CONNECTION_ERROR',
+                'details': str(e),
+                'recommendations': [
+                    'Check if the website is accessible',
+                    'Verify the URL is correct',
+                    'Check your internet connection'
+                ]
+            }
+        except requests.exceptions.Timeout as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Timeout Error in {func.__name__}: {str(e)}")
+            return {
+                'error': 'Request timed out',
+                'error_type': 'TIMEOUT_ERROR',
+                'details': str(e),
+                'recommendations': [
+                    'The website is taking too long to respond',
+                    'Try again later',
+                    'Check if the website is experiencing high load'
+                ]
+            }
+        except requests.exceptions.RequestException as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Request Error in {func.__name__}: {str(e)}")
+            return {
+                'error': 'HTTP request failed',
+                'error_type': 'REQUEST_ERROR',
+                'details': str(e),
+                'recommendations': [
+                    'Check if the URL is valid and accessible',
+                    'Verify the website is online',
+                    'Check for any network restrictions'
+                ]
             }
         except Exception as e:
-            error = TFQ0SEOError(
-                error_code='UNEXPECTED_ERROR',
-                message=str(e),
-                details={'type': type(e).__name__}
-            )
-            log_error(error)
+            logger = logging.getLogger(__name__)
+            logger.error(f"Unexpected error in {func.__name__}: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return {
-                'error': True,
-                'message': 'An unexpected error occurred',
-                'code': 'UNEXPECTED_ERROR'
+                'error': f'Analysis failed: {str(e)}',
+                'error_type': 'ANALYSIS_ERROR',
+                'function': func.__name__,
+                'traceback': traceback.format_exc(),
+                'recommendations': [
+                    'This appears to be an unexpected error',
+                    'Please report this issue with the URL and error details',
+                    'Try analyzing a different URL to see if the issue persists'
+                ]
             }
-    return wrapper 
+    return wrapper
+
+def validate_url(url: str) -> bool:
+    """Validate URL format and accessibility."""
+    # Basic URL format validation
+    url_pattern = re.compile(
+        r'^https?://'  # http:// or https://
+        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # domain...
+        r'localhost|'  # localhost...
+        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
+        r'(?::\d+)?'  # optional port
+        r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+    
+    if not url_pattern.match(url):
+        return False
+    
+    # Parse URL components
+    try:
+        parsed = urlparse(url)
+        return all([parsed.scheme, parsed.netloc])
+    except Exception:
+        return False
+
+def sanitize_url(url: str) -> str:
+    """Sanitize and normalize URL."""
+    url = url.strip()
+    
+    # Add protocol if missing
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    
+    # Remove trailing slash for consistency
+    if url.endswith('/') and len(url) > 8:  # Don't remove from root URLs
+        url = url.rstrip('/')
+    
+    return url
+
+def log_analysis_start(url: str, analysis_type: str):
+    """Log the start of an analysis."""
+    logger = logging.getLogger(__name__)
+    logger.info(f"Starting {analysis_type} analysis for: {url}")
+
+def log_analysis_complete(url: str, analysis_type: str, duration: float):
+    """Log the completion of an analysis."""
+    logger = logging.getLogger(__name__)
+    logger.info(f"Completed {analysis_type} analysis for: {url} in {duration:.2f}s")
+
+def create_error_report(error: Exception, context: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a detailed error report."""
+    return {
+        'error_type': type(error).__name__,
+        'error_message': str(error),
+        'context': context,
+        'timestamp': datetime.now().isoformat(),
+        'traceback': traceback.format_exc() if hasattr(error, '__traceback__') else None
+    } 

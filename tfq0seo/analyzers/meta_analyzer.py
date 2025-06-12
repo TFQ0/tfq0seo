@@ -62,7 +62,7 @@ class MetaAnalyzer:
     def _get_title(self, soup: BeautifulSoup) -> Optional[str]:
         """Extract and validate page title for tfq0seo compliance"""
         title_tag = soup.title
-        return title_tag.string.strip() if title_tag else None
+        return title_tag.get_text().strip() if title_tag else None
 
     def _get_meta_content(self, soup: BeautifulSoup, name: str) -> Optional[str]:
         """Extract meta tag content for tfq0seo analysis"""
@@ -94,7 +94,7 @@ class MetaAnalyzer:
         schema_data = []
         for tag in schema_tags:
             try:
-                schema_data.append(json.loads(tag.string))
+                schema_data.append(json.loads(tag.get_text()))
             except (json.JSONDecodeError, AttributeError):
                 continue
         return schema_data

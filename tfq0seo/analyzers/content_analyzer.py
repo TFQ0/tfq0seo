@@ -110,8 +110,21 @@ class ContentAnalyzer:
 
     def _analyze_keywords(self, text: str, target_keyword: str = None) -> Dict:
         """Analyze keyword usage and density"""
-        words = word_tokenize(text.lower())
-        words = [word for word in words if word.isalnum() and word not in self.stop_words]
+        # Clean text first - remove technical terms and code
+        cleaned_text = self._clean_text_for_analysis(text)
+        
+        words = word_tokenize(cleaned_text.lower())
+        words = [word for word in words if word.isalnum() and word not in self.stop_words and len(word) >= 2]
+        
+        # Filter out technical/code terms
+        technical_terms = {
+            'var', 'function', 'return', 'if', 'else', 'for', 'while', 'class', 'id',
+            'px', 'em', 'rem', 'vh', 'vw', 'deg', 'ms', 'transform', 'translate3d',
+            'webkit', 'moz', 'opacity', 'rgba', 'href', 'src', 'alt', 'title',
+            'div', 'span', 'img', 'link', 'script', 'style', 'html', 'body', 'head'
+        }
+        
+        words = [word for word in words if word not in technical_terms]
         
         # Get keyword frequency
         word_freq = Counter(words)
@@ -121,19 +134,32 @@ class ContentAnalyzer:
         bigrams = list(ngrams(words, 2))
         trigrams = list(ngrams(words, 3))
         
+        # Detect potential keyword stuffing
+        keyword_stuffing_candidates = []
+        for word, count in word_freq.most_common(20):
+            density = (count / total_words) * 100 if total_words > 0 else 0
+            if density > 3.0 and count > 5:  # More than 3% density and appears more than 5 times
+                keyword_stuffing_candidates.append({
+                    'keyword': word,
+                    'count': count,
+                    'density': density
+                })
+        
         keyword_analysis = {
             'top_keywords': [
                 {
                     'keyword': kw,
                     'count': count,
-                    'density': (count / total_words) * 100
+                    'density': (count / total_words) * 100 if total_words > 0 else 0
                 }
                 for kw, count in word_freq.most_common(10)
             ],
             'top_phrases': {
                 'bigrams': Counter(bigrams).most_common(5),
                 'trigrams': Counter(trigrams).most_common(5)
-            }
+            },
+            'keyword_stuffing_detected': keyword_stuffing_candidates,
+            'total_meaningful_words': total_words
         }
         
         if target_keyword:
@@ -143,6 +169,31 @@ class ContentAnalyzer:
             }
             
         return keyword_analysis
+
+    def _clean_text_for_analysis(self, text: str) -> str:
+        """Clean text for meaningful content analysis."""
+        import re
+        
+        # Remove URLs
+        text = re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', '', text)
+        
+        # Remove email addresses
+        text = re.sub(r'\S+@\S+', '', text)
+        
+        # Remove CSS-like patterns
+        text = re.sub(r'[a-zA-Z-]+:\s*[^;]+;', '', text)
+        
+        # Remove JavaScript-like patterns
+        text = re.sub(r'function\s*\([^)]*\)\s*{[^}]*}', '', text)
+        text = re.sub(r'var\s+\w+\s*=\s*[^;]+;', '', text)
+        
+        # Remove HTML-like patterns that might have been missed
+        text = re.sub(r'<[^>]+>', '', text)
+        
+        # Remove excessive whitespace
+        text = re.sub(r'\s+', ' ', text.strip())
+        
+        return text
 
     def _analyze_structure(self, text: str) -> Dict:
         """Analyze content structure"""

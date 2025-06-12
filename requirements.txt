@@ -10,6 +10,20 @@ pyyaml>=6.0.1
 html5lib>=1.1
 lxml>=4.9.3
 
+# Enhanced crawling and async support
+aiohttp>=3.9.0
+asyncio-throttle>=1.0.2
+
+# URL and domain analysis
+tldextract>=5.1.0
+
+# Advanced data processing and export
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# Image processing
+Pillow>=10.0.0
+
 # CLI and UI
 
 colorama>=0.4.6
@@ -19,6 +33,7 @@ click>=8.1.7
 # Testing and development
 
 pytest>=8.0.0
+pytest-asyncio>=0.21.0
 setuptools>=69.0.3
 
 # Python version specific
