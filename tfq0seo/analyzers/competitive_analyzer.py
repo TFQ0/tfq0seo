@@ -21,7 +21,7 @@ class CompetitiveAnalyzer:
         }
 
     @handle_analysis_error
-    def analyze(self, url: str, competitor_urls: List[str]) -> Dict:
+    def analyze(self, url: str, competitor_urls: Optional[List[str]] = None) -> Dict:
         """Perform comprehensive competitive SEO analysis.
         
         Analyzes:
@@ -37,13 +37,17 @@ class CompetitiveAnalyzer:
         Returns:
             Dict containing competitive analysis results
         """
+        # If no competitor URLs provided, perform basic analysis
+        if not competitor_urls:
+            competitor_urls = []
+        
         analysis = {
             'main_site': self._analyze_site(url),
             'competitors': {
                 competitor: self._analyze_site(competitor)
                 for competitor in competitor_urls
             },
-            'comparative_analysis': self._compare_sites(url, competitor_urls)
+            'comparative_analysis': self._compare_sites(url, competitor_urls) if competitor_urls else {}
         }
         
         return self._evaluate_competitive_analysis(analysis)

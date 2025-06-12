@@ -44,7 +44,7 @@ class ReportFormatter:
         report_data = {
             'metadata': {
                 'generated_at': self.timestamp.isoformat(),
-                'version': '1.0.4'
+                'version': '2.0.0'
             },
             'title': 'tfq0seo Analysis Report',
             'summary': self.data.get('combined_report', {}).get('summary', {}),

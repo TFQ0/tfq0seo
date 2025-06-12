@@ -20,6 +20,7 @@ try:
     ]
 except FileNotFoundError:
     requirements = [
+        # Core dependencies
         "requests>=2.31.0",
         "beautifulsoup4>=4.12.2",
         "nltk>=3.8.1",
@@ -29,18 +30,31 @@ except FileNotFoundError:
         "pyyaml>=6.0.1",
         "html5lib>=1.1",
         "lxml>=4.9.3",
+        # Enhanced crawling and async support
+        "aiohttp>=3.9.0",
+        "asyncio-throttle>=1.0.2",
+        # URL and domain analysis
+        "tldextract>=5.1.0",
+        # Advanced data processing and export
+        "pandas>=2.0.0",
+        "openpyxl>=3.1.0",
+        # Image processing
+        "Pillow>=10.0.0",
+        # CLI and UI
         "colorama>=0.4.6",
         "rich>=13.7.0",
         "click>=8.1.7",
+        # Testing and development
         "pytest>=8.0.0",
+        "pytest-asyncio>=0.21.0",
         "setuptools>=69.0.3"
     ]
 
 setup(
     name="tfq0seo",
-    version="1.0.8",
+    version="2.0.0",
     author="tfq0",
-    description="Modern SEO analysis and optimization toolkit with advanced reporting",
+    description="Enhanced SEO analysis and site crawling toolkit with professional capabilities",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/tfq0/tfq0seo",
@@ -66,7 +80,7 @@ setup(
         "Environment :: Console",
         "Operating System :: OS Independent",
     ],
-    keywords="seo, analysis, optimization, web, content, meta tags, technical seo, reporting, analytics",
+    keywords="seo, analysis, optimization, web, content, meta tags, technical seo, reporting, analytics, crawling, spider, screaming frog, site audit",
     python_requires=">=3.7",
     install_requires=requirements,
     entry_points={

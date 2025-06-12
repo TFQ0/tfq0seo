@@ -122,17 +122,52 @@ class ModernSEOAnalyzer:
         - Content security policies
         """
         try:
-            response = requests.get(url, headers=self.headers)
+            # Make request and check actual response
+            response = requests.get(url, headers=self.headers, verify=True)
+            
+            # Check if the final URL (after redirects) uses HTTPS
+            final_url = response.url
+            uses_https = final_url.startswith('https://')
+            
+            # Verify SSL certificate is valid
+            ssl_valid = False
+            if uses_https:
+                try:
+                    import ssl
+                    import socket
+                    from urllib.parse import urlparse
+                    parsed = urlparse(final_url)
+                    context = ssl.create_default_context()
+                    with socket.create_connection((parsed.hostname, 443), timeout=10) as sock:
+                        with context.wrap_socket(sock, server_hostname=parsed.hostname) as ssock:
+                            ssl_valid = True
+                except Exception:
+                    ssl_valid = False
             
             security_checks = {
-                'https': url.startswith('https'),
+                'https': uses_https,
+                'ssl_certificate_valid': ssl_valid,
+                'original_url_https': url.startswith('https://'),
+                'redirected_to_https': url.startswith('http://') and uses_https,
                 'hsts': 'strict-transport-security' in response.headers,
                 'xss_protection': 'x-xss-protection' in response.headers,
                 'content_security': 'content-security-policy' in response.headers,
-                'mixed_content': self._check_mixed_content(response.text)
+                'mixed_content': self._check_mixed_content(response.text),
+                'security_headers': {
+                    'x-frame-options': response.headers.get('x-frame-options'),
+                    'x-content-type-options': response.headers.get('x-content-type-options'),
+                    'referrer-policy': response.headers.get('referrer-policy')
+                }
             }
             
             return security_checks
+        except requests.exceptions.SSLError:
+            return {
+                'https': url.startswith('https://'),
+                'ssl_certificate_valid': False,
+                'ssl_error': True,
+                'error': 'SSL certificate verification failed'
+            }
         except Exception as e:
             return {'error': str(e)}
 
