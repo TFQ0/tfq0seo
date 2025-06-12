@@ -6,8 +6,6 @@
 
 **Enhanced SEO analysis and site crawling toolkit** - A comprehensive, professional-grade SEO analysis tool with full site crawling capabilities. Competitive with Screaming Frog SEO Spider but open source and extensible! 🚀
 
-## 🆕 What's New in v2.0.0
-
 **Complete Site Crawling** - Now includes professional website crawling capabilities:
 - 🕷️ **Full Site Crawling** with configurable depth (1-10 levels)
 - ⚡ **Concurrent Processing** (1-50 simultaneous requests)
@@ -19,33 +17,6 @@
 - 🤖 **Robots.txt & Sitemap Integration**
 - 📱 **Real-time Progress Tracking** with rich console output
 
-## ✨ Enhanced Features
-
-### 🕷️ Site Crawling (NEW!)
-- **Professional Website Crawling** with configurable depth and concurrency
-- **Broken Link Detection** with detailed error reporting
-- **Redirect Chain Analysis** (301, 302, etc.)
-- **Duplicate Content Identification** across pages
-- **Orphaned Page Detection** for better site structure
-- **Sitemap Integration** and coverage analysis
-
-### 🔍 Advanced SEO Analysis
-- **Complete URL Analysis** with SEO scoring (0-100)
-- **Content Optimization** with keyword density analysis
-- **Technical SEO Validation** (meta tags, headers, structure)
-- **Image Analysis** (alt text, optimization, accessibility)
-- **Performance Metrics** and Core Web Vitals
-- **Mobile-Friendly Testing** and responsive design validation
-- **Security Analysis** (HTTPS, headers, certificates)
-- **Rich Results** and structured data analysis
-
-### 📊 Professional Reporting
-- **Multiple Export Formats**: JSON, CSV, XLSX, HTML
-- **Interactive HTML Reports** with charts and visualizations
-- **Bulk Operations** for large-scale analysis
-- **Real-time Progress Tracking** with rich console output
-- **Prioritized Recommendations** based on impact and effort
-- **Executive Summaries** for stakeholder reporting
 
 ## 🛠️ Installation
 
@@ -103,18 +74,6 @@ tfq0seo insights --summary --recommendations
 tfq0seo list
 ```
 
-## 🎯 Competitive Advantages
-
-**vs. Screaming Frog SEO Spider:**
-- ✅ **Open Source** - No licensing fees, unlimited crawls
-- ✅ **Modern Architecture** - Async/concurrent processing for faster crawls
-- ✅ **Cloud Ready** - Deploy anywhere, scale horizontally
-- ✅ **Extensible** - Python-based, easy to customize and extend
-- ✅ **Advanced Analysis** - ML-ready data structure, modern SEO factors
-- ✅ **Multiple Export Formats** - JSON, CSV, XLSX, HTML
-- ✅ **API Integration** - Easy integration with other tools
-- ✅ **Real-time Progress** - Rich console output with live updates
-
 ## 🚀 Powerful SEO Testing Capabilities
 
 ### 🔍 Large-Scale Site Crawling Tests
@@ -126,10 +85,10 @@ tfq0seo crawl https://example-store.com --depth 5 --max-pages 1000 --concurrent 
 ```
 
 **Performance Results:**
-- ✅ **Concurrent Processing**: Handles 10-50 simultaneous requests efficiently
-- ✅ **Robots.txt Compliance**: Respects crawling restrictions automatically
-- ✅ **Progress Tracking**: Real-time updates with rich console output
-- 📊 **Speed**: ~0.3-0.4 pages/second depending on site response time
+-  **Concurrent Processing**: Handles 10-50 simultaneous requests efficiently
+-  **Robots.txt Compliance**: Respects crawling restrictions automatically
+-  **Progress Tracking**: Real-time updates with rich console output
+-  **Speed**: ~0.3-0.4 pages/second depending on site response time
 
 **Multi-language Content Analysis:**
 ```bash
@@ -145,11 +104,6 @@ tfq0seo analyze https://multilingual-site.com --format json
 - Large content (5,000 chars): 146,166 chars/second
 - Very large content (25,000 chars): 146,604 chars/second
 
-**What this reveals:**
-- ✅ **Consistent Performance**: Speed remains stable regardless of content size
-- ✅ **Linear Scaling**: Efficient processing with good performance characteristics
-- ✅ **Memory Management**: Handles large content without crashes
-
 ### 📊 Export & Data Analysis
 
 **Comprehensive Export Testing:**
@@ -159,12 +113,6 @@ tfq0seo crawl https://test-site.com --format json --output detailed.json
 tfq0seo export --format csv --output spreadsheet.csv
 tfq0seo export --format xlsx --output professional.xlsx
 ```
-
-**Export Quality Results:**
-- ✅ **JSON Export**: Structured data with 2,838+ characters of detailed analysis
-- ✅ **CSV Export**: Professional format with 9+ comprehensive columns
-- ✅ **XLSX Export**: Excel-compatible with styled worksheets and auto-adjusted columns
-- ✅ **Headers Include**: URL, Status Code, Title, Meta Description, H1 Count, H2 Count, Word Count, Internal Links, External Links, Images, Response Time, Content Type, Canonical URL, Robots Meta, Depth, Parent URL
 
 ### 🎯 Real-World Site Analysis Results
 
@@ -212,82 +160,6 @@ tfq0seo insights --summary --recommendations
 tfq0seo analyze "https://site.com/very-long-url-that-exceeds-recommended-length"
 tfq0seo analyze "https://site.com/page?param1=value1&param2=value2&param3=value3"
 ```
-
-## 🔬 Confirmed Strengths & Capabilities
-
-### **Professional Crawling Architecture:**
-- ✅ **Configurable Depth**: 1-10 levels with intelligent stopping
-- ✅ **Concurrent Processing**: 1-50 simultaneous requests
-- ✅ **Robots.txt Compliance**: Automatic respect for crawling restrictions
-- ✅ **Real-time Progress**: Rich console output with live updates
-- ✅ **Error Handling**: Graceful handling of timeouts, 404s, and network issues
-- ✅ **Export Flexibility**: Multiple formats for different use cases
-
-### **URL Structure Analysis:**
-- ✅ **Protocol Analysis**: HTTP/HTTPS detection and validation
-- ✅ **Domain Processing**: Accurate domain and subdomain analysis
-- ✅ **Path Structure**: SEO-friendly URL pattern detection
-- ✅ **Parameter Handling**: Query parameter analysis and optimization
-- ✅ **Length Validation**: URL length and structure recommendations
-
-### **Site-Wide Analysis Framework:**
-- ✅ **Duplicate Content Detection**: Framework for identifying duplicate pages
-- ✅ **Broken Link Identification**: Comprehensive link validation
-- ✅ **Redirect Chain Analysis**: 301, 302, and redirect loop detection
-- ✅ **Orphaned Page Detection**: Pages without internal links
-- ✅ **Site Structure Mapping**: Hierarchical site organization analysis
-
-## ⚠️ Current Limitations & Known Issues
-
-### **Content Analysis Limitations:**
-- ❌ **No JavaScript Rendering**: Cannot analyze SPAs or dynamic content
-- ❌ **Limited NLP Analysis**: Basic content processing without advanced semantics
-- ❌ **Static HTML Only**: Misses dynamically loaded content and interactions
-
-### **Crawling Constraints:**
-- ❌ **Public Access Only**: Requires HTTP/HTTPS access, no authentication support
-- ❌ **Navigation Patterns**: Cannot handle complex JavaScript-based navigation
-- ❌ **Rate Limiting**: Basic delay controls, no advanced rate limiting strategies
-
-### **SEO Analysis Gaps:**
-- ❌ **Core Web Vitals**: Missing performance metrics integration
-- ❌ **Advanced Image Analysis**: Limited image optimization detection
-- ❌ **Schema Validation**: Basic schema detection without validation
-
-## 🎯 Best Use Cases
-
-### **Recommended For:**
-- ✅ **Static Website Audits**: Excellent for traditional HTML websites
-- ✅ **URL Structure Analysis**: Comprehensive technical SEO audits
-- ✅ **Bulk Operations**: Large-scale crawling and data collection
-- ✅ **Data Export Projects**: Integration with other SEO tools and workflows
-- ✅ **Site Mapping**: Understanding site structure and organization
-- ✅ **Link Analysis**: Internal and external link relationship mapping
-
-### **Avoid For:**
-- ❌ **Single Page Applications (SPAs)**: Limited JavaScript support
-- ❌ **Dynamic Content Sites**: Cannot render client-side content
-- ❌ **Advanced Performance Analysis**: Missing Core Web Vitals integration
-- ❌ **Complex Authentication**: No support for login-protected content
-
-## 📈 Performance Benchmarks
-
-### **Crawling Performance:**
-- **Small Sites** (< 100 pages): 2-5 seconds per page
-- **Medium Sites** (100-1000 pages): 1-3 seconds per page
-- **Large Sites** (1000+ pages): 0.5-2 seconds per page
-- **Concurrent Efficiency**: Linear scaling up to 20 concurrent requests
-
-### **Memory Usage:**
-- **Base Usage**: ~50MB for tool initialization
-- **Per Page**: ~1-2MB additional memory per crawled page
-- **Large Crawls**: Efficient memory management for 1000+ page crawls
-
-### **Export Performance:**
-- **JSON**: Instant export for any crawl size
-- **CSV**: < 1 second for 1000+ pages
-- **XLSX**: 2-5 seconds for 1000+ pages with styling
-- **HTML**: 1-3 seconds with interactive features
 
 ## 📋 Command Reference
 
@@ -454,90 +326,7 @@ The comprehensive analysis provides:
 - **cache_results**: Enable/disable caching
 - **custom_thresholds**: Custom analysis thresholds
 
-## 🧪 Testing & Quality Assurance
 
-### **Comprehensive Testing Framework**
-
-tfq0seo includes a robust testing system to ensure reliability and performance:
-
-```bash
-# Run comprehensive tests
-python test_tool_comprehensive.py
-
-# Quick essential tests
-python test_tool_comprehensive.py --quick
-
-# Stress testing with memory and performance analysis
-python test_tool_comprehensive.py --stress
-```
-
-### **Periodic Testing & Monitoring**
-
-**Windows:**
-```cmd
-# Set up automated testing
-run_periodic_tests.bat schedule
-
-# Run tests manually
-run_periodic_tests.bat quick
-```
-
-**Linux/macOS:**
-```bash
-# Set up cron job for periodic testing
-./run_periodic_tests.sh schedule
-
-# Run tests manually
-./run_periodic_tests.sh quick
-```
-
-### **Test Categories Covered**
-
-- ✅ **Basic Functionality**: Analyzer initialization, URL analysis, content processing
-- ✅ **CLI Integration**: All output formats (JSON, HTML, CSV) and command-line options
-- ✅ **Error Handling**: Invalid URLs, timeouts, malformed content, network issues
-- ✅ **Performance Testing**: Memory usage, concurrent analysis, response times
-- ✅ **Stress Testing**: Large content processing, rapid requests, resource cleanup
-- ✅ **Integration Testing**: Export functionality, data validation, report generation
-
-### **Quality Metrics & Benchmarks**
-
-**Success Rate Targets:**
-- ✅ **Valid URLs**: > 90% success rate
-- ✅ **Error Handling**: 100% graceful failure handling
-- ✅ **Export Functions**: 100% data integrity across formats
-- ✅ **Performance**: < 5 seconds per URL analysis
-
-**Automated Monitoring:**
-- 📊 **Daily Tests**: Essential functionality verification
-- 📊 **Weekly Tests**: Comprehensive feature testing
-- 📊 **Stress Tests**: Monthly performance and limit testing
-- 📊 **Regression Tests**: Continuous integration with every update
-
-## 📊 Output Formats
-
-The tool supports multiple output formats, each optimized for different use cases:
-
-### HTML Report
-- Interactive and visually appealing
-- Clear visualization of metrics
-- Color-coded status indicators
-- Mobile-responsive design
-- Easy to share and view in browsers
-
-### JSON Format
-- Structured data format
-- Perfect for programmatic processing
-- Complete analysis details
-- Easy to parse and integrate
-- Ideal for automation workflows
-
-### CSV Format
-- Tabular data representation
-- Easy to import into spreadsheets
-- Simple to analyze in tools like Excel
-- Good for data aggregation
-- Compatible with data analysis tools
 
 ## 🎯 Default Settings
 
@@ -559,92 +348,6 @@ tfq0seo comes with carefully tuned default settings for optimal SEO analysis:
 - **Log Files**: `~/.tfq0seo/tfq0seo.log`
 - **Cache Expiration**: 1 hour
 - **Log Rotation**: 10MB max file size, keeps 5 backups
-
-## 🔧 Troubleshooting & Known Issues
-
-### **Common Issues & Solutions**
-
-**1. CLI Module Not Found:**
-```bash
-# Error: No module named tfq0seo.__main__
-# Solution: Ensure you're in the correct directory and tfq0seo is installed
-pip install -e .  # For development installation
-```
-
-**2. Import Errors:**
-```bash
-# Error: Failed to import tfq0seo modules
-# Solution: Check Python path and installation
-python -c "import tfq0seo; print('✅ tfq0seo installed correctly')"
-```
-
-**3. Permission Errors (Linux/macOS):**
-```bash
-# Error: Permission denied
-# Solution: Make scripts executable
-chmod +x run_periodic_tests.sh
-```
-
-**4. Network Timeouts:**
-```bash
-# Error: Connection timeout
-# Solution: Check internet connection or increase timeout values
-tfq0seo analyze https://example.com --timeout 30
-```
-
-### **Performance Optimization Tips**
-
-**For Large Sites:**
-```bash
-# Optimize for large crawls
-tfq0seo crawl https://large-site.com \
-  --concurrent 10 \
-  --delay 1.0 \
-  --max-pages 1000 \
-  --exclude "/images/" "/downloads/"
-```
-
-**For Slow Sites:**
-```bash
-# Adjust for slow-responding sites
-tfq0seo crawl https://slow-site.com \
-  --concurrent 5 \
-  --delay 2.0 \
-  --timeout 30
-```
-
-### **Memory Management**
-
-**Monitor Memory Usage:**
-- **Small Crawls** (< 100 pages): ~50-100MB
-- **Medium Crawls** (100-1000 pages): ~100-500MB
-- **Large Crawls** (1000+ pages): ~500MB-2GB
-
-**Memory Optimization:**
-```bash
-# For memory-constrained environments
-tfq0seo crawl https://site.com \
-  --concurrent 5 \
-  --max-pages 500 \
-  --format csv  # Lighter than XLSX
-```
-
-### **Known Limitations**
-
-**JavaScript-Heavy Sites:**
-- ❌ **Issue**: Cannot render dynamic content
-- 🔧 **Workaround**: Use for static analysis only
-- 📋 **Future**: JavaScript rendering planned for v2.1
-
-**Authentication Required:**
-- ❌ **Issue**: No login support
-- 🔧 **Workaround**: Analyze public pages only
-- 📋 **Future**: Authentication support planned
-
-**Core Web Vitals:**
-- ❌ **Issue**: Missing performance metrics
-- 🔧 **Workaround**: Use Google PageSpeed Insights API separately
-- 📋 **Future**: Integration planned for v2.2
 
 ## 📋 Analysis Areas
 
@@ -706,78 +409,9 @@ tfq0seo crawl https://site.com \
   - Enhancement layers
   - Progressive loading
 
-## 🚀 Development Roadmap
-
-### **v2.1 (Planned - Q1 2025)**
-- 🔧 **JavaScript Rendering**: Selenium/Playwright integration for SPA support
-- 📊 **Core Web Vitals**: Performance metrics integration
-- 🔐 **Authentication Support**: Login-protected content analysis
-- 🎯 **Advanced Image Analysis**: Compression, format optimization, accessibility
-- 📱 **Mobile-First Analysis**: Enhanced mobile SEO features
-
-### **v2.2 (Planned - Q2 2025)**
-- 🤖 **AI-Powered Insights**: Machine learning for content recommendations
-- 🔍 **Competitor Intelligence**: Advanced competitive analysis features
-- 📈 **Historical Tracking**: Change detection and trend analysis
-- 🌐 **API Integration**: Google Search Console, Analytics, PageSpeed Insights
-- 🎨 **Custom Reporting**: Branded reports and custom templates
-
-### **v2.3 (Planned - Q3 2025)**
-- 🔄 **Real-time Monitoring**: Continuous site monitoring and alerts
-- 📊 **Advanced Analytics**: Predictive SEO insights and recommendations
-- 🌍 **International SEO**: Enhanced multi-language and geo-targeting features
-- 🔗 **Link Building Tools**: Opportunity identification and outreach features
-- 📱 **Mobile App**: Companion mobile app for on-the-go analysis
-
-### **Community Contributions Welcome!**
-
-We actively encourage community contributions:
 
 - 🐛 **Bug Reports**: Help us identify and fix issues
 - 💡 **Feature Requests**: Suggest new capabilities and improvements
-- 🔧 **Code Contributions**: Submit pull requests for enhancements
-- 📚 **Documentation**: Improve guides, examples, and tutorials
 - 🧪 **Testing**: Help expand our test coverage and scenarios
-
-**Contributing Guidelines:**
-```bash
-# Fork the repository
-git clone https://github.com/tfq0/tfq0seo.git
-cd tfq0seo
-
-# Create a feature branch
-git checkout -b feature/your-feature-name
-
-# Make your changes and test
-python test_tool_comprehensive.py
-
-# Submit a pull request
-git push origin feature/your-feature-name
-```
-
-## 📞 Support & Community
-
-### **Getting Help**
-- 📖 **Documentation**: Comprehensive guides and examples in this README
-- 🐛 **Issue Tracker**: [GitHub Issues](https://github.com/tfq0/tfq0seo/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/tfq0/tfq0seo/discussions)
-- 📧 **Email Support**: For enterprise and commercial inquiries
-
-### **Stay Updated**
-- ⭐ **Star the Repository**: Get notified of new releases
-- 👀 **Watch Releases**: Stay informed about updates and new features
-- 🐦 **Follow Updates**: Social media and blog announcements
-- 📰 **Newsletter**: Monthly updates on new features and best practices
-
-### **Enterprise Support**
-For organizations requiring:
-- 🏢 **Custom Integrations**: Tailored API integrations and workflows
-- 🎓 **Training & Onboarding**: Team training and best practices
-- 🔧 **Custom Development**: Specialized features and modifications
-- 📞 **Priority Support**: Dedicated support channels and SLAs
-
-Contact us for enterprise solutions and partnerships.
-
----
 
 **tfq0seo** - Empowering SEO professionals with open-source, extensible, and powerful analysis tools. 🚀
