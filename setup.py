@@ -1,88 +1,48 @@
 from setuptools import setup, find_packages
-import os
-from pathlib import Path
 
-# Get the directory containing setup.py
-here = Path(__file__).parent.resolve()
-
-# Read the README file
-try:
-    long_description = (here / "README.md").read_text(encoding="utf-8")
-except FileNotFoundError:
-    long_description = "Modern SEO analysis and optimization toolkit with advanced reporting"
-
-# Read requirements
-try:
-    requirements = [
-        line.strip()
-        for line in (here / "requirements.txt").read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.startswith("#")
-    ]
-except FileNotFoundError:
-    requirements = [
-        # Core dependencies
-        "requests>=2.31.0",
-        "beautifulsoup4>=4.12.2",
-        "nltk>=3.8.1",
-        "readability>=0.3.1",
-        "certifi>=2024.2.2",
-        "textblob>=0.17.1",
-        "pyyaml>=6.0.1",
-        "html5lib>=1.1",
-        "lxml>=4.9.3",
-        # Enhanced crawling and async support
-        "aiohttp>=3.9.0",
-        "asyncio-throttle>=1.0.2",
-        # URL and domain analysis
-        "tldextract>=5.1.0",
-        # Advanced data processing and export
-        "pandas>=2.0.0",
-        "openpyxl>=3.1.0",
-        # Image processing
-        "Pillow>=10.0.0",
-        # CLI and UI
-        "colorama>=0.4.6",
-        "rich>=13.7.0",
-        "click>=8.1.7",
-        # Testing and development
-        "pytest>=8.0.0",
-        "pytest-asyncio>=0.21.0",
-        "setuptools>=69.0.3"
-    ]
+with open("README.md", "r", encoding="utf-8") as fh:
+    long_description = fh.read()
 
 setup(
     name="tfq0seo",
-    version="2.0.0",
+    version="2.1.0",
     author="tfq0",
-    description="Enhanced SEO analysis and site crawling toolkit with professional capabilities",
+    author_email="tfq0@example.com",
+    description="Professional SEO Analysis Toolkit - Open source alternative to Screaming Frog",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/tfq0/tfq0seo",
-    project_urls={
-        "Bug Tracker": "https://github.com/tfq0/tfq0seo/issues",
-        "Source Code": "https://github.com/tfq0/tfq0seo",
-    },
     packages=find_packages(),
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
-        "Intended Audience :: Information Technology",
         "Topic :: Internet :: WWW/HTTP :: Site Management",
-        "Topic :: Internet :: WWW/HTTP :: Site Management :: Link Checking",
-        "Topic :: Text Processing :: Markup :: HTML",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
-        "Environment :: Console",
-        "Operating System :: OS Independent",
     ],
-    keywords="seo, analysis, optimization, web, content, meta tags, technical seo, reporting, analytics, crawling, spider, screaming frog, site audit",
-    python_requires=">=3.7",
-    install_requires=requirements,
+    python_requires=">=3.8",
+    install_requires=[
+        "aiohttp>=3.8.0",
+        "beautifulsoup4>=4.11.0",
+        "lxml>=4.9.0",
+        "requests>=2.28.0",
+        "rich>=12.6.0",
+        "click>=8.1.0",
+        "pandas>=1.5.0",
+        "openpyxl>=3.0.0",
+        "jinja2>=3.1.0",
+        "validators>=0.20.0",
+        "urllib3>=1.26.0",
+        "aiofiles>=23.0.0",
+        "textstat>=0.7.3",
+        "jsonschema>=4.17.0",
+        "httpx>=0.24.0",
+        "user-agents>=2.2.0",
+    ],
     entry_points={
         "console_scripts": [
             "tfq0seo=tfq0seo.cli:main",
@@ -90,10 +50,6 @@ setup(
     },
     include_package_data=True,
     package_data={
-        "tfq0seo": [
-            "templates/*.html",
-            "static/css/*.css",
-            "static/js/*.js",
-        ],
+        'tfq0seo': ['templates/*.html', 'templates/*.css'],
     },
 ) 
