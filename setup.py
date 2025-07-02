@@ -9,7 +9,7 @@ here = Path(__file__).parent.resolve()
 try:
     long_description = (here / "README.md").read_text(encoding="utf-8")
 except FileNotFoundError:
-    long_description = "Modern SEO analysis and optimization toolkit with advanced reporting"
+    long_description = "Modern SEO analysis and optimization toolkit with enhanced accuracy, reliability, and professional reporting capabilities"
 
 # Read requirements
 try:
@@ -52,24 +52,28 @@ except FileNotFoundError:
 
 setup(
     name="tfq0seo",
-    version="2.0.0",
+    version="2.1.0",
     author="tfq0",
-    description="Enhanced SEO analysis and site crawling toolkit with professional capabilities",
+    description="Professional SEO analysis toolkit with enhanced accuracy, reliable scoring algorithms, and comprehensive site auditing capabilities",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/tfq0/tfq0seo",
     project_urls={
         "Bug Tracker": "https://github.com/tfq0/tfq0seo/issues",
         "Source Code": "https://github.com/tfq0/tfq0seo",
+        "Documentation": "https://github.com/tfq0/tfq0seo#readme",
+        "Changelog": "https://github.com/tfq0/tfq0seo/releases",
     },
     packages=find_packages(),
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
         "Intended Audience :: Information Technology",
+        "Intended Audience :: System Administrators",
         "Topic :: Internet :: WWW/HTTP :: Site Management",
         "Topic :: Internet :: WWW/HTTP :: Site Management :: Link Checking",
         "Topic :: Text Processing :: Markup :: HTML",
+        "Topic :: Software Development :: Quality Assurance",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.7",
@@ -77,10 +81,12 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "Environment :: Console",
         "Operating System :: OS Independent",
+        "Natural Language :: English",
     ],
-    keywords="seo, analysis, optimization, web, content, meta tags, technical seo, reporting, analytics, crawling, spider, screaming frog, site audit",
+    keywords="seo, analysis, optimization, web, content, meta tags, technical seo, reporting, analytics, crawling, spider, screaming frog, site audit, accuracy, reliability, professional, validation",
     python_requires=">=3.7",
     install_requires=requirements,
     entry_points={
@@ -94,6 +100,19 @@ setup(
             "templates/*.html",
             "static/css/*.css",
             "static/js/*.js",
+        ],
+    },
+    extras_require={
+        "dev": [
+            "pytest>=8.0.0",
+            "pytest-asyncio>=0.21.0",
+            "pytest-cov>=4.0.0",
+            "black>=23.0.0",
+            "flake8>=6.0.0",
+        ],
+        "docs": [
+            "sphinx>=7.0.0",
+            "sphinx-rtd-theme>=1.3.0",
         ],
     },
 ) 

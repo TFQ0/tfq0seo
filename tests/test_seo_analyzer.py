@@ -842,5 +842,282 @@ async def test_extract_seo_data(analyzer):
     # Test that word count is now meaningful (not inflated by JS/CSS)
     assert result.word_count > 0
 
+def test_accuracy_validation_system(analyzer):
+    """Test the accuracy validation system to ensure reliable results."""
+    
+    # Test data validation
+    invalid_report = {
+        'analysis_modules': {
+            'basic_seo': {'title': 'A' * 300},  # Unrealistic title length
+            'content': {'basic_metrics': {'word_count': -100}}  # Invalid word count
+        }
+    }
+    
+    assert not analyzer._validate_analysis_data(invalid_report)
+    
+    # Test valid data
+    valid_report = {
+        'analysis_modules': {
+            'basic_seo': {'title': 'Valid Title', 'meta_description': 'Valid description'},
+            'content': {'basic_metrics': {'word_count': 500}},
+            'modern_seo': {'security': {'https': True}}
+        }
+    }
+    
+    assert analyzer._validate_analysis_data(valid_report)
+
+def test_enhanced_seo_scoring_accuracy(analyzer):
+    """Test that enhanced SEO scoring provides more accurate results."""
+    
+    # Test with comprehensive good SEO
+    excellent_report = {
+        'analysis_modules': {
+            'modern_seo': {
+                'security': {
+                    'https': True,
+                    'ssl_certificate_valid': True,
+                    'hsts': True,
+                    'xss_protection': True,
+                    'content_security': True
+                },
+                'structured_data': {
+                    'schema_types': ['Organization', 'WebPage', 'Article', 'BreadcrumbList', 'Person']
+                },
+                'mobile_friendly': {
+                    'responsive_viewport': True,
+                    'viewport_meta': True,
+                    'touch_elements_spacing': {'potentially_small': 0, 'very_small': 0}
+                },
+                'html_structure': {
+                    'optimizations': {
+                        'image_optimization': {'missing_alt': 0, 'total_images': 10}
+                    }
+                }
+            },
+            'basic_seo': {
+                'title': 'Perfect SEO Title Length For Testing Here',  # 45 chars - optimal
+                'meta_description': 'This is a perfect meta description that is between 120 and 160 characters long for optimal SEO performance, click rates, and user engagement.',  # 140 chars - optimal
+                'headings': {'h1': ['Single Perfect H1 Tag']}
+            },
+            'content': {
+                'basic_metrics': {'word_count': 2500},  # Rich content
+                'readability': {'flesch_reading_ease': 70},  # Perfect readability
+                'keyword_analysis': {
+                    'total_meaningful_words': 2500,
+                    'keyword_stuffing_detected': [],
+                    'keyword_diversity': 0.4  # Good diversity
+                },
+                'content_structure': {
+                    'content_sections': 8,
+                    'avg_paragraph_length': 75
+                }
+            },
+            'advanced_seo': {
+                'url_analysis': {
+                    'is_seo_friendly': True,
+                    'seo_score': 95
+                }
+            }
+        }
+    }
+    
+    excellent_score = analyzer._calculate_seo_score(excellent_report)
+    assert excellent_score >= 85, f"Excellent SEO should score very high, got {excellent_score}"
+    
+    # Test with poor SEO but not completely broken
+    poor_report = {
+        'analysis_modules': {
+            'modern_seo': {
+                'security': {'https': False},
+                'structured_data': {'schema_types': []},
+                'mobile_friendly': {'responsive_viewport': False, 'viewport_meta': False},
+                'html_structure': {'optimizations': {'image_optimization': {'missing_alt': 15, 'total_images': 20}}}
+            },
+            'basic_seo': {
+                'title': 'Title',  # Too short
+                'meta_description': 'Short desc',  # Too short
+                'headings': {'h1': []}
+            },
+            'content': {
+                'basic_metrics': {'word_count': 80},  # Very thin
+                'readability': {'flesch_reading_ease': 20},  # Poor readability
+                'keyword_analysis': {
+                    'total_meaningful_words': 80,
+                    'keyword_stuffing_detected': [
+                        {'keyword': 'test', 'density': 8.5, 'severity': 'high'},
+                        {'keyword': 'seo', 'density': 6.2, 'severity': 'high'}
+                    ]
+                },
+                'content_structure': {'content_sections': 1, 'avg_paragraph_length': 200}
+            },
+            'advanced_seo': {
+                'url_analysis': {'is_seo_friendly': False, 'seo_score': 15}
+            }
+        }
+    }
+    
+    poor_score = analyzer._calculate_seo_score(poor_report)
+    assert poor_score <= 25, f"Poor SEO should score low, got {poor_score}"
+    
+    # Ensure significant score difference for accuracy
+    assert excellent_score - poor_score >= 60, "Score difference should be substantial for accuracy"
+
+def test_keyword_analysis_accuracy_improvements(content_analyzer):
+    """Test improved keyword analysis accuracy."""
+    
+    # Test content with technical terms that should be filtered
+    technical_content = """
+    function initializeApp() {
+        var config = {
+            apiUrl: 'https://api.example.com',
+            timeout: 5000,
+            retries: 3
+        };
+        return config;
+    }
+    
+    This is actual meaningful content about software development best practices.
+    Writing clean code involves following established patterns and principles.
+    Good documentation helps maintainability and collaboration among developers.
+    """
+    
+    keyword_analysis = content_analyzer._analyze_keywords(technical_content)
+    
+    # Verify technical terms are filtered out
+    top_keywords = [kw['keyword'] for kw in keyword_analysis['top_keywords']]
+    technical_terms = ['function', 'var', 'config', 'return', 'https', 'api', 'timeout']
+    
+    for term in technical_terms:
+        assert term not in top_keywords, f"Technical term '{term}' should be filtered out"
+    
+    # Verify meaningful words are preserved
+    meaningful_terms = ['meaningful', 'content', 'software', 'development', 'practices']
+    found_meaningful = [term for term in meaningful_terms if term in top_keywords]
+    assert len(found_meaningful) > 0, "Should find meaningful content words"
+    
+    # Test keyword stuffing detection accuracy
+    stuffed_content = """
+    SEO optimization is crucial for SEO success. Our SEO experts provide SEO services 
+    that improve SEO rankings through SEO best practices. SEO analysis shows SEO 
+    improvements when proper SEO techniques are implemented with SEO tools.
+    """
+    
+    stuffing_analysis = content_analyzer._analyze_keywords(stuffed_content)
+    stuffing_detected = stuffing_analysis['keyword_stuffing_detected']
+    
+    assert len(stuffing_detected) > 0, "Should detect keyword stuffing"
+    
+    # Check for 'seo' specifically
+    seo_stuffing = next((item for item in stuffing_detected if item['keyword'] == 'seo'), None)
+    assert seo_stuffing is not None, "Should detect 'seo' as stuffed keyword"
+    assert seo_stuffing['density'] > 10, "SEO density should be very high"
+    assert seo_stuffing.get('severity') == 'high', "Should mark as high severity"
+
+def test_content_word_count_consistency(analyzer, content_analyzer):
+    """Test that word counting is consistent between main app and content analyzer."""
+    
+    test_content = """
+    This is a test content with exactly twenty meaningful words that should be counted consistently.
+    Technical terms like px, var, function should be filtered out properly.
+    """
+    
+    # Test main app word counting
+    main_app_count = analyzer._count_meaningful_words(test_content)
+    
+    # Test content analyzer word counting
+    content_analyzer_count = content_analyzer._count_words(test_content)
+    
+    # Should be similar (within reasonable range due to different filtering approaches)
+    assert abs(main_app_count - content_analyzer_count) <= 3, \
+        f"Word counts should be consistent: main={main_app_count}, content={content_analyzer_count}"
+
+def test_readability_calculation_accuracy(content_analyzer):
+    """Test improved readability calculation accuracy."""
+    
+    # Test with empty content
+    empty_analysis = content_analyzer._analyze_readability("")
+    assert empty_analysis['flesch_reading_ease'] == 0
+    assert 'readability_issues' in empty_analysis
+    
+    # Test with very simple content
+    simple_content = "The cat sat on the mat. It was a nice day."
+    simple_analysis = content_analyzer._analyze_readability(simple_content)
+    
+    assert 0 <= simple_analysis['flesch_reading_ease'] <= 100
+    assert simple_analysis['avg_sentence_length'] > 0
+    assert simple_analysis['avg_syllables_per_word'] > 0
+    
+    # Test with complex content
+    complex_content = """
+    The implementation of sophisticated algorithmic methodologies necessitates 
+    comprehensive understanding of computational complexity theoretical frameworks 
+    and their practical applications in contemporary software engineering paradigms.
+    """
+    complex_analysis = content_analyzer._analyze_readability(complex_content)
+    
+    # Complex content should have lower readability score
+    assert complex_analysis['flesch_reading_ease'] < simple_analysis['flesch_reading_ease']
+    assert len(complex_analysis.get('readability_issues', [])) > 0
+
+def test_real_time_insights_accuracy_warnings(analyzer):
+    """Test that real-time insights include accuracy warnings for suspicious data."""
+    
+    # Test with suspicious data
+    suspicious_modules = {
+        'basic_seo': {
+            'title': 'A' * 250,  # Suspiciously long title
+            'meta_description': 'Valid description'
+        },
+        'content': {
+            'basic_metrics': {'word_count': 15000},  # Suspiciously high word count
+            'readability': {'flesch_reading_ease': 150},  # Invalid flesch score
+            'keyword_analysis': {'top_keywords': [], 'keyword_stuffing_detected': []}
+        },
+        'modern_seo': {
+            'security': {'https': True},
+            'structured_data': {'schema_types': []},
+            'mobile_friendly': {'viewport_meta': True}
+        }
+    }
+    
+    insights = analyzer._generate_real_time_insights(suspicious_modules)
+    
+    # Should have accuracy warnings
+    assert 'accuracy_warnings' in insights
+    assert len(insights['accuracy_warnings']) > 0
+    
+    # Check specific warnings
+    warnings = insights['accuracy_warnings']
+    assert any('suspicious' in warning.lower() or 'high' in warning.lower() for warning in warnings)
+
+def test_enhanced_https_ssl_validation():
+    """Test enhanced HTTPS/SSL validation accuracy."""
+    from tfq0seo.analyzers.modern_seo_analyzer import ModernSEOAnalyzer
+    
+    config = {'crawling': {'user_agent': 'TFQ0SEO-Test/2.0'}}
+    analyzer = ModernSEOAnalyzer(config)
+    
+    # Test HSTS analysis
+    hsts_header = "max-age=31536000; includeSubDomains; preload"
+    hsts_analysis = analyzer._analyze_hsts(hsts_header)
+    
+    assert hsts_analysis['present'] == True
+    assert hsts_analysis['max_age'] == 31536000
+    assert hsts_analysis['max_age_sufficient'] == True
+    assert hsts_analysis['include_subdomains'] == True
+    assert hsts_analysis['preload'] == True
+    
+    # Test security score calculation
+    security_headers = {
+        'strict_transport_security': {'present': True},
+        'x_frame_options': {'present': True},
+        'x_content_type_options': {'present': True},
+        'x_xss_protection': {'present': True},
+        'content_security_policy': {'present': True}
+    }
+    
+    score = analyzer._calculate_security_score(True, True, security_headers)
+    assert score >= 90, f"Full security implementation should score high, got {score}"
+
 if __name__ == '__main__':
     pytest.main([__file__]) 

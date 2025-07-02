@@ -57,9 +57,33 @@ class ContentAnalyzer:
         return self._evaluate_content(analysis)
 
     def _count_words(self, text: str) -> int:
-        """Count meaningful words in text"""
-        words = word_tokenize(text.lower())
-        return len([w for w in words if w.isalnum()])
+        """Count meaningful words in text with improved accuracy."""
+        if not text:
+            return 0
+        
+        # Use the same logic as the main app for consistency
+        import re
+        
+        # Clean the text first
+        cleaned_text = self._clean_text_for_analysis(text)
+        
+        # Split into words and filter
+        words = cleaned_text.split()
+        meaningful_words = []
+        
+        for word in words:
+            # Remove punctuation and convert to lowercase
+            clean_word = re.sub(r'[^\w]', '', word.lower())
+            
+            # Skip if empty, too short, or looks like code/CSS/technical terms
+            if (len(clean_word) >= 2 and 
+                not clean_word.isdigit() and 
+                not re.match(r'^(px|em|rem|vh|vw|deg|ms|s)$', clean_word) and
+                not re.match(r'^(var|function|return|if|else|for|while|class|id)$', clean_word) and
+                clean_word not in self.stop_words):
+                meaningful_words.append(clean_word)
+        
+        return len(meaningful_words)
 
     def _count_paragraphs(self, text: str) -> int:
         """Count paragraphs in text"""
@@ -67,108 +91,275 @@ class ContentAnalyzer:
         return len(paragraphs)
 
     def _analyze_readability(self, text: str) -> Dict:
-        """Analyze text readability"""
+        """Analyze text readability with improved accuracy."""
+        if not text or len(text.strip()) == 0:
+            return {
+                'flesch_reading_ease': 0,
+                'sentiment': {'polarity': 0, 'subjectivity': 0},
+                'avg_word_length': 0,
+                'readability_issues': ['No content to analyze']
+            }
+        
         blob = TextBlob(text)
         sentences = sent_tokenize(text)
         words = word_tokenize(text)
         
-        # Calculate various readability metrics
+        # Calculate various readability metrics with validation
         word_count = len([w for w in words if w.isalnum()])
         sentence_count = len(sentences)
-        syllable_count = sum(self._count_syllables(word) for word in words if word.isalnum())
         
-        # Flesch Reading Ease
-        if sentence_count > 0:
-            flesch = 206.835 - 1.015 * (word_count / sentence_count) - 84.6 * (syllable_count / word_count)
-        else:
-            flesch = 0
-            
+        if sentence_count == 0 or word_count == 0:
+            return {
+                'flesch_reading_ease': 0,
+                'sentiment': {'polarity': 0, 'subjectivity': 0},
+                'avg_word_length': 0,
+                'readability_issues': ['Insufficient content for analysis']
+            }
+        
+        # Improved syllable counting for accuracy
+        syllable_count = sum(self._count_syllables_accurate(word) for word in words if word.isalnum())
+        
+        # Flesch Reading Ease with validation
+        avg_sentence_length = word_count / sentence_count
+        avg_syllables_per_word = syllable_count / word_count
+        
+        flesch = 206.835 - (1.015 * avg_sentence_length) - (84.6 * avg_syllables_per_word)
+        
+        # Validate flesch score
+        flesch = max(0, min(100, flesch))
+        
+        # Identify readability issues
+        readability_issues = []
+        if avg_sentence_length > 25:
+            readability_issues.append("Sentences are too long")
+        if avg_syllables_per_word > 2.0:
+            readability_issues.append("Words are too complex")
+        if flesch < 30:
+            readability_issues.append("Text is very difficult to read")
+        
         return {
             'flesch_reading_ease': flesch,
+            'avg_sentence_length': avg_sentence_length,
+            'avg_syllables_per_word': avg_syllables_per_word,
             'sentiment': {
                 'polarity': blob.sentiment.polarity,
                 'subjectivity': blob.sentiment.subjectivity
             },
-            'avg_word_length': sum(len(word) for word in words) / len(words) if words else 0
+            'avg_word_length': sum(len(word) for word in words) / len(words) if words else 0,
+            'readability_issues': readability_issues
         }
 
-    def _count_syllables(self, word: str) -> int:
-        """Count syllables in a word"""
-        word = word.lower()
+    def _count_syllables_accurate(self, word: str) -> int:
+        """Count syllables in a word with improved accuracy."""
+        word = word.lower().strip()
+        if not word:
+            return 0
+        
+        # Handle common exceptions first
+        exceptions = {
+            'the': 1, 'a': 1, 'an': 1, 'and': 1, 'or': 1, 'but': 1, 'in': 1, 'on': 1, 'at': 1, 'to': 1, 'for': 1, 'of': 1, 'with': 1, 'by': 1,
+            'some': 1, 'time': 1, 'use': 1, 'page': 1, 'make': 1, 'here': 1, 'more': 1, 'code': 1, 'like': 1, 'site': 1
+        }
+        
+        if word in exceptions:
+            return exceptions[word]
+        
         count = 0
         vowels = 'aeiouy'
-        if word[0] in vowels:
-            count += 1
-        for index in range(1, len(word)):
-            if word[index] in vowels and word[index - 1] not in vowels:
+        prev_was_vowel = False
+        
+        for i, char in enumerate(word):
+            is_vowel = char in vowels
+            if is_vowel and not prev_was_vowel:
                 count += 1
-        if word.endswith('e'):
+            prev_was_vowel = is_vowel
+        
+        # Handle silent e
+        if word.endswith('e') and count > 1:
             count -= 1
-        if count == 0:
+        
+        # Handle special cases
+        if word.endswith('le') and len(word) > 2 and word[-3] not in vowels:
             count += 1
-        return count
+        
+        # Ensure at least one syllable
+        return max(1, count)
 
     def _analyze_keywords(self, text: str, target_keyword: str = None) -> Dict:
-        """Analyze keyword usage and density"""
+        """Analyze keyword usage and density with improved accuracy."""
+        if not text or len(text.strip()) == 0:
+            return {
+                'top_keywords': [],
+                'top_phrases': {'bigrams': [], 'trigrams': []},
+                'keyword_stuffing_detected': [],
+                'total_meaningful_words': 0,
+                'keyword_analysis_issues': ['No content to analyze']
+            }
+        
         # Clean text first - remove technical terms and code
         cleaned_text = self._clean_text_for_analysis(text)
         
         words = word_tokenize(cleaned_text.lower())
         words = [word for word in words if word.isalnum() and word not in self.stop_words and len(word) >= 2]
         
-        # Filter out technical/code terms
+        # Enhanced technical terms filtering
         technical_terms = {
             'var', 'function', 'return', 'if', 'else', 'for', 'while', 'class', 'id',
             'px', 'em', 'rem', 'vh', 'vw', 'deg', 'ms', 'transform', 'translate3d',
             'webkit', 'moz', 'opacity', 'rgba', 'href', 'src', 'alt', 'title',
-            'div', 'span', 'img', 'link', 'script', 'style', 'html', 'body', 'head'
+            'div', 'span', 'img', 'link', 'script', 'style', 'html', 'body', 'head',
+            'css', 'js', 'javascript', 'jquery', 'api', 'url', 'http', 'https',
+            'www', 'com', 'org', 'net', 'edu', 'gov'
         }
         
+        # Filter out technical terms and common web terms
         words = [word for word in words if word not in technical_terms]
         
         # Get keyword frequency
         word_freq = Counter(words)
         total_words = len(words)
         
-        # Analyze keyword phrases (2-3 words)
+        if total_words == 0:
+            return {
+                'top_keywords': [],
+                'top_phrases': {'bigrams': [], 'trigrams': []},
+                'keyword_stuffing_detected': [],
+                'total_meaningful_words': 0,
+                'keyword_analysis_issues': ['No meaningful words found after filtering']
+            }
+        
+        # Analyze keyword phrases (2-3 words) with filtering
         bigrams = list(ngrams(words, 2))
         trigrams = list(ngrams(words, 3))
         
-        # Detect potential keyword stuffing
+        # Enhanced keyword stuffing detection with better thresholds
         keyword_stuffing_candidates = []
+        analysis_issues = []
+        
         for word, count in word_freq.most_common(20):
-            density = (count / total_words) * 100 if total_words > 0 else 0
-            if density > 3.0 and count > 5:  # More than 3% density and appears more than 5 times
+            density = (count / total_words) * 100
+            
+            # Adjust thresholds based on content length
+            if total_words < 100:
+                threshold = 5.0  # Higher threshold for short content
+            elif total_words < 300:
+                threshold = 4.0
+            else:
+                threshold = 3.0
+            
+            if density > threshold and count > max(3, total_words // 50):
                 keyword_stuffing_candidates.append({
                     'keyword': word,
                     'count': count,
-                    'density': density
+                    'density': density,
+                    'severity': 'high' if density > threshold * 1.5 else 'medium'
                 })
+        
+        # Check for overall keyword stuffing patterns
+        if len(keyword_stuffing_candidates) > 5:
+            analysis_issues.append("Multiple keywords show stuffing patterns")
         
         keyword_analysis = {
             'top_keywords': [
                 {
                     'keyword': kw,
                     'count': count,
-                    'density': (count / total_words) * 100 if total_words > 0 else 0
+                    'density': (count / total_words) * 100,
+                    'relevance_score': self._calculate_keyword_relevance(kw, text)
                 }
                 for kw, count in word_freq.most_common(10)
             ],
             'top_phrases': {
-                'bigrams': Counter(bigrams).most_common(5),
-                'trigrams': Counter(trigrams).most_common(5)
+                'bigrams': [
+                    {
+                        'phrase': ' '.join(phrase),
+                        'count': count,
+                        'density': (count / len(bigrams)) * 100 if bigrams else 0
+                    }
+                    for phrase, count in Counter(bigrams).most_common(5)
+                ],
+                'trigrams': [
+                    {
+                        'phrase': ' '.join(phrase),
+                        'count': count,
+                        'density': (count / len(trigrams)) * 100 if trigrams else 0
+                    }
+                    for phrase, count in Counter(trigrams).most_common(5)
+                ]
             },
             'keyword_stuffing_detected': keyword_stuffing_candidates,
-            'total_meaningful_words': total_words
+            'total_meaningful_words': total_words,
+            'keyword_analysis_issues': analysis_issues,
+            'keyword_diversity': len(word_freq) / total_words if total_words > 0 else 0
         }
         
+        # Target keyword analysis with improved accuracy
         if target_keyword:
-            keyword_analysis['target_keyword'] = {
-                'count': word_freq.get(target_keyword.lower(), 0),
-                'density': (word_freq.get(target_keyword.lower(), 0) / total_words) * 100 if total_words > 0 else 0
-            }
+            target_variations = self._get_keyword_variations(target_keyword.lower())
+            target_count = sum(word_freq.get(variation, 0) for variation in target_variations)
+            target_density = (target_count / total_words) * 100 if total_words > 0 else 0
             
+            keyword_analysis['target_keyword'] = {
+                'keyword': target_keyword,
+                'count': target_count,
+                'density': target_density,
+                'variations_found': [var for var in target_variations if word_freq.get(var, 0) > 0],
+                'optimization_status': self._assess_keyword_optimization(target_density, total_words)
+            }
+        
         return keyword_analysis
+
+    def _get_keyword_variations(self, keyword: str) -> List[str]:
+        """Get variations of a keyword for more accurate analysis."""
+        variations = [keyword]
+        
+        # Add plural/singular forms
+        if keyword.endswith('s'):
+            variations.append(keyword[:-1])
+        else:
+            variations.append(keyword + 's')
+        
+        # Add common variations
+        if keyword.endswith('ing'):
+            variations.append(keyword[:-3])
+        elif keyword.endswith('ed'):
+            variations.append(keyword[:-2])
+        
+        return variations
+
+    def _calculate_keyword_relevance(self, keyword: str, text: str) -> float:
+        """Calculate keyword relevance score based on context."""
+        # Simple relevance score based on keyword position and context
+        text_lower = text.lower()
+        keyword_positions = []
+        
+        start = 0
+        while True:
+            pos = text_lower.find(keyword, start)
+            if pos == -1:
+                break
+            keyword_positions.append(pos)
+            start = pos + 1
+        
+        if not keyword_positions:
+            return 0.0
+        
+        # Higher score for keywords appearing early in text
+        relevance = sum(1 / (1 + pos / len(text_lower)) for pos in keyword_positions[:5])
+        return min(100.0, relevance * 20)
+
+    def _assess_keyword_optimization(self, density: float, total_words: int) -> str:
+        """Assess keyword optimization status."""
+        if density == 0:
+            return "not_optimized"
+        elif density < 0.5:
+            return "under_optimized"
+        elif density <= 2.5:
+            return "well_optimized"
+        elif density <= 4.0:
+            return "over_optimized"
+        else:
+            return "keyword_stuffing"
 
     def _clean_text_for_analysis(self, text: str) -> str:
         """Clean text for meaningful content analysis."""

@@ -291,86 +291,197 @@ class SEOAnalyzerApp:
             }
 
     def _generate_real_time_insights(self, analysis_modules: Dict) -> Dict:
-        """Generate real-time insights based on actual analysis results."""
+        """Generate real-time insights based on actual analysis results with improved accuracy."""
         insights = {
             'critical_issues': [],
             'opportunities': [],
             'strengths': [],
-            'recommendations': []
+            'recommendations': [],
+            'accuracy_warnings': []
         }
         
-        # Analyze HTTPS/Security
+        # Validate data consistency first
+        consistency_issues = self._validate_module_consistency(analysis_modules)
+        if consistency_issues:
+            insights['accuracy_warnings'].extend(consistency_issues)
+        
+        # Analyze HTTPS/Security with enhanced validation
         security = analysis_modules.get('modern_seo', {}).get('security', {})
         if not security.get('https'):
             insights['critical_issues'].append("Site is not using HTTPS - major security and SEO issue")
             insights['recommendations'].append("Migrate to HTTPS immediately to improve security and search rankings")
         elif not security.get('ssl_certificate_valid'):
             insights['critical_issues'].append("SSL certificate is invalid or expired")
+            insights['recommendations'].append("Fix SSL certificate issues to ensure secure connections")
         else:
             insights['strengths'].append("Site properly uses HTTPS with valid SSL certificate")
         
-        # Analyze Content Quality
+        # Analyze Content Quality with enhanced validation
         content = analysis_modules.get('content', {})
         word_count = content.get('basic_metrics', {}).get('word_count', 0)
         
-        if word_count == 0:
-            insights['critical_issues'].append("No meaningful content detected - page may be JavaScript-heavy or have extraction issues")
-        elif word_count < 300:
-            insights['opportunities'].append(f"Content is thin ({word_count} words) - consider expanding to 300+ words")
-        elif word_count >= 1000:
-            insights['strengths'].append(f"Good content length ({word_count} words)")
+        # Cross-validate word count with other sources
+        if self._validate_word_count(word_count, analysis_modules):
+            if word_count == 0:
+                insights['critical_issues'].append("No meaningful content detected - page may be JavaScript-heavy or have extraction issues")
+                insights['recommendations'].append("Ensure content is accessible to crawlers and not hidden behind JavaScript")
+            elif word_count < 300:
+                insights['opportunities'].append(f"Content is thin ({word_count} words) - consider expanding to 300+ words")
+                insights['recommendations'].append("Add more comprehensive content to improve search visibility")
+            elif word_count >= 1000:
+                insights['strengths'].append(f"Good content length ({word_count} words)")
+        else:
+            insights['accuracy_warnings'].append("Word count may be inaccurate due to content extraction issues")
         
-        # Check for keyword stuffing
+        # Enhanced keyword stuffing detection with severity levels
         keyword_stuffing = content.get('keyword_analysis', {}).get('keyword_stuffing_detected', [])
         if keyword_stuffing:
-            insights['critical_issues'].append(f"Keyword stuffing detected: {', '.join([kw['keyword'] for kw in keyword_stuffing[:3]])}")
-            insights['recommendations'].append("Reduce keyword density and focus on natural language")
+            high_severity = [kw for kw in keyword_stuffing if kw.get('severity') == 'high']
+            if high_severity:
+                insights['critical_issues'].append(f"Severe keyword stuffing detected: {', '.join([kw['keyword'] for kw in high_severity[:3]])}")
+                insights['recommendations'].append("Immediately reduce keyword density and rewrite content naturally")
+            else:
+                insights['opportunities'].append(f"Mild keyword stuffing detected: {', '.join([kw['keyword'] for kw in keyword_stuffing[:3]])}")
+                insights['recommendations'].append("Review and reduce keyword density for better optimization")
         
-        # Analyze Technical SEO
+        # Enhanced Technical SEO Analysis
         basic_seo = analysis_modules.get('basic_seo', {})
         
-        # Title analysis
+        # Title analysis with accuracy validation
         title = basic_seo.get('title', '')
-        if not title:
-            insights['critical_issues'].append("Missing title tag")
-        elif len(title) > 60:
-            insights['opportunities'].append(f"Title tag too long ({len(title)} chars) - optimize to under 60 characters")
-        elif 30 <= len(title) <= 60:
-            insights['strengths'].append("Title tag length is optimal")
+        if self._validate_title(title, analysis_modules):
+            if not title:
+                insights['critical_issues'].append("Missing title tag")
+                insights['recommendations'].append("Add a descriptive title tag to improve search visibility")
+            elif len(title) > 60:
+                insights['opportunities'].append(f"Title tag too long ({len(title)} chars) - optimize to under 60 characters")
+                insights['recommendations'].append("Shorten title while maintaining descriptiveness")
+            elif len(title) < 30:
+                insights['opportunities'].append(f"Title tag too short ({len(title)} chars) - expand to 30-60 characters")
+                insights['recommendations'].append("Expand title to be more descriptive")
+            elif 30 <= len(title) <= 60:
+                insights['strengths'].append("Title tag length is optimal")
+        else:
+            insights['accuracy_warnings'].append("Title analysis may be inaccurate")
         
-        # Meta description analysis
+        # Meta description analysis with validation
         meta_desc = basic_seo.get('meta_description', '')
         if not meta_desc:
             insights['opportunities'].append("Missing meta description - add one to improve click-through rates")
+            insights['recommendations'].append("Write a compelling meta description between 120-160 characters")
         elif len(meta_desc) > 160:
             insights['opportunities'].append(f"Meta description too long ({len(meta_desc)} chars)")
+            insights['recommendations'].append("Shorten meta description to under 160 characters")
+        elif len(meta_desc) < 120:
+            insights['opportunities'].append(f"Meta description too short ({len(meta_desc)} chars)")
+            insights['recommendations'].append("Expand meta description to 120-160 characters")
         elif 120 <= len(meta_desc) <= 160:
             insights['strengths'].append("Meta description length is optimal")
         
-        # H1 analysis
+        # H1 analysis with enhanced validation
         h1_tags = basic_seo.get('headings', {}).get('h1', [])
         if not h1_tags:
             insights['opportunities'].append("Missing H1 tag - add one for better content structure")
+            insights['recommendations'].append("Add a single, descriptive H1 tag to the page")
         elif len(h1_tags) > 1:
             insights['opportunities'].append(f"Multiple H1 tags ({len(h1_tags)}) - use only one H1 per page")
+            insights['recommendations'].append("Consolidate to a single H1 tag and use H2-H6 for subheadings")
         else:
             insights['strengths'].append("Proper H1 tag structure")
         
-        # Mobile optimization
+        # Mobile optimization with comprehensive checks
         mobile = analysis_modules.get('modern_seo', {}).get('mobile_friendly', {})
         if not mobile.get('viewport_meta'):
             insights['critical_issues'].append("Missing viewport meta tag - critical for mobile optimization")
+            insights['recommendations'].append("Add viewport meta tag: <meta name='viewport' content='width=device-width, initial-scale=1'>")
         elif mobile.get('responsive_viewport'):
             insights['strengths'].append("Mobile-responsive viewport configured")
         
-        # Schema markup
+        # Schema markup analysis
         schema_count = len(analysis_modules.get('modern_seo', {}).get('structured_data', {}).get('schema_types', []))
         if schema_count == 0:
             insights['opportunities'].append("No structured data found - implement Schema.org markup for better search visibility")
+            insights['recommendations'].append("Add relevant structured data markup (Organization, WebPage, etc.)")
+        elif schema_count >= 3:
+            insights['strengths'].append(f"Comprehensive structured data implemented ({schema_count} schema types)")
         else:
             insights['strengths'].append(f"Structured data implemented ({schema_count} schema types)")
         
+        # Performance and UX checks
+        html_structure = analysis_modules.get('modern_seo', {}).get('html_structure', {})
+        image_opt = html_structure.get('optimizations', {}).get('image_optimization', {})
+        missing_alt = image_opt.get('missing_alt', 0)
+        
+        if missing_alt > 0:
+            insights['opportunities'].append(f"{missing_alt} images missing alt text - impacts accessibility and SEO")
+            insights['recommendations'].append("Add descriptive alt text to all images")
+        else:
+            insights['strengths'].append("All images have alt text")
+        
         return insights
+
+    def _validate_module_consistency(self, analysis_modules: Dict) -> List[str]:
+        """Validate consistency between different analysis modules."""
+        issues = []
+        
+        # Check if basic SEO and content analysis are consistent
+        basic_seo = analysis_modules.get('basic_seo', {})
+        content = analysis_modules.get('content', {})
+        
+        # Validate title consistency
+        title = basic_seo.get('title', '')
+        if title and len(title) > 200:
+            issues.append("Title length appears suspicious - may indicate parsing error")
+        
+        # Validate content metrics consistency
+        word_count = content.get('basic_metrics', {}).get('word_count', 0)
+        if word_count > 10000:
+            issues.append("Word count appears very high - may include navigation or boilerplate text")
+        
+        # Check readability score consistency
+        flesch_score = content.get('readability', {}).get('flesch_reading_ease', 0)
+        if flesch_score < 0 or flesch_score > 100:
+            issues.append("Readability score is out of normal range - calculation may be incorrect")
+        
+        # Validate keyword analysis
+        keyword_analysis = content.get('keyword_analysis', {})
+        top_keywords = keyword_analysis.get('top_keywords', [])
+        if len(top_keywords) == 0 and word_count > 100:
+            issues.append("No keywords found despite significant content - filtering may be too aggressive")
+        
+        return issues
+
+    def _validate_word_count(self, word_count: int, analysis_modules: Dict) -> bool:
+        """Validate word count accuracy."""
+        # Check if word count is reasonable
+        if word_count < 0 or word_count > 50000:
+            return False
+        
+        # Cross-check with other indicators
+        basic_seo = analysis_modules.get('basic_seo', {})
+        title = basic_seo.get('title', '')
+        meta_desc = basic_seo.get('meta_description', '')
+        
+        # If we have title and meta description but no content, something's wrong
+        if word_count == 0 and (title or meta_desc):
+            return False
+        
+        return True
+
+    def _validate_title(self, title: str, analysis_modules: Dict) -> bool:
+        """Validate title accuracy."""
+        if not title:
+            return True  # Missing title is a valid finding
+        
+        # Check for unrealistic title lengths
+        if len(title) > 200:
+            return False
+        
+        # Check if title contains only whitespace or special characters
+        if not title.strip() or len(title.strip()) < 2:
+            return False
+        
+        return True
 
     @handle_analysis_error
     async def crawl_and_analyze_site(self, start_url: str, crawl_config: CrawlConfig = None, 
@@ -1414,136 +1525,332 @@ class SEOAnalyzerApp:
         return combined
 
     def _calculate_seo_score(self, report: Dict) -> int:
-        """Calculate dynamic SEO score based on actual analysis results."""
+        """Calculate dynamic SEO score based on actual analysis results with improved accuracy."""
+        # Validate input data first
+        if not self._validate_analysis_data(report):
+            return 0
+        
         score = 0
-        max_score = 100
+        analysis_modules = report.get('analysis_modules', {})
         
-        # Technical SEO (35 points)
-        technical_score = 0
-        
-        # HTTPS check (8 points)
-        if report.get('analysis_modules', {}).get('modern_seo', {}).get('security', {}).get('https'):
-            technical_score += 8
-        
-        # Title tag (7 points)
-        title = report.get('analysis_modules', {}).get('basic_seo', {}).get('title', '')
-        if title and 30 <= len(title) <= 60:
-            technical_score += 7
-        elif title:
-            technical_score += 4
-        
-        # Meta description (7 points)
-        meta_desc = report.get('analysis_modules', {}).get('basic_seo', {}).get('meta_description', '')
-        if meta_desc and 120 <= len(meta_desc) <= 160:
-            technical_score += 7
-        elif meta_desc:
-            technical_score += 4
-        
-        # H1 tags (6 points)
-        h1_tags = report.get('analysis_modules', {}).get('basic_seo', {}).get('headings', {}).get('h1', [])
-        if len(h1_tags) == 1:
-            technical_score += 6
-        elif len(h1_tags) > 0:
-            technical_score += 3
-        
-        # URL structure (4 points)
-        url_analysis = report.get('analysis_modules', {}).get('advanced_seo', {}).get('url_analysis', {})
-        if url_analysis.get('is_seo_friendly'):
-            technical_score += 4
-        elif url_analysis.get('seo_score', 0) > 50:
-            technical_score += 2
-        
-        # Schema markup (3 points)
-        schema_count = len(report.get('analysis_modules', {}).get('modern_seo', {}).get('structured_data', {}).get('schema_types', []))
-        if schema_count > 0:
-            technical_score += min(3, schema_count)
-        
+        # Technical SEO (35 points) - More accurate scoring
+        technical_score = self._calculate_technical_score_accurate(analysis_modules)
         score += min(35, technical_score)
         
-        # Content Quality (35 points)
-        content_score = 0
-        content_analysis = report.get('analysis_modules', {}).get('content', {})
-        
-        # Word count (12 points)
-        word_count = content_analysis.get('basic_metrics', {}).get('word_count', 0)
-        if word_count >= 1000:
-            content_score += 12
-        elif word_count >= 500:
-            content_score += 9
-        elif word_count >= 300:
-            content_score += 6
-        elif word_count > 0:
-            content_score += 3
-        
-        # Readability (10 points)
-        flesch_score = content_analysis.get('readability', {}).get('flesch_reading_ease', 0)
-        if 60 <= flesch_score <= 80:
-            content_score += 10
-        elif 50 <= flesch_score <= 90:
-            content_score += 8
-        elif flesch_score > 0:
-            content_score += 4
-        
-        # Keyword optimization (8 points)
-        keyword_analysis = content_analysis.get('keyword_analysis', {})
-        if keyword_analysis.get('total_meaningful_words', 0) > 0:
-            content_score += 4
-            # Check for keyword stuffing (penalty)
-            if len(keyword_analysis.get('keyword_stuffing_detected', [])) == 0:
-                content_score += 4
-            else:
-                content_score -= 2  # Penalty for keyword stuffing
-        
-        # Content structure (5 points)
-        structure = content_analysis.get('content_structure', {})
-        if structure.get('content_sections', 0) > 2:
-            content_score += 3
-        if structure.get('avg_paragraph_length', 0) > 0:
-            content_score += 2
-        
+        # Content Quality (35 points) - Improved content assessment
+        content_score = self._calculate_content_score_accurate(analysis_modules)
         score += min(35, content_score)
         
-        # User Experience (20 points)
-        ux_score = 0
-        
-        # Mobile optimization (12 points)
-        mobile_analysis = report.get('analysis_modules', {}).get('modern_seo', {}).get('mobile_friendly', {})
-        if mobile_analysis.get('responsive_viewport'):
-            ux_score += 6
-        if mobile_analysis.get('viewport_meta'):
-            ux_score += 4
-        if mobile_analysis.get('touch_elements_spacing', {}).get('potentially_small', 0) == 0:
-            ux_score += 2
-        
-        # Performance indicators (8 points)
-        html_structure = report.get('analysis_modules', {}).get('modern_seo', {}).get('html_structure', {})
-        if html_structure.get('optimizations', {}).get('image_optimization', {}).get('missing_alt', 0) == 0:
-            ux_score += 8
-        
+        # User Experience (20 points) - Better UX evaluation
+        ux_score = self._calculate_ux_score_accurate(analysis_modules)
         score += min(20, ux_score)
         
-        # Security (10 points)
-        security_score = 0
-        security_analysis = report.get('analysis_modules', {}).get('modern_seo', {}).get('security', {})
-        
-        if security_analysis.get('https') and security_analysis.get('ssl_certificate_valid'):
-            security_score += 6
-        elif security_analysis.get('https'):
-            security_score += 4
-        
-        if security_analysis.get('hsts'):
-            security_score += 2
-        if security_analysis.get('xss_protection'):
-            security_score += 1
-        if security_analysis.get('content_security'):
-            security_score += 1
-        
+        # Security (10 points) - More comprehensive security check
+        security_score = self._calculate_security_score_accurate(analysis_modules)
         score += min(10, security_score)
         
-        # Ensure score is within bounds
-        final_score = max(0, min(100, score))
+        # Apply penalties for critical issues
+        penalties = self._calculate_score_penalties(analysis_modules)
+        score = max(0, score - penalties)
+        
+        # Apply bonuses for exceptional practices
+        bonuses = self._calculate_score_bonuses(analysis_modules)
+        score = min(100, score + bonuses)
+        
+        # Final validation and consistency check
+        final_score = self._validate_final_score(score, analysis_modules)
         
         return final_score
+
+    def _validate_analysis_data(self, report: Dict) -> bool:
+        """Validate analysis data for accuracy and completeness."""
+        if not report or 'analysis_modules' not in report:
+            return False
+        
+        analysis_modules = report['analysis_modules']
+        
+        # Check for required modules
+        required_modules = ['basic_seo', 'content', 'modern_seo']
+        for module in required_modules:
+            if module not in analysis_modules:
+                self.logger.warning(f"Missing required analysis module: {module}")
+                return False
+        
+        # Validate content analysis consistency
+        if not self._validate_content_consistency(analysis_modules):
+            return False
+        
+        return True
+
+    def _validate_content_consistency(self, analysis_modules: Dict) -> bool:
+        """Validate consistency between different content analyses."""
+        basic_seo = analysis_modules.get('basic_seo', {})
+        content = analysis_modules.get('content', {})
+        
+        # Check if title lengths are consistent
+        title = basic_seo.get('title', '')
+        if title and len(title) > 200:  # Unrealistic title length
+            self.logger.warning(f"Suspicious title length: {len(title)}")
+            return False
+        
+        # Check content metrics for reasonableness
+        word_count = content.get('basic_metrics', {}).get('word_count', 0)
+        if word_count < 0 or word_count > 50000:  # Unrealistic word count
+            self.logger.warning(f"Suspicious word count: {word_count}")
+            return False
+        
+        return True
+
+    def _calculate_technical_score_accurate(self, analysis_modules: Dict) -> int:
+        """Calculate technical SEO score with improved accuracy."""
+        score = 0
+        
+        # HTTPS check (8 points) - More comprehensive
+        security = analysis_modules.get('modern_seo', {}).get('security', {})
+        if security.get('https') and security.get('ssl_certificate_valid'):
+            score += 8
+        elif security.get('https'):
+            score += 5  # Partial credit for HTTPS without valid SSL
+        
+        # Title tag (7 points) - Better evaluation
+        title = analysis_modules.get('basic_seo', {}).get('title', '')
+        if title:
+            title_length = len(title)
+            if 30 <= title_length <= 60:
+                score += 7
+            elif 25 <= title_length <= 70:
+                score += 5  # Partial credit for close-to-optimal
+            elif title_length > 0:
+                score += 3  # Some credit for having a title
+        
+        # Meta description (7 points) - Improved assessment
+        meta_desc = analysis_modules.get('basic_seo', {}).get('meta_description', '')
+        if meta_desc:
+            desc_length = len(meta_desc)
+            if 120 <= desc_length <= 160:
+                score += 7
+            elif 100 <= desc_length <= 180:
+                score += 5  # Partial credit
+            elif desc_length > 0:
+                score += 3  # Some credit for having a description
+        
+        # H1 tags (6 points) - More nuanced evaluation
+        h1_tags = analysis_modules.get('basic_seo', {}).get('headings', {}).get('h1', [])
+        if len(h1_tags) == 1:
+            score += 6
+        elif len(h1_tags) == 0:
+            score += 0  # No H1 is bad
+        else:
+            score += 2  # Multiple H1s get minimal credit
+        
+        # URL structure (4 points) - Better assessment
+        url_analysis = analysis_modules.get('advanced_seo', {}).get('url_analysis', {})
+        if url_analysis.get('is_seo_friendly'):
+            score += 4
+        elif url_analysis.get('seo_score', 0) >= 70:
+            score += 3
+        elif url_analysis.get('seo_score', 0) >= 50:
+            score += 2
+        
+        # Schema markup (3 points) - More accurate evaluation
+        schema_types = analysis_modules.get('modern_seo', {}).get('structured_data', {}).get('schema_types', [])
+        schema_count = len(schema_types)
+        if schema_count >= 3:
+            score += 3
+        elif schema_count >= 1:
+            score += 2
+        
+        return score
+
+    def _calculate_content_score_accurate(self, analysis_modules: Dict) -> int:
+        """Calculate content quality score with improved accuracy."""
+        score = 0
+        content_analysis = analysis_modules.get('content', {})
+        
+        # Word count (12 points) - More nuanced scoring
+        word_count = content_analysis.get('basic_metrics', {}).get('word_count', 0)
+        if word_count >= 1500:
+            score += 12
+        elif word_count >= 1000:
+            score += 10
+        elif word_count >= 500:
+            score += 8
+        elif word_count >= 300:
+            score += 6
+        elif word_count >= 150:
+            score += 3
+        elif word_count > 0:
+            score += 1
+        
+        # Readability (10 points) - Better assessment
+        flesch_score = content_analysis.get('readability', {}).get('flesch_reading_ease', 0)
+        if 60 <= flesch_score <= 80:
+            score += 10
+        elif 50 <= flesch_score <= 90:
+            score += 8
+        elif 40 <= flesch_score <= 100:
+            score += 6
+        elif flesch_score > 0:
+            score += 3
+        
+        # Keyword optimization (8 points) - More sophisticated
+        keyword_analysis = content_analysis.get('keyword_analysis', {})
+        meaningful_words = keyword_analysis.get('total_meaningful_words', 0)
+        stuffing_detected = keyword_analysis.get('keyword_stuffing_detected', [])
+        
+        if meaningful_words > 0:
+            score += 4  # Base score for having content
+            
+            # Bonus for no keyword stuffing
+            if len(stuffing_detected) == 0:
+                score += 4
+            elif len(stuffing_detected) <= 2:
+                score += 2  # Mild stuffing
+            else:
+                score -= 2  # Heavy stuffing penalty
+        
+        # Content structure (5 points) - Better evaluation
+        structure = content_analysis.get('content_structure', {})
+        sections = structure.get('content_sections', 0)
+        avg_paragraph = structure.get('avg_paragraph_length', 0)
+        
+        if sections >= 4:
+            score += 3
+        elif sections >= 2:
+            score += 2
+        elif sections >= 1:
+            score += 1
+        
+        if 30 <= avg_paragraph <= 100:
+            score += 2
+        elif avg_paragraph > 0:
+            score += 1
+        
+        return score
+
+    def _calculate_ux_score_accurate(self, analysis_modules: Dict) -> int:
+        """Calculate user experience score with improved accuracy."""
+        score = 0
+        
+        # Mobile optimization (12 points) - More comprehensive
+        mobile_analysis = analysis_modules.get('modern_seo', {}).get('mobile_friendly', {})
+        if mobile_analysis.get('responsive_viewport'):
+            score += 6
+        elif mobile_analysis.get('viewport_meta'):
+            score += 3  # Partial credit
+        
+        touch_elements = mobile_analysis.get('touch_elements_spacing', {})
+        if touch_elements.get('potentially_small', 0) == 0:
+            score += 4
+        elif touch_elements.get('potentially_small', 0) <= 2:
+            score += 2  # Some small elements acceptable
+        
+        font_size = mobile_analysis.get('font_size', {})
+        if font_size.get('small_font_elements', 0) == 0:
+            score += 2
+        
+        # Performance indicators (8 points) - Better assessment
+        html_structure = analysis_modules.get('modern_seo', {}).get('html_structure', {})
+        image_opt = html_structure.get('optimizations', {}).get('image_optimization', {})
+        
+        missing_alt = image_opt.get('missing_alt', 0)
+        total_images = image_opt.get('total_images', 1)
+        
+        if missing_alt == 0 and total_images > 0:
+            score += 8
+        elif missing_alt <= total_images * 0.1:  # 10% or less missing
+            score += 6
+        elif missing_alt <= total_images * 0.3:  # 30% or less missing
+            score += 4
+        elif missing_alt <= total_images * 0.5:  # 50% or less missing
+            score += 2
+        
+        return score
+
+    def _calculate_security_score_accurate(self, analysis_modules: Dict) -> int:
+        """Calculate security score with improved accuracy."""
+        score = 0
+        security_analysis = analysis_modules.get('modern_seo', {}).get('security', {})
+        
+        # HTTPS and SSL (6 points) - More detailed assessment
+        if security_analysis.get('https') and security_analysis.get('ssl_certificate_valid'):
+            score += 6
+        elif security_analysis.get('https'):
+            score += 4  # HTTPS but SSL issues
+        elif security_analysis.get('redirected_to_https'):
+            score += 3  # Redirects to HTTPS
+        
+        # Security headers (4 points)
+        if security_analysis.get('hsts'):
+            score += 2
+        if security_analysis.get('xss_protection'):
+            score += 1
+        if security_analysis.get('content_security'):
+            score += 1
+        
+        return score
+
+    def _calculate_score_penalties(self, analysis_modules: Dict) -> int:
+        """Calculate penalties for critical SEO issues."""
+        penalties = 0
+        
+        # Heavy keyword stuffing penalty
+        keyword_stuffing = analysis_modules.get('content', {}).get('keyword_analysis', {}).get('keyword_stuffing_detected', [])
+        if len(keyword_stuffing) > 3:
+            penalties += 10
+        
+        # No HTTPS penalty
+        if not analysis_modules.get('modern_seo', {}).get('security', {}).get('https'):
+            penalties += 8
+        
+        # Missing title penalty
+        if not analysis_modules.get('basic_seo', {}).get('title'):
+            penalties += 6
+        
+        # Very thin content penalty
+        word_count = analysis_modules.get('content', {}).get('basic_metrics', {}).get('word_count', 0)
+        if word_count < 100:
+            penalties += 5
+        
+        return penalties
+
+    def _calculate_score_bonuses(self, analysis_modules: Dict) -> int:
+        """Calculate bonuses for exceptional SEO practices."""
+        bonuses = 0
+        
+        # Rich content bonus
+        word_count = analysis_modules.get('content', {}).get('basic_metrics', {}).get('word_count', 0)
+        if word_count > 2000:
+            bonuses += 5
+        
+        # Comprehensive schema markup bonus
+        schema_count = len(analysis_modules.get('modern_seo', {}).get('structured_data', {}).get('schema_types', []))
+        if schema_count >= 5:
+            bonuses += 3
+        
+        # Perfect readability bonus
+        flesch_score = analysis_modules.get('content', {}).get('readability', {}).get('flesch_reading_ease', 0)
+        if 65 <= flesch_score <= 75:
+            bonuses += 2
+        
+        return bonuses
+
+    def _validate_final_score(self, score: int, analysis_modules: Dict) -> int:
+        """Validate and adjust final score for consistency."""
+        # Ensure score is within bounds
+        score = max(0, min(100, score))
+        
+        # Sanity check: if no content detected, score should be low
+        word_count = analysis_modules.get('content', {}).get('basic_metrics', {}).get('word_count', 0)
+        if word_count == 0 and score > 30:
+            score = min(score, 30)
+        
+        # Sanity check: if no title, score should be penalized
+        title = analysis_modules.get('basic_seo', {}).get('title', '')
+        if not title and score > 40:
+            score = min(score, 40)
+        
+        return score
 
     def get_educational_resources(self, topic: Optional[str] = None) -> Dict:
         """Get tfq0seo educational resources.
@@ -2157,131 +2464,21 @@ class SEOAnalyzerApp:
             )
 
     def _calculate_technical_score(self, analysis_modules: Dict) -> int:
-        """Calculate technical SEO score component."""
-        score = 0
-        
-        # HTTPS check (8 points)
-        if analysis_modules.get('modern_seo', {}).get('security', {}).get('https'):
-            score += 8
-        
-        # Title tag (7 points)
-        title = analysis_modules.get('basic_seo', {}).get('title', '')
-        if title and 30 <= len(title) <= 60:
-            score += 7
-        elif title:
-            score += 4
-        
-        # Meta description (7 points)
-        meta_desc = analysis_modules.get('basic_seo', {}).get('meta_description', '')
-        if meta_desc and 120 <= len(meta_desc) <= 160:
-            score += 7
-        elif meta_desc:
-            score += 4
-        
-        # H1 tags (6 points)
-        h1_tags = analysis_modules.get('basic_seo', {}).get('headings', {}).get('h1', [])
-        if len(h1_tags) == 1:
-            score += 6
-        elif len(h1_tags) > 0:
-            score += 3
-        
-        # URL structure (4 points)
-        url_analysis = analysis_modules.get('advanced_seo', {}).get('url_analysis', {})
-        if url_analysis.get('is_seo_friendly'):
-            score += 4
-        elif url_analysis.get('seo_score', 0) > 50:
-            score += 2
-        
-        # Schema markup (3 points)
-        schema_count = len(analysis_modules.get('modern_seo', {}).get('structured_data', {}).get('schema_types', []))
-        if schema_count > 0:
-            score += min(3, schema_count)
-        
-        return score
-    
+        """Calculate technical SEO score component - backward compatibility method."""
+        return self._calculate_technical_score_accurate(analysis_modules)
+
     def _calculate_content_score(self, analysis_modules: Dict) -> int:
-        """Calculate content quality score component."""
-        score = 0
-        content_analysis = analysis_modules.get('content', {})
-        
-        # Word count (12 points)
-        word_count = content_analysis.get('basic_metrics', {}).get('word_count', 0)
-        if word_count >= 1000:
-            score += 12
-        elif word_count >= 500:
-            score += 9
-        elif word_count >= 300:
-            score += 6
-        elif word_count > 0:
-            score += 3
-        
-        # Readability (10 points)
-        flesch_score = content_analysis.get('readability', {}).get('flesch_reading_ease', 0)
-        if 60 <= flesch_score <= 80:
-            score += 10
-        elif 50 <= flesch_score <= 90:
-            score += 8
-        elif flesch_score > 0:
-            score += 4
-        
-        # Keyword optimization (8 points)
-        keyword_analysis = content_analysis.get('keyword_analysis', {})
-        if keyword_analysis.get('total_meaningful_words', 0) > 0:
-            score += 4
-            # Check for keyword stuffing (penalty)
-            if len(keyword_analysis.get('keyword_stuffing_detected', [])) == 0:
-                score += 4
-            else:
-                score -= 2  # Penalty for keyword stuffing
-        
-        # Content structure (5 points)
-        structure = content_analysis.get('content_structure', {})
-        if structure.get('content_sections', 0) > 2:
-            score += 3
-        if structure.get('avg_paragraph_length', 0) > 0:
-            score += 2
-        
-        return score
-    
+        """Calculate content quality score component - backward compatibility method."""
+        return self._calculate_content_score_accurate(analysis_modules)
+
     def _calculate_ux_score(self, analysis_modules: Dict) -> int:
-        """Calculate user experience score component."""
-        score = 0
-        
-        # Mobile optimization (12 points)
-        mobile_analysis = analysis_modules.get('modern_seo', {}).get('mobile_friendly', {})
-        if mobile_analysis.get('responsive_viewport'):
-            score += 6
-        if mobile_analysis.get('viewport_meta'):
-            score += 4
-        if mobile_analysis.get('touch_elements_spacing', {}).get('potentially_small', 0) == 0:
-            score += 2
-        
-        # Performance indicators (8 points)
-        html_structure = analysis_modules.get('modern_seo', {}).get('html_structure', {})
-        if html_structure.get('optimizations', {}).get('image_optimization', {}).get('missing_alt', 0) == 0:
-            score += 8
-        
-        return score
-    
+        """Calculate user experience score component - backward compatibility method."""
+        return self._calculate_ux_score_accurate(analysis_modules)
+
     def _calculate_security_score(self, analysis_modules: Dict) -> int:
-        """Calculate security score component."""
-        score = 0
-        security_analysis = analysis_modules.get('modern_seo', {}).get('security', {})
-        
-        if security_analysis.get('https') and security_analysis.get('ssl_certificate_valid'):
-            score += 6
-        elif security_analysis.get('https'):
-            score += 4
-        
-        if security_analysis.get('hsts'):
-            score += 2
-        if security_analysis.get('xss_protection'):
-            score += 1
-        if security_analysis.get('content_security'):
-            score += 1
-        
-        return score
-    
+        """Calculate security score component - backward compatibility method."""
+        return self._calculate_security_score_accurate(analysis_modules)
+
     def _get_strongest_category(self, analysis_modules: Dict) -> str:
         """Identify the strongest SEO category."""
         scores = {

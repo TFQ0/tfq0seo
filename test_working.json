@@ -1,0 +1,162 @@
+{
+  "url": "https://httpbin.org/html",
+  "analysis_modules": {
+    "basic_seo": {
+      "strengths": [],
+      "weaknesses": [
+        "Missing meta description",
+        "Missing canonical URL",
+        "Missing Open Graph tags",
+        "Missing Twitter Card tags",
+        "Missing Schema.org markup",
+        "Missing language declaration"
+      ],
+      "recommendations": [
+        "Add a meta description tag",
+        "Add a canonical URL tag",
+        "Add Open Graph tags for better social media sharing",
+        "Add Twitter Card tags for better Twitter sharing",
+        "Add relevant Schema.org markup",
+        "Add lang attribute to the HTML tag"
+      ],
+      "education_tips": [
+        "Meta descriptions improve click-through rates from search results",
+        "Canonical URLs help prevent duplicate content issues",
+        "Open Graph tags control how your content appears when shared on social media",
+        "Schema.org markup helps search engines better understand your content",
+        "Language declaration helps search engines serve content to the right audience"
+      ]
+    },
+    "content": {
+      "strengths": [
+        "Content length is good (637 words)"
+      ],
+      "weaknesses": [
+        "Content might be too difficult to read",
+        "Paragraphs are too long",
+        "Found duplicate sentences",
+        "High usage of passive voice",
+        "Low usage of transition words"
+      ],
+      "recommendations": [
+        "Simplify language and sentence structure",
+        "Break down long paragraphs into smaller chunks",
+        "Remove or rephrase duplicate content",
+        "Convert passive voice to active voice where possible",
+        "Add more transition words to improve flow"
+      ],
+      "education_tips": [
+        "Clear, readable content improves user engagement and SEO performance",
+        "Shorter paragraphs improve readability and user experience",
+        "Active voice makes content more engaging and easier to understand",
+        "Transition words help create better content flow and readability"
+      ]
+    },
+    "modern_seo": {
+      "strengths": [
+        "Site uses HTTPS"
+      ],
+      "weaknesses": [
+        "Missing viewport meta tag",
+        "Missing structured data"
+      ],
+      "recommendations": [
+        "Add a viewport meta tag to ensure proper rendering on mobile devices",
+        "Implement structured data to improve search engine understanding"
+      ],
+      "education_tips": []
+    },
+    "advanced_seo": {
+      "strengths": [
+        "Well-structured content hierarchy"
+      ],
+      "weaknesses": [
+        "Navigation structure needs improvement",
+        "Accessibility needs improvement",
+        "Missing structured data markup"
+      ],
+      "recommendations": [
+        "Implement clear navigation hierarchy with breadcrumbs",
+        "Enhance accessibility with ARIA landmarks and image alts",
+        "Add relevant Schema.org markup for rich results"
+      ],
+      "education_tips": [
+        "Progressive enhancement ensures functionality across all devices",
+        "Semantic HTML improves accessibility and SEO",
+        "Rich results increase visibility in search results",
+        "Content clustering helps establish topic authority"
+      ]
+    },
+    "competitive": {
+      "strengths": [],
+      "weaknesses": [
+        "Missing Schema.org markup",
+        "Analytics not detected"
+      ],
+      "recommendations": [
+        "Implement relevant Schema.org markup",
+        "Implement analytics tracking",
+        "Consider adding search functionality"
+      ],
+      "education_tips": [
+        "Regular competitive analysis helps maintain market position",
+        "Focus on unique value proposition while matching competitor strengths",
+        "Monitor competitor content strategies for industry trends",
+        "Implement missing features strategically based on business goals"
+      ]
+    }
+  },
+  "timestamp": "2025-07-02T18:38:31.048520",
+  "tool_version": "2.0.0",
+  "seo_score": 0,
+  "insights": {
+    "critical_issues": [
+      "Site is not using HTTPS - major security and SEO issue",
+      "No meaningful content detected - page may be JavaScript-heavy or have extraction issues",
+      "Missing title tag",
+      "Missing viewport meta tag - critical for mobile optimization"
+    ],
+    "opportunities": [
+      "Missing meta description - add one to improve click-through rates",
+      "Missing H1 tag - add one for better content structure",
+      "No structured data found - implement Schema.org markup for better search visibility"
+    ],
+    "strengths": [
+      "All images have alt text"
+    ],
+    "recommendations": [
+      "Migrate to HTTPS immediately to improve security and search rankings",
+      "Ensure content is accessible to crawlers and not hidden behind JavaScript",
+      "Add a descriptive title tag to improve search visibility",
+      "Write a compelling meta description between 120-160 characters",
+      "Add a single, descriptive H1 tag to the page",
+      "Add viewport meta tag: <meta name='viewport' content='width=device-width, initial-scale=1'>",
+      "Add relevant structured data markup (Organization, WebPage, etc.)"
+    ],
+    "accuracy_warnings": []
+  },
+  "scores": {
+    "overall_score": 0,
+    "category_scores": {
+      "technical_seo": 0,
+      "content_quality": 0,
+      "user_experience": 14,
+      "security": 0
+    }
+  },
+  "summary": {
+    "overview": {
+      "total_issues": 7,
+      "critical_issues": 4,
+      "strongest_category": "User Experience",
+      "weakest_category": "Technical SEO"
+    },
+    "key_findings": [
+      "Site is not using HTTPS - major security and SEO issue",
+      "No meaningful content detected - page may be JavaScript-heavy or have extraction issues",
+      "Missing title tag",
+      "Missing meta description - add one to improve click-through rates",
+      "Missing H1 tag - add one for better content structure"
+    ]
+  }
+}
