@@ -113,21 +113,3 @@ tfq0seo analyze-content --file blog-post.txt --keyword "target keyword"
 ```bash
 tfq0seo analyze https://yoursite.com --depth complete --format json
 ```
-
-## 💻 Development
-
-### Contributing
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-### License
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🤝 Support
-
-- **GitHub**: [https://github.com/tfq0/tfq0seo](https://github.com/tfq0/tfq0seo)
-- **Issues**: Report bugs or request features
-- **Author**: tfq0
-
-## 🎉 Acknowledgments
-
-Built with ❤️ by tfq0 as an open-source alternative to commercial SEO tools. 
