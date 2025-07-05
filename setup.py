@@ -5,9 +5,8 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="tfq0seo",
-    version="2.1.0",
+    version="2.1.1",
     author="tfq0",
-    author_email="tfq0@example.com",
     description="Professional SEO Analysis Toolkit - Open source alternative to Screaming Frog",
     long_description=long_description,
     long_description_content_type="text/markdown",
