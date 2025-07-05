@@ -24,7 +24,7 @@ console = Console()
 try:
     from . import __version__
 except ImportError:
-    __version__ = '2.1.0'
+    __version__ = '2.1.1'
 
 def setup_logging(verbose: bool, quiet: bool) -> None:
     """Setup logging based on verbosity settings"""
