@@ -6,7 +6,7 @@
 
 **tfq0seo** is a comprehensive, open-source SEO analysis and site crawling toolkit that provides professional-grade website auditing capabilities. It's a powerful alternative to commercial tools like Screaming Frog SEO Spider, but fully open-source and extensible.
 
-## 🚀 Features
+##  Features
 
 ### Site Crawling
 - Full website crawling with configurable depth (1-10 levels)
@@ -29,7 +29,7 @@
 - Competitive analysis with side-by-side comparisons
 - Action plans with priority levels and impact estimates
 
-## 📦 Installation
+##  Installation
 
 ```bash
 pip install tfq0seo
