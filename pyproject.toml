@@ -11,7 +11,7 @@ requires-python = ">=3.7"
 license = {text = "MIT"}
 keywords = ["seo", "analysis", "optimization", "web", "content", "meta tags", "technical seo", "reporting", "analytics"]
 authors = [
-    {name = "tfq0", email = "tfq0@users.noreply.github.com"}
+    {name = "tfq0"}
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
