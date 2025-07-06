@@ -7,6 +7,7 @@ import re
 import json
 import logging
 from urllib.parse import urljoin, urlparse
+from ..core.issue_helper import IssueHelper
 
 logger = logging.getLogger(__name__)
 
@@ -125,62 +126,54 @@ class SEOAnalyzer:
         title_tags = soup.find_all('title')
         
         if not title_tags:
-            issues.append({
-                'type': 'missing_title',
-                'severity': 'critical',
-                'message': 'Missing title tag - critical for SEO and user experience'
-            })
+            issues.append(IssueHelper.create_issue('missing_title'))
             return {'title': '', 'issues': issues}
         
         if len(title_tags) > 1:
-            issues.append({
-                'type': 'multiple_titles',
-                'severity': 'warning',
-                'message': f'Multiple title tags found ({len(title_tags)}) - only first will be used'
-            })
+            issues.append(IssueHelper.create_issue(
+                'multiple_titles',
+                count=len(title_tags)
+            ))
         
         # Get first title tag
         title = title_tags[0].get_text(strip=True)
         
         if not title:
-            issues.append({
-                'type': 'empty_title',
-                'severity': 'critical',
-                'message': 'Title tag is empty'
-            })
+            issues.append(IssueHelper.create_issue('empty_title'))
         else:
             # Check length
             title_length = len(title)
             pixel_width = self._calculate_pixel_width(title)
             
             if title_length < self.config.title_min_length:
-                issues.append({
-                    'type': 'short_title',
-                    'severity': 'warning',
-                    'message': f'Title too short ({title_length} chars, ~{pixel_width}px, recommended: {self.config.title_min_length}-{self.config.title_max_length} chars)'
-                })
+                issues.append(IssueHelper.create_issue(
+                    'short_title',
+                    current_value=f"{title_length} chars",
+                    recommended_value=f"{self.config.title_min_length}-{self.config.title_max_length} chars",
+                    pixel_width=pixel_width
+                ))
             elif title_length > self.config.title_max_length:
-                issues.append({
-                    'type': 'long_title',
-                    'severity': 'warning',
-                    'message': f'Title too long ({title_length} chars, ~{pixel_width}px, recommended: {self.config.title_min_length}-{self.config.title_max_length} chars)'
-                })
+                issues.append(IssueHelper.create_issue(
+                    'long_title',
+                    current_value=f"{title_length} chars",
+                    recommended_value=f"{self.config.title_min_length}-{self.config.title_max_length} chars",
+                    pixel_width=pixel_width
+                ))
             
             # Check pixel width (Google typically shows ~580px on desktop)
             if pixel_width > 580:
-                issues.append({
-                    'type': 'title_truncated',
-                    'severity': 'notice',
-                    'message': f'Title may be truncated in search results (~{pixel_width}px, max ~580px)'
-                })
+                issues.append(IssueHelper.create_issue(
+                    'title_truncated',
+                    pixel_width=pixel_width,
+                    max_width=580
+                ))
             
             # Check for common issues
             if title.lower() == 'untitled' or title.lower() == 'home':
-                issues.append({
-                    'type': 'generic_title',
-                    'severity': 'warning',
-                    'message': 'Title is too generic'
-                })
+                issues.append(IssueHelper.create_issue(
+                    'generic_title',
+                    current_title=title
+                ))
             
             # Check for keyword stuffing
             words = title.lower().split()
@@ -191,11 +184,10 @@ class SEOAnalyzer:
                 
                 max_freq = max(word_freq.values())
                 if max_freq > 2:
-                    issues.append({
-                        'type': 'title_keyword_stuffing',
-                        'severity': 'warning',
-                        'message': 'Possible keyword stuffing in title'
-                    })
+                    issues.append(IssueHelper.create_issue(
+                        'title_keyword_stuffing',
+                        repeated_word_count=max_freq
+                    ))
         
         return {'title': title, 'issues': issues}
     
@@ -211,52 +203,48 @@ class SEOAnalyzer:
                 desc_tags.append(meta)
         
         if not desc_tags:
-            issues.append({
-                'type': 'missing_description',
-                'severity': 'critical',
-                'message': 'Missing meta description - important for CTR in search results'
-            })
+            issues.append(IssueHelper.create_issue('missing_description'))
             return {'description': '', 'issues': issues, 'duplicates': 0}
         
         if len(desc_tags) > 1:
-            issues.append({
-                'type': 'multiple_descriptions',
-                'severity': 'warning',
-                'message': f'Multiple meta description tags found ({len(desc_tags)}) - search engines may ignore'
-            })
+            issues.append(IssueHelper.create_issue(
+                'multiple_descriptions',
+                count=len(desc_tags)
+            ))
         
         # Get first description
         description = desc_tags[0].get('content', '').strip()
         
         if not description:
-            issues.append({
-                'type': 'empty_description',
-                'severity': 'critical',
-                'message': 'Meta description is empty'
-            })
+            issues.append(IssueHelper.create_issue('empty_description'))
         else:
             desc_length = len(description)
             pixel_width = self._calculate_pixel_width(description)
             
             if desc_length < self.config.description_min_length:
-                issues.append({
-                    'type': 'short_description',
-                    'severity': 'warning',
-                    'message': f'Description too short ({desc_length} chars, recommended: {self.config.description_min_length}-{self.config.description_max_length})'
-                })
+                issues.append(IssueHelper.create_issue(
+                    'short_description',
+                    current_value=f"{desc_length} chars",
+                    recommended_value=f"{self.config.description_min_length}-{self.config.description_max_length} chars"
+                ))
             elif desc_length > self.config.description_max_length:
-                issues.append({
-                    'type': 'long_description',
-                    'severity': 'warning',
-                    'message': f'Description too long ({desc_length} chars, recommended: {self.config.description_min_length}-{self.config.description_max_length})'
-                })
+                issues.append(IssueHelper.create_issue(
+                    'long_description',
+                    current_value=f"{desc_length} chars",
+                    recommended_value=f"{self.config.description_min_length}-{self.config.description_max_length} chars"
+                ))
             
             # Check pixel width (Google shows ~920px on desktop)
             if pixel_width > 920:
                 issues.append({
                     'type': 'description_truncated',
                     'severity': 'notice',
-                    'message': f'Description may be truncated in search results (~{pixel_width}px, max ~920px)'
+                    'message': f'Description may be truncated in search results (~{pixel_width}px, max ~920px)',
+                    'user_impact': 'Your call-to-action or important information might be cut off',
+                    'recommendation': 'Move important information to the beginning of your description',
+                    'implementation_difficulty': 'easy',
+                    'priority_score': 4,
+                    'estimated_impact': 'low'
                 })
             
             # Check for duplicate content
@@ -266,7 +254,12 @@ class SEOAnalyzer:
                     issues.append({
                         'type': 'duplicate_descriptions',
                         'severity': 'warning',
-                        'message': 'Duplicate meta descriptions found'
+                        'message': 'Duplicate meta descriptions found',
+                        'user_impact': 'Search engines may be confused about which description to use',
+                        'recommendation': 'Keep only one unique meta description per page',
+                        'implementation_difficulty': 'easy',
+                        'priority_score': 5,
+                        'estimated_impact': 'medium'
                     })
         
         return {
@@ -297,11 +290,10 @@ class SEOAnalyzer:
         missing_required = [tag for tag in required_tags if tag not in og_tags]
         
         if og_tags and missing_required:
-            issues.append({
-                'type': 'incomplete_open_graph',
-                'severity': 'warning',
-                'message': f'Missing required Open Graph tags: {", ".join(missing_required)}'
-            })
+            issues.append(IssueHelper.create_issue(
+                'incomplete_open_graph',
+                missing_tags=', '.join(missing_required)
+            ))
         
         # Validate OG image if present
         if 'image' in og_tags:
@@ -312,7 +304,13 @@ class SEOAnalyzer:
                 issues.append({
                     'type': 'og_relative_image',
                     'severity': 'warning',
-                    'message': 'Open Graph image should use absolute URL'
+                    'message': 'Open Graph image should use absolute URL',
+                    'user_impact': 'Social media platforms may not be able to display your image',
+                    'recommendation': 'Use full URL starting with https:// for your OG image',
+                    'example': '<meta property="og:image" content="https://example.com/image.jpg">',
+                    'implementation_difficulty': 'easy',
+                    'priority_score': 5,
+                    'estimated_impact': 'medium'
                 })
             
             # Check for image dimensions
@@ -320,7 +318,13 @@ class SEOAnalyzer:
                 issues.append({
                     'type': 'og_image_dimensions_missing',
                     'severity': 'notice',
-                    'message': 'Open Graph image dimensions not specified'
+                    'message': 'Open Graph image dimensions not specified',
+                    'user_impact': 'Social platforms may crop your image unexpectedly',
+                    'recommendation': 'Add og:image:width and og:image:height tags',
+                    'example': '<meta property="og:image:width" content="1200">\n<meta property="og:image:height" content="630">',
+                    'implementation_difficulty': 'easy',
+                    'priority_score': 3,
+                    'estimated_impact': 'low'
                 })
             else:
                 try:
@@ -332,7 +336,12 @@ class SEOAnalyzer:
                         issues.append({
                             'type': 'og_image_too_small',
                             'severity': 'notice',
-                            'message': f'Open Graph image small ({width}x{height}), recommend 1200x630'
+                            'message': f'Open Graph image small ({width}x{height}), recommend 1200x630',
+                            'user_impact': 'Your image may appear small or pixelated on social media',
+                            'recommendation': 'Use images at least 1200x630 pixels for best results',
+                            'implementation_difficulty': 'medium',
+                            'priority_score': 4,
+                            'estimated_impact': 'medium'
                         })
                 except ValueError:
                     pass
@@ -342,7 +351,13 @@ class SEOAnalyzer:
             issues.append({
                 'type': 'og_missing_site_name',
                 'severity': 'notice',
-                'message': 'Open Graph site_name not specified'
+                'message': 'Open Graph site_name not specified',
+                'user_impact': 'Your brand name won\'t appear in social shares',
+                'recommendation': 'Add og:site_name with your website or brand name',
+                'example': '<meta property="og:site_name" content="Your Brand Name">',
+                'implementation_difficulty': 'easy',
+                'priority_score': 3,
+                'estimated_impact': 'low'
             })
         
         return {'tags': og_tags, 'issues': issues}
@@ -569,11 +584,10 @@ class SEOAnalyzer:
             return {'url': '', 'issues': issues}
         
         if len(canonical_tags) > 1:
-            issues.append({
-                'type': 'multiple_canonicals',
-                'severity': 'critical',
-                'message': f'Multiple canonical URLs found ({len(canonical_tags)}) - can confuse search engines'
-            })
+            issues.append(IssueHelper.create_issue(
+                'multiple_canonicals',
+                count=len(canonical_tags)
+            ))
         
         canonical_url = canonical_tags[0].get('href', '')
         
@@ -581,11 +595,7 @@ class SEOAnalyzer:
             # Validate canonical URL
             parsed = urlparse(canonical_url)
             if not parsed.scheme or not parsed.netloc:
-                issues.append({
-                    'type': 'invalid_canonical',
-                    'severity': 'warning',
-                    'message': 'Canonical URL should be absolute'
-                })
+                issues.append(IssueHelper.create_issue('invalid_canonical'))
         
         return {'url': canonical_url, 'issues': issues}
     
@@ -612,24 +622,33 @@ class SEOAnalyzer:
         
         # Check for problematic directives
         if 'noindex' in directives:
-            issues.append({
-                'type': 'noindex',
-                'severity': 'warning',
-                'message': 'Page has noindex directive - will not appear in search results'
-            })
+            issues.append(IssueHelper.create_issue('noindex'))
         
         if 'nofollow' in directives:
-            issues.append({
-                'type': 'nofollow',
-                'severity': 'notice',
-                'message': 'Page has nofollow directive - links will not pass PageRank'
-            })
+            issues.append(IssueHelper.create_issue('nofollow'))
         
         if 'nosnippet' in directives:
             issues.append({
                 'type': 'nosnippet',
                 'severity': 'notice',
-                'message': 'Page has nosnippet directive - no text snippet in search results'
+                'message': 'Page has nosnippet directive - search snippets will not be shown',
+                'user_impact': 'Your page won\'t show preview text in search results',
+                'recommendation': 'Remove nosnippet unless you have a specific reason to hide snippets',
+                'implementation_difficulty': 'easy',
+                'priority_score': 3,
+                'estimated_impact': 'low'
+            })
+        
+        if 'noarchive' in directives:
+            issues.append({
+                'type': 'noarchive',
+                'severity': 'notice',
+                'message': 'Page has noarchive directive - cached version will not be available',
+                'user_impact': 'Users won\'t be able to view cached versions of your page',
+                'recommendation': 'Consider if noarchive is necessary for your content',
+                'implementation_difficulty': 'easy',
+                'priority_score': 2,
+                'estimated_impact': 'low'
             })
         
         return {'content': robots_content, 'issues': issues}
@@ -679,76 +698,89 @@ class SEOAnalyzer:
         return {'language': lang, 'charset': charset, 'issues': issues}
     
     def _analyze_viewport(self, soup: BeautifulSoup) -> Dict[str, Any]:
-        """Analyze viewport meta tag for mobile optimization"""
+        """Analyze viewport meta tag"""
         issues = []
-        viewport = soup.find('meta', attrs={'name': 'viewport'})
+        viewport_tag = soup.find('meta', attrs={'name': 'viewport'})
         
-        if not viewport:
-            issues.append({
-                'type': 'missing_viewport',
-                'severity': 'critical',
-                'message': 'Missing viewport meta tag - critical for mobile optimization'
-            })
+        if not viewport_tag:
+            issues.append(IssueHelper.create_issue('missing_viewport'))
             return {'has_viewport': False, 'content': '', 'issues': issues}
         
-        content = viewport.get('content', '')
+        content = viewport_tag.get('content', '')
         
-        # Check for required viewport properties
+        # Check for common viewport issues
         if 'width=device-width' not in content:
             issues.append({
                 'type': 'viewport_not_responsive',
                 'severity': 'warning',
-                'message': 'Viewport should include width=device-width for responsive design'
+                'message': 'Viewport not set to device width',
+                'user_impact': 'Your site may not display correctly on mobile devices',
+                'recommendation': 'Include width=device-width in your viewport tag',
+                'example': '<meta name="viewport" content="width=device-width, initial-scale=1">',
+                'implementation_difficulty': 'easy',
+                'priority_score': 8,
+                'estimated_impact': 'high'
             })
         
-        if 'initial-scale=1' not in content:
-            issues.append({
-                'type': 'viewport_scale_missing',
-                'severity': 'notice',
-                'message': 'Viewport should include initial-scale=1'
-            })
-        
-        # Check for problematic settings
         if 'maximum-scale=1' in content or 'user-scalable=no' in content:
             issues.append({
-                'type': 'viewport_zoom_disabled',
+                'type': 'viewport_prevents_zoom',
                 'severity': 'warning',
-                'message': 'Viewport disables zooming - accessibility issue'
+                'message': 'Viewport prevents user zoom',
+                'user_impact': 'Users with visual impairments cannot zoom your content',
+                'recommendation': 'Remove maximum-scale=1 and user-scalable=no for better accessibility',
+                'example': '<meta name="viewport" content="width=device-width, initial-scale=1">',
+                'implementation_difficulty': 'easy',
+                'priority_score': 6,
+                'estimated_impact': 'medium'
             })
         
-        return {'has_viewport': True, 'content': content, 'issues': issues}
+        return {
+            'has_viewport': True,
+            'content': content,
+            'issues': issues
+        }
     
     def _analyze_h1_tags(self, soup: BeautifulSoup) -> Dict[str, Any]:
         """Analyze H1 tags"""
         issues = []
         h1_tags = soup.find_all('h1')
+        h1_texts = []
         
         if not h1_tags:
-            issues.append({
-                'type': 'missing_h1',
-                'severity': 'warning',
-                'message': 'No H1 tag found - important for content structure'
-            })
+            issues.append(IssueHelper.create_issue('missing_h1'))
         elif len(h1_tags) > 1:
-            issues.append({
-                'type': 'multiple_h1',
-                'severity': 'warning',
-                'message': f'Multiple H1 tags found ({len(h1_tags)}) - use only one per page'
-            })
+            issues.append(IssueHelper.create_issue(
+                'multiple_h1',
+                count=len(h1_tags)
+            ))
         
-        # Extract H1 text
-        h1_texts = [h1.get_text(strip=True) for h1 in h1_tags]
+        for h1 in h1_tags:
+            text = h1.get_text(strip=True)
+            if text:
+                h1_texts.append(text)
+            else:
+                issues.append(IssueHelper.create_issue('empty_h1'))
         
-        # Check for empty H1s
-        empty_h1s = sum(1 for text in h1_texts if not text)
-        if empty_h1s > 0:
-            issues.append({
-                'type': 'empty_h1',
-                'severity': 'warning',
-                'message': f'{empty_h1s} empty H1 tag(s) found'
-            })
+        # Check for excessively long H1
+        for text in h1_texts:
+            if len(text) > 70:
+                issues.append({
+                    'type': 'long_h1',
+                    'severity': 'notice',
+                    'message': f'H1 is quite long ({len(text)} characters)',
+                    'user_impact': 'Long H1 tags may not display well on mobile devices',
+                    'recommendation': 'Keep H1 tags concise, ideally under 70 characters',
+                    'implementation_difficulty': 'easy',
+                    'priority_score': 3,
+                    'estimated_impact': 'low'
+                })
         
-        return {'count': len(h1_tags), 'texts': h1_texts, 'issues': issues}
+        return {
+            'count': len(h1_tags),
+            'texts': h1_texts,
+            'issues': issues
+        }
     
     def _analyze_hreflang(self, soup: BeautifulSoup) -> Dict[str, Any]:
         """Analyze hreflang tags for international SEO"""

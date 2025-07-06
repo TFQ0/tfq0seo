@@ -6,6 +6,7 @@ import re
 import gzip
 from urllib.parse import urlparse
 import logging
+from ..core.issue_helper import IssueHelper
 
 logger = logging.getLogger(__name__)
 
@@ -86,17 +87,21 @@ class PerformanceAnalyzer:
         issues = []
         
         if load_time > self.config.max_page_load_time:
-            issues.append({
-                'type': 'slow_load_time',
-                'severity': 'critical',
-                'message': f'Page load time too slow ({load_time:.2f}s, recommended: <{self.config.max_page_load_time}s)'
-            })
+            issues.append(IssueHelper.create_issue(
+                'slow_page',
+                current_value=f'{load_time:.2f}s',
+                recommended_value=f'<{self.config.max_page_load_time}s'
+            ))
         elif load_time > 2:
-            issues.append({
-                'type': 'moderate_load_time',
-                'severity': 'warning',
-                'message': f'Page load time could be improved ({load_time:.2f}s, recommended: <2s)'
-            })
+            # For moderate load time, we still use slow_page but note it's less severe
+            issue = IssueHelper.create_issue(
+                'slow_page',
+                current_value=f'{load_time:.2f}s',
+                recommended_value='<2s'
+            )
+            # Downgrade severity for moderate issues
+            issue['severity'] = 'warning'
+            issues.append(issue)
         
         return {'issues': issues}
     
@@ -129,18 +134,18 @@ class PerformanceAnalyzer:
         
         # Check sizes
         if raw_size_kb > 500:
-            issues.append({
-                'type': 'large_page_size',
-                'severity': 'warning',
-                'message': f'Large page size ({raw_size_kb:.0f}KB uncompressed)'
-            })
+            issues.append(IssueHelper.create_issue(
+                'large_page_size',
+                current_value=f'{raw_size_kb:.0f}KB uncompressed',
+                recommended_value='<500KB'
+            ))
         
         if compressed_size_kb > 150:
-            issues.append({
-                'type': 'large_compressed_size',
-                'severity': 'warning',
-                'message': f'Large compressed size ({compressed_size_kb:.0f}KB) - consider optimization'
-            })
+            issues.append(IssueHelper.create_issue(
+                'large_page_size',
+                current_value=f'{compressed_size_kb:.0f}KB compressed',
+                recommended_value='<150KB compressed'
+            ))
         
         return {
             'raw_size_bytes': raw_size,
@@ -289,11 +294,7 @@ class PerformanceAnalyzer:
         issues = []
         
         if not is_compressed and len(content) > 1024:  # Only flag if content > 1KB
-            issues.append({
-                'type': 'no_compression',
-                'severity': 'critical',
-                'message': 'Content not compressed - enable gzip/brotli compression'
-            })
+            issues.append(IssueHelper.create_issue('no_compression'))
         
         return {
             'enabled': is_compressed,
@@ -329,12 +330,9 @@ class PerformanceAnalyzer:
         
         # Check for caching issues
         if not cache_control:
-            issues.append({
-                'type': 'no_cache_headers',
-                'severity': 'warning',
-                'message': 'No Cache-Control header - browsers may not cache effectively'
-            })
+            issues.append(IssueHelper.create_issue('no_cache_control'))
         elif 'no-cache' in cache_directives or 'no-store' in cache_directives:
+            # Not in IssueHelper, keep manual for now
             issues.append({
                 'type': 'caching_disabled',
                 'severity': 'notice',
@@ -344,6 +342,7 @@ class PerformanceAnalyzer:
             try:
                 max_age = int(cache_directives['max-age'])
                 if max_age < 3600:  # Less than 1 hour
+                    # Not in IssueHelper, keep manual for now
                     issues.append({
                         'type': 'short_cache_duration',
                         'severity': 'notice',

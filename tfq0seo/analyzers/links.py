@@ -6,6 +6,7 @@ from bs4 import BeautifulSoup, NavigableString
 from urllib.parse import urlparse, urljoin, parse_qs
 import re
 import logging
+from ..core.issue_helper import IssueHelper
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +44,13 @@ class LinkAnalyzer:
         # Check for broken links
         broken_links = self._identify_broken_links(links_data, page_data)
         if broken_links:
-            issues.append({
-                'type': 'broken_links',
-                'severity': 'critical',
-                'message': f'{len(broken_links)} broken links found',
-                'details': broken_links[:5]  # First 5 for context
-            })
+            issues.append(IssueHelper.create_issue(
+                'broken_internal_links',
+                additional_info={
+                    'count': len(broken_links),
+                    'details': broken_links[:5]  # First 5 for context
+                }
+            ))
         
         # Analyze anchor text
         anchor_analysis = self._analyze_anchor_text(links_data, soup)
@@ -494,11 +496,11 @@ class LinkAnalyzer:
                 'message': f'Only {len(internal_links)} internal links found'
             })
         elif len(internal_links) > 100:
-            issues.append({
-                'type': 'excessive_internal_links',
-                'severity': 'notice',
-                'message': f'{len(internal_links)} internal links may dilute link equity'
-            })
+            issues.append(IssueHelper.create_issue(
+                'excessive_internal_links',
+                current_value=f'{len(internal_links)} internal links',
+                recommended_value='100-150 internal links maximum'
+            ))
         
         # Check for links to important pages
         important_pages = ['/', '/about', '/contact', '/products', '/services']
@@ -695,15 +697,13 @@ class LinkAnalyzer:
         # Check if the current page arrived via redirects
         redirect_chain = page_data.get('redirect_chain', [])
         if len(redirect_chain) > 1:
-            issues.append({
-                'type': 'page_redirect_chain',
-                'severity': 'warning',
-                'message': f'Page reached via {len(redirect_chain)} redirects'
-            })
-            redirect_chains.append({
-                'final_url': page_data['url'],
-                'chain': redirect_chain
-            })
+            issues.append(IssueHelper.create_issue(
+                'redirect_chains',
+                additional_info={
+                    'chain_length': len(redirect_chain),
+                    'chain': redirect_chain
+                }
+            ))
         
         # Check for links that might lead to redirects
         # This would need crawl data to properly detect
