@@ -76,7 +76,7 @@ class Config:
     
     # User agent and headers
     user_agent: Optional[str] = None
-    default_user_agent: str = "tfq0seo/2.1.2 (https://github.com/tfq0/tfq0seo)"
+    default_user_agent: str = "tfq0seo/2.1.3 (https://github.com/tfq0/tfq0seo)"
     custom_headers: Dict[str, str] = field(default_factory=dict)
     
     # Authentication

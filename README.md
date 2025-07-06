@@ -1,6 +1,6 @@
 # tfq0seo - Professional SEO Analysis Toolkit
 
-![Version](https://img.shields.io/badge/version-2.1.2-blue.svg)
+![Version](https://img.shields.io/badge/version-2.1.3-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Python](https://img.shields.io/badge/python-3.7+-blue.svg)
 

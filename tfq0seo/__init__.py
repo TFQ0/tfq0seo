@@ -3,7 +3,7 @@ tfq0seo - Professional SEO Analysis Toolkit
 Open source alternative to Screaming Frog SEO Spider
 """
 
-__version__ = "2.1.2"
+__version__ = "2.1.3"
 __author__ = "tfq0"
 
 from .core.app import SEOAnalyzerApp

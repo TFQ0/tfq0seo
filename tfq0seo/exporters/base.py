@@ -15,6 +15,19 @@ from xml.dom import minidom
 import re
 from html import escape
 
+# Fix encoding issues on Windows
+import sys
+import locale
+if sys.platform == 'win32':
+    # Set UTF-8 as default encoding
+    import codecs
+    # Set environment variable for UTF-8
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    # Configure stdout/stderr for UTF-8
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, errors='replace')
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, errors='replace')
+
 logger = logging.getLogger(__name__)
 
 class ExportManager:
@@ -24,7 +37,9 @@ class ExportManager:
         self.template_dir = Path(__file__).parent.parent / 'templates'
         self.jinja_env = jinja2.Environment(
             loader=jinja2.FileSystemLoader(str(self.template_dir)),
-            autoescape=jinja2.select_autoescape(['html', 'xml'])
+            autoescape=jinja2.select_autoescape(['html', 'xml']),
+            enable_async=False,
+            finalize=lambda x: x if x is not None else ''
         )
         # Ensure template directory exists
         self.template_dir.mkdir(parents=True, exist_ok=True)
@@ -54,6 +69,22 @@ class ExportManager:
         elif isinstance(data, str):
             # Remove control characters
             return re.sub(r'[\x00-\x1F\x7F-\x9F]', '', data)
+        else:
+            return data
+    
+    def _handle_encoding_safe(self, data: Any) -> Any:
+        """Handle encoding issues by converting problematic characters"""
+        if isinstance(data, dict):
+            return {k: self._handle_encoding_safe(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [self._handle_encoding_safe(item) for item in data]
+        elif isinstance(data, str):
+            try:
+                # Try to encode/decode to handle problematic characters
+                return data.encode('utf-8', errors='replace').decode('utf-8')
+            except:
+                # Fallback to ASCII-safe representation
+                return data.encode('ascii', errors='xmlcharrefreplace').decode('ascii')
         else:
             return data
     
@@ -303,33 +334,41 @@ class ExportManager:
     
     def _format_summary_sheet(self, writer: pd.ExcelWriter, sheet_name: str) -> None:
         """Format the summary sheet"""
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        
         workbook = writer.book
         worksheet = writer.sheets[sheet_name]
         
-        # Header format
-        header_format = workbook.add_format({
-            'bold': True,
-            'font_color': 'white',
-            'bg_color': '#2c3e50',
-            'border': 1
-        })
+        # Define styles
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="2c3e50", end_color="2c3e50", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
         
-        # Apply header format
-        for col_num, value in enumerate(worksheet.row_values(0)):
-            worksheet.write(0, col_num, value, header_format)
+        # Apply header formatting
+        for cell in worksheet[1]:  # First row
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+            cell.border = thin_border
         
         # Auto-fit columns
         for column in worksheet.columns:
             max_length = 0
-            column = [column[0].column_letter]
-            for cell in worksheet[column[0]]:
+            column_letter = column[0].column_letter
+            for cell in column:
                 try:
                     if len(str(cell.value)) > max_length:
                         max_length = len(str(cell.value))
                 except:
                     pass
             adjusted_width = min(max_length + 2, 50)
-            worksheet.column_dimensions[column[0]].width = adjusted_width
+            worksheet.column_dimensions[column_letter].width = adjusted_width
     
     def _format_pages_sheet(self, writer: pd.ExcelWriter, sheet_name: str) -> None:
         """Format the pages sheet with conditional formatting"""
@@ -501,7 +540,7 @@ class ExportManager:
             # Load template
             template = self.jinja_env.get_template('report.html')
             
-            # Prepare data
+            # Prepare data - ensure all strings are properly encoded
             report_data = {
                 'title': f"SEO Report - {data.get('config', {}).get('url', 'Website')}",
                 'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -516,11 +555,17 @@ class ExportManager:
             # Add charts data
             report_data['charts_data'] = self._prepare_charts_data(data)
             
-            # Render template
-            html_content = template.render(**report_data)
+            # Render template with proper encoding handling
+            try:
+                html_content = template.render(**report_data)
+            except (UnicodeDecodeError, UnicodeEncodeError) as e:
+                # Handle encoding issues by converting problematic characters
+                logger.warning(f"Encoding issue encountered: {e}. Applying fallback encoding.")
+                report_data = self._handle_encoding_safe(report_data)
+                html_content = template.render(**report_data)
             
-            # Write file
-            with open(path, 'w', encoding='utf-8') as f:
+            # Write file - ensure proper UTF-8 encoding for Windows
+            with open(path, 'w', encoding='utf-8', errors='replace') as f:
                 f.write(html_content)
             
             logger.info(f"HTML export completed: {path}")
@@ -1280,16 +1325,16 @@ class ExportManager:
                         <tbody>
                             {% for page in pages[:50] %}
                             <tr>
-                                <td><a href="{{ page.url }}" target="_blank" style="color: var(--secondary-color); text-decoration: none;">{{ page.url[:60] }}{% if page.url|length > 60 %}...{% endif %}</a></td>
-                                <td>{{ page.title[:40] }}{% if page.title|length > 40 %}...{% endif %}</td>
-                                <td>{{ "%.2f"|format(page.load_time) }}s</td>
-                                <td>{{ page.content.word_count }}</td>
+                                <td><a href="{{ page.get('url', '') }}" target="_blank" style="color: var(--secondary-color); text-decoration: none;">{{ page.get('url', '')[:60] }}{% if page.get('url', '')|length > 60 %}...{% endif %}</a></td>
+                                <td>{{ page.get('title', '')[:40] }}{% if page.get('title', '')|length > 40 %}...{% endif %}</td>
+                                <td>{{ "%.2f"|format(page.get('load_time', 0)) }}s</td>
+                                <td>{{ page.get('content', {}).get('word_count', 0) }}</td>
                                 <td>
-                                    <span class="score {% if page.score >= 80 %}score-good{% elif page.score >= 60 %}score-medium{% else %}score-poor{% endif %}">
-                                        {{ "%.1f"|format(page.score) }}
+                                    <span class="score {% if page.get('score', 0) >= 80 %}score-good{% elif page.get('score', 0) >= 60 %}score-medium{% else %}score-poor{% endif %}">
+                                        {{ "%.1f"|format(page.get('score', 0)) }}
                                     </span>
                                 </td>
-                                <td>{{ page.issues|length }}</td>
+                                <td>{{ page.get('issues', [])|length }}</td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -1316,12 +1361,12 @@ class ExportManager:
                         </thead>
                         <tbody>
                             {% for page in pages %}
-                                {% for issue in page.issues[:5] %}
+                                {% for issue in page.get('issues', [])[:5] %}
                                 <tr>
-                                    <td><a href="{{ page.url }}" target="_blank" style="color: var(--secondary-color); text-decoration: none;">{{ page.url[:40] }}...</a></td>
-                                    <td>{{ issue.type }}</td>
-                                    <td><span class="issue-badge {{ issue.severity }}" style="font-size: 0.9em; padding: 4px 8px;">{{ issue.severity }}</span></td>
-                                    <td>{{ issue.message[:80] }}{% if issue.message|length > 80 %}...{% endif %}</td>
+                                    <td><a href="{{ page.get('url', '') }}" target="_blank" style="color: var(--secondary-color); text-decoration: none;">{{ page.get('url', '')[:40] }}...</a></td>
+                                    <td>{{ issue.get('type', '') }}</td>
+                                    <td><span class="issue-badge {{ issue.get('severity', '') }}" style="font-size: 0.9em; padding: 4px 8px;">{{ issue.get('severity', '') }}</span></td>
+                                    <td>{{ issue.get('message', '')[:80] }}{% if issue.get('message', '')|length > 80 %}...{% endif %}</td>
                                 </tr>
                                 {% endfor %}
                             {% endfor %}
@@ -1346,10 +1391,10 @@ class ExportManager:
                         <tbody>
                             {% for issue in summary.top_issues %}
                             <tr>
-                                <td>{{ issue.type }}</td>
-                                <td>{{ issue.message }}</td>
-                                <td><span class="issue-badge {{ issue.severity }}" style="font-size: 0.9em; padding: 4px 8px;">{{ issue.severity }}</span></td>
-                                <td>{{ issue.count }}</td>
+                                <td>{{ issue.get('type', '') }}</td>
+                                <td>{{ issue.get('message', '') }}</td>
+                                <td><span class="issue-badge {{ issue.get('severity', '') }}" style="font-size: 0.9em; padding: 4px 8px;">{{ issue.get('severity', '') }}</span></td>
+                                <td>{{ issue.get('count', 0) }}</td>
                             </tr>
                             {% endfor %}
                         </tbody>
