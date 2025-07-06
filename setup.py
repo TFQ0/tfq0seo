@@ -52,3 +52,6 @@ setup(
         'tfq0seo': ['templates/*.html', 'templates/*.css'],
     },
 ) 
+
+
+
