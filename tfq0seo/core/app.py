@@ -165,7 +165,8 @@ class SEOAnalyzerApp:
             enhanced_report['analysis_data'] = analysis_results
             
             # Add generation metadata
-            enhanced_report['generated_at'] = time.time()
+            import datetime
+            enhanced_report['generated_at'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             enhanced_report['report_version'] = '2.0'
             enhanced_report['enhancements'] = {
                 'contextual_recommendations': True,
@@ -177,7 +178,11 @@ class SEOAnalyzerApp:
             return enhanced_report
             
         except Exception as e:
+            import traceback
             logger.error(f"Error generating enhanced report: {e}")
+            logger.error(f"Enhanced report traceback: {traceback.format_exc()}")
+            logger.error(f"analysis_results type: {type(analysis_results)}")
+            logger.error(f"analysis_results keys: {list(analysis_results.keys()) if isinstance(analysis_results, dict) else 'Not a dict'}")
             # Return basic report on error
             return {
                 'error': f'Failed to generate enhanced report: {str(e)}',
@@ -248,7 +253,12 @@ class SEOAnalyzerApp:
     async def _analyze_page(self, page_data: Dict) -> Dict[str, Any]:
         """Analyze a single page"""
         try:
-            url = page_data['url']
+            # Validate page_data structure
+            if not isinstance(page_data, dict):
+                logger.error(f"Invalid page_data type: {type(page_data)}")
+                return None
+            
+            url = page_data.get('url', 'unknown')
             content = page_data.get('content', '')
             soup = self._create_soup(content)
             
@@ -354,7 +364,10 @@ class SEOAnalyzerApp:
             try:
                 link_analysis = self.link_analyzer.analyze(page_data, soup) if soup else {'issues': []}
             except Exception as e:
+                import traceback
                 logger.error(f"Link analyzer failed for {url}: {e}")
+                logger.error(f"Link analyzer traceback: {traceback.format_exc()}")
+                logger.error(f"page_data type: {type(page_data)}, content: {str(page_data)[:200] if page_data else 'None'}")
                 error_result = self.error_handler.handle_analyzer_error(e, {
                     'url': url,
                     'analyzer': 'links',
@@ -383,20 +396,24 @@ class SEOAnalyzerApp:
             issues.extend(link_analysis.get('issues', []))
             
             # Assess overall data quality
-            data_quality = self.data_quality_scorer.calculate_page_data_quality({
-                'url': url,
-                'final_url': page_data.get('final_url', url),
-                'status_code': page_data.get('status_code', 0),
-                'title': meta_analysis.get('title', ''),
-                'meta_description': meta_analysis.get('description', ''),
-                'meta_tags': meta_analysis,
-                'content': content_analysis,
-                'technical': technical_analysis,
-                'performance': performance_analysis,
-                'links': link_analysis,
-                'errors': [issue for issue in issues if issue.get('type') == 'analyzer_error'],
-                'validation': page_data.get('validation', {})
-            })
+            try:
+                data_quality = self.data_quality_scorer.calculate_page_data_quality({
+                    'url': url,
+                    'final_url': page_data.get('final_url', url),
+                    'status_code': page_data.get('status_code', 0),
+                    'title': meta_analysis.get('title', ''),
+                    'meta_description': meta_analysis.get('description', ''),
+                    'meta_tags': meta_analysis,
+                    'content': content_analysis,
+                    'technical': technical_analysis,
+                    'performance': performance_analysis,
+                    'links': link_analysis,
+                    'errors': [issue for issue in issues if issue.get('type') == 'analyzer_error'],
+                    'validation': page_data.get('validation', {})
+                })
+            except Exception as e:
+                logger.error(f"Data quality scoring failed for {url}: {e}")
+                data_quality = {'score': 0.5, 'warnings': [f'Data quality assessment failed: {str(e)}']}
             
             # Calculate comprehensive SEO score
             seo_score = self._calculate_comprehensive_seo_score(
@@ -417,14 +434,16 @@ class SEOAnalyzerApp:
                 'performance': performance_analysis,
                 'links': link_analysis,
                 'issues': issues,
-                'recommendations': self._generate_recommendations(issues, page_data),
+                'recommendations': self._safe_generate_recommendations(issues, page_data),
                 'score': seo_score['total'],
                 'score_breakdown': seo_score,
                 'data_quality': data_quality
             }
             
         except Exception as e:
-            logger.error(f"Critical error analyzing page {page_data.get('url', 'unknown')}: {e}")
+            import traceback
+            logger.error(f"Critical error analyzing page {page_data.get('url', 'unknown') if isinstance(page_data, dict) else 'unknown'}: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return None
     
     def _calculate_comprehensive_seo_score(self, meta_analysis: Dict, content_analysis: Dict,
@@ -645,6 +664,19 @@ class SEOAnalyzerApp:
         
         return sorted_issues[:10]
     
+    def _safe_generate_recommendations(self, issues: List[Dict], page_data: Dict = None) -> List[Dict]:
+        """Safe wrapper for generating recommendations"""
+        try:
+            return self._generate_recommendations(issues, page_data)
+        except Exception as e:
+            logger.error(f"Error generating recommendations: {e}")
+            return [{
+                'type': 'recommendation_error',
+                'severity': 'notice',
+                'message': f'Failed to generate recommendations: {str(e)}',
+                'priority': 1
+            }]
+    
     def _generate_recommendations(self, issues: List[Dict], page_data: Dict = None) -> List[Dict]:
         """Generate actionable recommendations based on issues using RecommendationEngine"""
         if not page_data:
@@ -688,14 +720,8 @@ class SEOAnalyzerApp:
         # Generate implementation timeline
         timeline = self.recommendation_engine.generate_implementation_timeline(prioritized)
         
-        # Return structured recommendations
-        return {
-            'all_recommendations': recommendations,
-            'prioritized': prioritized,
-            'implementation_timeline': timeline,
-            'total_issues': len(issues),
-            'website_type': recommendations[0].get('website_type', 'unknown') if recommendations else 'unknown'
-        }
+        # Return list of recommendations as expected by the rest of the code
+        return prioritized if prioritized else recommendations
     
     async def _analyze_competitors(self, analysis: Dict) -> Dict[str, Any]:
         """Analyze competitors and compare"""

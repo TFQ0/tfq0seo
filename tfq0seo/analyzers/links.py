@@ -33,13 +33,36 @@ class LinkAnalyzer:
                 }]
             }
         
+        # Validate page_data
+        if not isinstance(page_data, dict):
+            return {
+                'issues': [{
+                    'type': 'invalid_data',
+                    'severity': 'critical',
+                    'message': 'Invalid page data for link analysis'
+                }]
+            }
+        
         issues = []
         
         # Get all links from page data
         links_data = page_data.get('links', [])
+        if not isinstance(links_data, list):
+            links_data = []
+        
+        # Get current URL safely
+        current_url = page_data.get('url', '')
+        if not current_url:
+            return {
+                'issues': [{
+                    'type': 'missing_url',
+                    'severity': 'critical',
+                    'message': 'Missing URL for link analysis'
+                }]
+            }
         
         # Analyze link structure
-        link_analysis = self._analyze_link_structure(links_data, page_data['url'])
+        link_analysis = self._analyze_link_structure(links_data, current_url)
         
         # Check for broken links
         broken_links = self._identify_broken_links(links_data, page_data)
@@ -63,7 +86,7 @@ class LinkAnalyzer:
         # Analyze internal link structure
         internal_link_analysis = self._analyze_internal_links(
             link_analysis['internal_links'], 
-            page_data['url']
+            current_url
         )
         issues.extend(internal_link_analysis['issues'])
         
@@ -407,8 +430,17 @@ class LinkAnalyzer:
                 download_links += 1
             
             # Check external links without appropriate rel
-            parsed = urlparse(urljoin(soup.find('base', href=True).get('href') if soup.find('base', href=True) else '', href))
-            current_domain = urlparse(str(soup.base.get('href', '') if hasattr(soup, 'base') else '')).netloc
+            base_element = soup.find('base', href=True)
+            base_href = base_element.get('href') if base_element else ''
+            parsed = urlparse(urljoin(base_href, href))
+            
+            # Get current domain safely
+            current_domain = ''
+            if hasattr(soup, 'base') and soup.base is not None:
+                current_domain = urlparse(str(soup.base.get('href', ''))).netloc
+            else:
+                # Fallback - extract domain from first link or use empty string
+                current_domain = ''
             
             if parsed.netloc and parsed.netloc != current_domain:
                 # External link checks

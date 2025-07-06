@@ -830,7 +830,7 @@ class ContentAnalyzer:
             
             # Classify as internal or external
             if href.startswith('http://') or href.startswith('https://'):
-                if self.config.base_url and self.config.base_url in href:
+                if self.config.url and self.config.url in href:
                     internal_links.append(href)
                 else:
                     external_links.append(href)

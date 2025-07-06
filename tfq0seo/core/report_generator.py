@@ -102,10 +102,22 @@ class EnhancedReportGenerator:
         
         all_issues = []
         
+        # Validate input
+        if not isinstance(analysis_results, dict):
+            logger.warning(f"Invalid analysis_results type: {type(analysis_results)}")
+            return []
+        
         # Handle single page vs multi-page analysis
         if 'pages' in analysis_results:
             # Multi-page crawl
-            for page in analysis_results.get('pages', []):
+            pages = analysis_results.get('pages', [])
+            if not isinstance(pages, list):
+                logger.warning(f"Expected pages to be list, got: {type(pages)}")
+                return []
+                
+            for page in pages:
+                if not isinstance(page, dict):
+                    continue
                 page_issues = self._extract_page_issues(page)
                 for issue in page_issues:
                     issue['page_url'] = page.get('url', '')
@@ -124,19 +136,28 @@ class EnhancedReportGenerator:
         
         issues = []
         
+        # Validate input
+        if not isinstance(page_data, dict):
+            return []
+        
         # Direct issues array
         if 'issues' in page_data:
-            issues.extend(page_data['issues'])
+            page_issues = page_data['issues']
+            if isinstance(page_issues, list):
+                issues.extend(page_issues)
         
         # Extract from analyzer sections
         for section in ['meta_tags', 'content', 'technical', 'performance', 'links']:
             if section in page_data and isinstance(page_data[section], dict):
                 if 'issues' in page_data[section]:
                     section_issues = page_data[section]['issues']
-                    # Add source information
-                    for issue in section_issues:
-                        issue['source'] = section
-                    issues.extend(section_issues)
+                    # Ensure section_issues is a list
+                    if isinstance(section_issues, list):
+                        # Add source information
+                        for issue in section_issues:
+                            if isinstance(issue, dict):
+                                issue['source'] = section
+                        issues.extend(section_issues)
         
         return issues
     
@@ -357,7 +378,14 @@ class EnhancedReportGenerator:
         impact_sum = 0
         
         for group_issues in action_groups.values():
+            # Ensure group_issues is a list
+            if not isinstance(group_issues, list):
+                logger.warning(f"Expected list, got {type(group_issues)}: {group_issues}")
+                continue
+                
             for issue in group_issues:
+                if not isinstance(issue, dict):
+                    continue
                 severity_counts[issue.get('severity', 'notice')] += 1
                 impact_sum += issue.get('impact_score', 0.5)
         
@@ -785,7 +813,7 @@ class EnhancedReportGenerator:
         })
         
         # Content expansion
-        if any('thin_content' in str(analysis_results)):
+        if 'thin_content' in str(analysis_results):
             follow_ups.append({
                 'action': 'Develop content strategy',
                 'timing': 'After fixing technical issues',

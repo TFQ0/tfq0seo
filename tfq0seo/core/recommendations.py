@@ -43,9 +43,21 @@ class RecommendationEngine:
     def detect_website_type(self, page_data: Dict) -> WebsiteType:
         """Detect the type of website based on content and structure"""
         
+        if not isinstance(page_data, dict):
+            return WebsiteType.UNKNOWN
+        
         url = page_data.get('url', '')
         content = page_data.get('content', {})
-        structured_data = page_data.get('technical', {}).get('structured_data', [])
+        if not isinstance(content, dict):
+            content = {}
+        
+        technical = page_data.get('technical', {})
+        if not isinstance(technical, dict):
+            technical = {}
+        
+        structured_data = technical.get('structured_data', [])
+        if not isinstance(structured_data, list):
+            structured_data = []
         
         # Check structured data for clues
         for item in structured_data:
@@ -87,6 +99,13 @@ class RecommendationEngine:
     
     def generate_contextual_recommendation(self, issue: Dict, page_context: Dict) -> Dict:
         """Generate highly specific, contextual recommendations"""
+        
+        # Validate inputs
+        if not isinstance(issue, dict):
+            return issue if isinstance(issue, dict) else {'type': 'unknown', 'message': 'Invalid issue data'}
+        
+        if not isinstance(page_context, dict):
+            page_context = {}
         
         issue_type = issue.get('type', '')
         website_type = self.detect_website_type(page_context)
@@ -280,12 +299,21 @@ class RecommendationEngine:
     def prioritize_recommendations(self, recommendations: List[Dict], resources: Dict) -> List[Dict]:
         """Prioritize recommendations based on available resources"""
         
+        # Validate input
+        if not isinstance(recommendations, list):
+            return []
+        
+        if not isinstance(resources, dict):
+            resources = {}
+        
         time_available = resources.get('time_hours_per_week', 10)
         skill_level = resources.get('skill_level', 'intermediate')
         budget = resources.get('budget', 'medium')
         
         # Score each recommendation
         for rec in recommendations:
+            if not isinstance(rec, dict):
+                continue
             score = rec.get('priority_score', 5)
             
             # Adjust based on implementation difficulty
@@ -328,32 +356,51 @@ class RecommendationEngine:
             else:
                 long_term.append(rec)
         
-        return {
-            'quick_wins': quick_wins[:5],  # Top 5 quick wins
-            'major_improvements': major_improvements[:5],  # Top 5 major improvements
-            'long_term': long_term[:10],  # Top 10 long-term improvements
-            'all_prioritized': recommendations
-        }
+        # Return prioritized list - combine in order of priority
+        return quick_wins[:5] + major_improvements[:5] + long_term[:10]
     
-    def generate_implementation_timeline(self, prioritized_recs: Dict) -> Dict:
+    def generate_implementation_timeline(self, prioritized_recs: List[Dict]) -> Dict:
         """Generate a suggested implementation timeline"""
+        
+        # Validate input
+        if not isinstance(prioritized_recs, list):
+            prioritized_recs = []
+        
+        # Categorize recommendations by difficulty/impact
+        quick_wins = []
+        major_improvements = []
+        long_term = []
+        
+        for rec in prioritized_recs:
+            if not isinstance(rec, dict):
+                continue
+                
+            difficulty = rec.get('implementation_difficulty', 'medium')
+            impact = rec.get('estimated_impact', 'medium')
+            
+            if difficulty == 'easy' and impact in ['high', 'medium']:
+                quick_wins.append(rec)
+            elif impact == 'high':
+                major_improvements.append(rec)
+            else:
+                long_term.append(rec)
         
         timeline = {
             'week_1': {
                 'focus': 'Quick Wins - Immediate Impact',
-                'tasks': prioritized_recs['quick_wins'][:3],
+                'tasks': quick_wins[:3],
                 'estimated_time': '5-10 hours',
                 'expected_results': 'Improved user experience, basic SEO fixes'
             },
             'week_2_4': {
                 'focus': 'Major Improvements - High Impact',
-                'tasks': prioritized_recs['major_improvements'][:3],
+                'tasks': major_improvements[:3],
                 'estimated_time': '15-25 hours',
                 'expected_results': 'Significant SEO improvements, better rankings'
             },
             'month_2_3': {
                 'focus': 'Ongoing Optimization',
-                'tasks': prioritized_recs['long_term'][:5],
+                'tasks': long_term[:5],
                 'estimated_time': '10-15 hours/week',
                 'expected_results': 'Sustained growth, competitive advantage'
             }
