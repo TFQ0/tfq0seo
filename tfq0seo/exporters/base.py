@@ -334,33 +334,41 @@ class ExportManager:
     
     def _format_summary_sheet(self, writer: pd.ExcelWriter, sheet_name: str) -> None:
         """Format the summary sheet"""
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        
         workbook = writer.book
         worksheet = writer.sheets[sheet_name]
         
-        # Header format
-        header_format = workbook.add_format({
-            'bold': True,
-            'font_color': 'white',
-            'bg_color': '#2c3e50',
-            'border': 1
-        })
+        # Define styles
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="2c3e50", end_color="2c3e50", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
         
-        # Apply header format
-        for col_num, value in enumerate(worksheet.row_values(0)):
-            worksheet.write(0, col_num, value, header_format)
+        # Apply header formatting
+        for cell in worksheet[1]:  # First row
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+            cell.border = thin_border
         
         # Auto-fit columns
         for column in worksheet.columns:
             max_length = 0
-            column = [column[0].column_letter]
-            for cell in worksheet[column[0]]:
+            column_letter = column[0].column_letter
+            for cell in column:
                 try:
                     if len(str(cell.value)) > max_length:
                         max_length = len(str(cell.value))
                 except:
                     pass
             adjusted_width = min(max_length + 2, 50)
-            worksheet.column_dimensions[column[0]].width = adjusted_width
+            worksheet.column_dimensions[column_letter].width = adjusted_width
     
     def _format_pages_sheet(self, writer: pd.ExcelWriter, sheet_name: str) -> None:
         """Format the pages sheet with conditional formatting"""
