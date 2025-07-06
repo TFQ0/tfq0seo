@@ -169,7 +169,7 @@ def crawl(ctx, url, depth, max_pages, concurrent, delay, format, output, exclude
             max_pages=max_pages,
             concurrent_requests=concurrent,
             delay=delay,
-            exclude_patterns=list(exclude),
+            exclude_patterns=[*exclude],
             respect_robots=not no_robots,
             include_external=include_external,
             user_agent=user_agent,
@@ -203,8 +203,7 @@ def crawl(ctx, url, depth, max_pages, concurrent, delay, format, output, exclude
             
             try:
                 results = asyncio.run(app.crawl(
-                    progress_callback=update_progress,
-                    crawl_state=crawl_state
+                    progress_callback=update_progress
                 ))
                 
                 # Save crawl state for resume
