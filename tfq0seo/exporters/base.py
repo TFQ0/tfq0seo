@@ -537,8 +537,16 @@ class ExportManager:
                 page_data = data
                 data = self._convert_single_page_to_crawl_format(page_data)
             
+            # Determine which template to use based on whether this is an enhanced report
+            is_enhanced_report = 'executive_summary' in data or 'action_plan' in data or data.get('report_version') == '2.0'
+            template_name = 'enhanced_report.html' if is_enhanced_report else 'report.html'
+            
             # Load template
-            template = self.jinja_env.get_template('report.html')
+            try:
+                template = self.jinja_env.get_template(template_name)
+            except Exception as e:
+                logger.warning(f"Failed to load {template_name}: {e}. Falling back to report.html")
+                template = self.jinja_env.get_template('report.html')
             
             # Prepare data - ensure all strings are properly encoded
             report_data = {
@@ -551,6 +559,17 @@ class ExportManager:
                 'config': data.get('config', {}),
                 'is_single_page': is_single_page
             }
+            
+            # Add enhanced report data if present
+            if is_enhanced_report:
+                report_data.update({
+                    'executive_summary': data.get('executive_summary', {}),
+                    'action_plan': data.get('action_plan', {}),
+                    'implementation_timeline': data.get('implementation_timeline', {}),
+                    'expected_results': data.get('expected_results', {}),
+                    'resources_needed': data.get('resources_needed', {}),
+                    'analysis_data': data.get('analysis_data', data)
+                })
             
             # Add charts data
             report_data['charts_data'] = self._prepare_charts_data(data)
