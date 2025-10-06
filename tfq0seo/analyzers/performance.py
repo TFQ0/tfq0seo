@@ -1,14 +1,24 @@
 """
-Performance analyzer for page speed and Core Web Vitals
+Performance analyzer for page speed and Core Web Vitals - Optimized
 """
 from typing import Dict, List, Optional, Any, Tuple
 import re
 import gzip
 from urllib.parse import urlparse
 import logging
-from ..core.issue_helper import IssueHelper
 
 logger = logging.getLogger(__name__)
+
+# Simple issue creation - fast and lightweight
+def create_issue(issue_type: str, severity: str = 'warning', message: str = '', **kwargs) -> Dict:
+    """Create a simple issue dictionary"""
+    issue = {
+        'type': issue_type,
+        'severity': severity,
+        'message': message or issue_type.replace('_', ' ').title()
+    }
+    issue.update(kwargs)
+    return issue
 
 class PerformanceAnalyzer:
     """Analyzer for page performance metrics"""
@@ -87,14 +97,14 @@ class PerformanceAnalyzer:
         issues = []
         
         if load_time > self.config.max_page_load_time:
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'slow_page',
                 current_value=f'{load_time:.2f}s',
                 recommended_value=f'<{self.config.max_page_load_time}s'
             ))
         elif load_time > 2:
             # For moderate load time, we still use slow_page but note it's less severe
-            issue = IssueHelper.create_issue(
+            issue = create_issue(
                 'slow_page',
                 current_value=f'{load_time:.2f}s',
                 recommended_value='<2s'
@@ -134,14 +144,14 @@ class PerformanceAnalyzer:
         
         # Check sizes
         if raw_size_kb > 500:
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'large_page_size',
                 current_value=f'{raw_size_kb:.0f}KB uncompressed',
                 recommended_value='<500KB'
             ))
         
         if compressed_size_kb > 150:
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'large_page_size',
                 current_value=f'{compressed_size_kb:.0f}KB compressed',
                 recommended_value='<150KB compressed'
@@ -294,7 +304,7 @@ class PerformanceAnalyzer:
         issues = []
         
         if not is_compressed and len(content) > 1024:  # Only flag if content > 1KB
-            issues.append(IssueHelper.create_issue('no_compression'))
+            issues.append(create_issue('no_compression'))
         
         return {
             'enabled': is_compressed,
@@ -330,7 +340,7 @@ class PerformanceAnalyzer:
         
         # Check for caching issues
         if not cache_control:
-            issues.append(IssueHelper.create_issue('no_cache_control'))
+            issues.append(create_issue('no_cache_control'))
         elif 'no-cache' in cache_directives or 'no-store' in cache_directives:
             # Not in IssueHelper, keep manual for now
             issues.append({

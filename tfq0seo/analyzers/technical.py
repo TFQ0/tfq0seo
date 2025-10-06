@@ -1,5 +1,5 @@
 """
-Technical SEO analyzer
+Technical SEO analyzer - Optimized
 """
 from typing import Dict, List, Optional, Any, Set
 from bs4 import BeautifulSoup
@@ -7,9 +7,19 @@ from urllib.parse import urlparse, urljoin
 import re
 import json
 import logging
-from ..core.issue_helper import IssueHelper
 
 logger = logging.getLogger(__name__)
+
+# Simple issue creation - fast and lightweight
+def create_issue(issue_type: str, severity: str = 'warning', message: str = '', **kwargs) -> Dict:
+    """Create a simple issue dictionary"""
+    issue = {
+        'type': issue_type,
+        'severity': severity,
+        'message': message or issue_type.replace('_', ' ').title()
+    }
+    issue.update(kwargs)
+    return issue
 
 class TechnicalAnalyzer:
     """Analyzer for technical SEO aspects"""
@@ -27,7 +37,7 @@ class TechnicalAnalyzer:
         is_https = parsed_url.scheme == 'https'
         
         if not is_https:
-            issues.append(IssueHelper.create_issue('no_https'))
+            issues.append(create_issue('no_https'))
         
         # Response headers analysis
         headers = page_data.get('headers', {})
@@ -165,7 +175,7 @@ class TechnicalAnalyzer:
                     })
             else:
                 severity = 'warning' if header == 'Strict-Transport-Security' else 'notice'
-                issues.append(IssueHelper.create_issue(
+                issues.append(create_issue(
                     'missing_security_header',
                     header=header,
                     protection=config['protection']
@@ -176,7 +186,7 @@ class TechnicalAnalyzer:
         x_powered_by = headers.get('X-Powered-By', '')
         
         if server and re.search(r'(apache|nginx|iis|microsoft-iis)/[\d\.]+', server.lower()):
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'server_version_exposed',
                 server_info=server
             ))
@@ -250,7 +260,7 @@ class TechnicalAnalyzer:
         canonical_link = soup.find('link', {'rel': 'canonical'})
         
         if not canonical_link:
-            issues.append(IssueHelper.create_issue('missing_canonical'))
+            issues.append(create_issue('missing_canonical'))
             return {'canonical': '', 'is_self': True, 'issues': issues}
         
         canonical_url = canonical_link.get('href', '')
@@ -323,7 +333,7 @@ class TechnicalAnalyzer:
         viewport = soup.find('meta', attrs={'name': 'viewport'})
         if not viewport:
             is_mobile_friendly = False
-            issues.append(IssueHelper.create_issue('no_viewport'))
+            issues.append(create_issue('no_viewport'))
         else:
             content = viewport.get('content', '')
             features['viewport'] = content
@@ -343,7 +353,7 @@ class TechnicalAnalyzer:
                 })
             
             if 'user-scalable=no' in content or 'maximum-scale=1' in content:
-                issues.append(IssueHelper.create_issue('viewport_zoom_disabled'))
+                issues.append(create_issue('viewport_zoom_disabled'))
         
         # Check for mobile-specific meta tags
         apple_tags = {
@@ -442,7 +452,7 @@ class TechnicalAnalyzer:
             actual_size = len(page_data['content'].encode('utf-8'))
             
             if not compression and actual_size > 1024:  # 1KB threshold
-                issues.append(IssueHelper.create_issue(
+                issues.append(create_issue(
                     'no_compression',
                     file_size=actual_size
                 ))
@@ -485,7 +495,7 @@ class TechnicalAnalyzer:
         max_age = 0
         
         if not cache_control:
-            issues.append(IssueHelper.create_issue('no_cache_control'))
+            issues.append(create_issue('no_cache_control'))
         else:
             # Parse cache directives
             directives = [d.strip() for d in cache_control.split(',')]

@@ -1,5 +1,5 @@
 """
-Content analyzer for text analysis and readability
+Content analyzer for text analysis and readability - Optimized
 """
 from typing import Dict, List, Optional, Any, Set, Tuple
 from bs4 import BeautifulSoup, NavigableString, Comment
@@ -12,9 +12,19 @@ import logging
 from nltk.stem import PorterStemmer
 from nltk.corpus import stopwords
 import nltk
-from ..core.issue_helper import IssueHelper
 
 logger = logging.getLogger(__name__)
+
+# Simple issue creation - fast and lightweight
+def create_issue(issue_type: str, severity: str = 'warning', message: str = '', **kwargs) -> Dict:
+    """Create a simple issue dictionary"""
+    issue = {
+        'type': issue_type,
+        'severity': severity,
+        'message': message or issue_type.replace('_', ' ').title()
+    }
+    issue.update(kwargs)
+    return issue
 
 # Download required NLTK data if not present
 try:
@@ -22,7 +32,7 @@ try:
 except LookupError:
     try:
         nltk.download('stopwords', quiet=True)
-    except:
+    except Exception:
         logger.warning("Could not download NLTK stopwords")
 
 class ContentAnalyzer:
@@ -31,16 +41,24 @@ class ContentAnalyzer:
     def __init__(self, config):
         self.config = config
         self.stemmer = PorterStemmer()
+        
+        # Load stopwords with fallback
         try:
             self.stop_words = set(stopwords.words('english'))
-        except:
-            # Fallback to basic stop words if NLTK data not available
-            self.stop_words = {
-                'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
-                'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the',
-                'to', 'was', 'will', 'with', 'the', 'this', 'but', 'they', 'have',
-                'had', 'what', 'when', 'where', 'who', 'which', 'why', 'how'
-            }
+        except Exception:
+            self.stop_words = self._get_fallback_stopwords()
+    
+    def _get_fallback_stopwords(self):
+        """Get fallback stopwords when NLTK is not available"""
+        return {
+            'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
+            'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the',
+            'to', 'was', 'will', 'with', 'the', 'this', 'but', 'they', 'have',
+            'had', 'what', 'when', 'where', 'who', 'which', 'why', 'how',
+            'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other',
+            'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same',
+            'so', 'than', 'too', 'very', 'can', 'will', 'just', 'should'
+        }
     
     def analyze(self, soup: Optional[BeautifulSoup], raw_html: str = '') -> Dict[str, Any]:
         """Analyze content quality and structure"""
@@ -71,7 +89,7 @@ class ContentAnalyzer:
         
         # Check content length
         if word_count < self.config.min_content_words:
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'thin_content',
                 current_value=f"{word_count} words",
                 recommended_value=f"{self.config.min_content_words}+ words"
@@ -92,7 +110,7 @@ class ContentAnalyzer:
         readability_data = self._calculate_readability_scores(text_content)
         
         if readability_data['flesch_score'] < self.config.min_readability_score and word_count > 50:
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'poor_readability',
                 current_value=f"Flesch score: {readability_data['flesch_score']:.1f}",
                 recommended_value=f"{self.config.min_readability_score}+"
@@ -280,7 +298,7 @@ class ContentAnalyzer:
             
             # Check for skipped levels
             if current_level > prev_level + 1 and prev_level > 0:
-                issues.append(IssueHelper.create_issue(
+                issues.append(create_issue(
                     'heading_hierarchy_skip',
                     from_level=f"H{prev_level}",
                     to_level=f"H{current_level}",
@@ -289,7 +307,7 @@ class ContentAnalyzer:
             
             # Check for empty headings
             if not heading['text']:
-                issues.append(IssueHelper.create_issue(
+                issues.append(create_issue(
                     'empty_heading',
                     heading_level=f"H{current_level}"
                 ))
@@ -303,7 +321,7 @@ class ContentAnalyzer:
             if heading['level'] == 2 and not h1_found:
                 h2_found = True
             if heading['level'] == 1 and h2_found:
-                issues.append(IssueHelper.create_issue('h1_after_h2'))
+                issues.append(create_issue('h1_after_h2'))
                 break
         
         return {
@@ -430,7 +448,7 @@ class ContentAnalyzer:
         
         # Generate issues based on stats
         if stats['missing_alt'] > 0:
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'missing_alt_text',
                 count=stats['missing_alt']
             ))
@@ -532,7 +550,7 @@ class ContentAnalyzer:
         
         # Check for common issues
         if not semantic_elements['main']:
-            issues.append(IssueHelper.create_issue('missing_main_element'))
+            issues.append(create_issue('missing_main_element'))
         
         if len(semantic_elements['main']) > 1:
             issues.append({
@@ -552,7 +570,7 @@ class ContentAnalyzer:
         text_ratio = (text_length / html_length * 100) if html_length > 0 else 0
         
         if text_ratio < 25 and html_length > 1000:  # Less than 25% text content
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'low_text_to_html_ratio',
                 current_ratio=f"{text_ratio:.1f}%",
                 recommended_ratio="25%+"
@@ -840,14 +858,14 @@ class ContentAnalyzer:
         
         # Check for issues
         if len(internal_links) > 150:
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'excessive_internal_links',
                 count=len(internal_links),
                 recommended_max=150
             ))
         
         if len(external_links) == 0 and len(all_links) > 10:
-            issues.append(IssueHelper.create_issue('no_external_links'))
+            issues.append(create_issue('no_external_links'))
         
         # Check for links without descriptive text
         generic_anchor_texts = ['click here', 'here', 'read more', 'more', 'link']

@@ -18,13 +18,11 @@ import hashlib
 import ipaddress
 import socket
 from contextlib import asynccontextmanager
-from .real_time_validator import RealTimeValidator
-
 console = Console()
 logger = logging.getLogger(__name__)
 
 class WebCrawler:
-    """Asynchronous web crawler for SEO analysis"""
+    """Asynchronous web crawler for SEO analysis - optimized for speed"""
     
     def __init__(self, config):
         self.config = config
@@ -41,7 +39,6 @@ class WebCrawler:
         self.redirect_chains: Dict[str, List[Tuple[str, int]]] = {}
         self.retry_count = 3
         self.retry_delay = 1.0
-        self.validator = RealTimeValidator()
         
     async def initialize(self):
         """Initialize crawler session and robots.txt"""
@@ -341,8 +338,8 @@ class WebCrawler:
                         except Exception as e:
                             logger.error(f"Error parsing HTML for {url}: {e}")
                     
-                    # Prepare page data for validation
-                    page_data = {
+                    # Prepare page data
+                    return {
                         'url': url,
                         'final_url': final_url,
                         'status_code': status_code,
@@ -352,33 +349,13 @@ class WebCrawler:
                         'load_time': load_time,
                         'links': links,
                         'redirect_chain': redirect_chain,
-                        'crawled_at': time.time(),
                         'content_length': len(content.encode('utf-8')),
                         'response_headers': {
                             'cache_control': headers.get('Cache-Control', ''),
-                            'expires': headers.get('Expires', ''),
-                            'last_modified': headers.get('Last-Modified', ''),
-                            'etag': headers.get('ETag', ''),
                             'content_encoding': headers.get('Content-Encoding', ''),
-                            'server': headers.get('Server', ''),
-                            'x_powered_by': headers.get('X-Powered-By', '')
+                            'server': headers.get('Server', '')
                         }
                     }
-                    
-                    # Perform real-time validation
-                    if status_code == 200 and 'text/html' in content_type:
-                        validation_result = self.validator.validate_page_data(page_data)
-                        page_data['validation'] = validation_result
-                        
-                        # Log warnings if any
-                        if validation_result.get('warnings'):
-                            for warning in validation_result['warnings'][:3]:  # Log first 3 warnings
-                                logger.warning(f"Validation warning for {url}: {warning['message']}")
-                        
-                        # Add data quality score to page data
-                        page_data['data_quality_score'] = validation_result.get('data_quality_score', 1.0)
-                    
-                    return page_data
                     
             except asyncio.TimeoutError:
                 if retry_count < self.retry_count:
@@ -498,7 +475,7 @@ class WebCrawler:
                                 url, depth = batch[i]
                                 logger.error(f"Error processing {url}: {result}")
                 
-                # Clean up large content from results to save memory
+                # Return results with optimized memory usage
                 for url, data in self.results.items():
                     if 'content' in data and len(data['content']) > 100000:  # 100KB
                         # Keep only first 100KB for very large pages

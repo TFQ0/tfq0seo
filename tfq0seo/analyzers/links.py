@@ -1,14 +1,24 @@
 """
-Link analyzer for internal/external links and broken links
+Link analyzer for internal/external links and broken links - Optimized
 """
 from typing import Dict, List, Optional, Any, Set, Tuple
 from bs4 import BeautifulSoup, NavigableString
 from urllib.parse import urlparse, urljoin, parse_qs
 import re
 import logging
-from ..core.issue_helper import IssueHelper
 
 logger = logging.getLogger(__name__)
+
+# Simple issue creation - fast and lightweight
+def create_issue(issue_type: str, severity: str = 'warning', message: str = '', **kwargs) -> Dict:
+    """Create a simple issue dictionary"""
+    issue = {
+        'type': issue_type,
+        'severity': severity,
+        'message': message or issue_type.replace('_', ' ').title()
+    }
+    issue.update(kwargs)
+    return issue
 
 class LinkAnalyzer:
     """Analyzer for link structure and quality"""
@@ -67,7 +77,7 @@ class LinkAnalyzer:
         # Check for broken links
         broken_links = self._identify_broken_links(links_data, page_data)
         if broken_links:
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'broken_internal_links',
                 additional_info={
                     'count': len(broken_links),
@@ -528,7 +538,7 @@ class LinkAnalyzer:
                 'message': f'Only {len(internal_links)} internal links found'
             })
         elif len(internal_links) > 100:
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'excessive_internal_links',
                 current_value=f'{len(internal_links)} internal links',
                 recommended_value='100-150 internal links maximum'
@@ -729,7 +739,7 @@ class LinkAnalyzer:
         # Check if the current page arrived via redirects
         redirect_chain = page_data.get('redirect_chain', [])
         if len(redirect_chain) > 1:
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'redirect_chains',
                 additional_info={
                     'chain_length': len(redirect_chain),

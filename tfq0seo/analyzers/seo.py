@@ -1,5 +1,5 @@
 """
-SEO meta tags analyzer
+SEO meta tags analyzer - Optimized
 """
 from typing import Dict, List, Optional, Any, Tuple
 from bs4 import BeautifulSoup, Tag
@@ -7,9 +7,19 @@ import re
 import json
 import logging
 from urllib.parse import urljoin, urlparse
-from ..core.issue_helper import IssueHelper
 
 logger = logging.getLogger(__name__)
+
+# Simple issue creation - fast and lightweight
+def create_issue(issue_type: str, severity: str = 'warning', message: str = '', **kwargs) -> Dict:
+    """Create a simple issue dictionary"""
+    issue = {
+        'type': issue_type,
+        'severity': severity,
+        'message': message or issue_type.replace('_', ' ').title()
+    }
+    issue.update(kwargs)
+    return issue
 
 class SEOAnalyzer:
     """Analyzer for SEO meta tags and structured data"""
@@ -126,34 +136,31 @@ class SEOAnalyzer:
         title_tags = soup.find_all('title')
         
         if not title_tags:
-            issues.append(IssueHelper.create_issue('missing_title'))
+            issues.append(create_issue('missing_title', 'critical', 'Page is missing a title tag'))
             return {'title': '', 'issues': issues}
         
         if len(title_tags) > 1:
-            issues.append(IssueHelper.create_issue(
-                'multiple_titles',
-                count=len(title_tags)
-            ))
+            issues.append(create_issue('multiple_titles', 'warning', f'Page has {len(title_tags)} title tags'))
         
         # Get first title tag
         title = title_tags[0].get_text(strip=True)
         
         if not title:
-            issues.append(IssueHelper.create_issue('empty_title'))
+            issues.append(create_issue('empty_title', 'critical', 'Title tag is empty'))
         else:
             # Check length
             title_length = len(title)
             pixel_width = self._calculate_pixel_width(title)
             
             if title_length < self.config.title_min_length:
-                issues.append(IssueHelper.create_issue(
+                issues.append(create_issue(
                     'short_title',
                     current_value=f"{title_length} chars",
                     recommended_value=f"{self.config.title_min_length}-{self.config.title_max_length} chars",
                     pixel_width=pixel_width
                 ))
             elif title_length > self.config.title_max_length:
-                issues.append(IssueHelper.create_issue(
+                issues.append(create_issue(
                     'long_title',
                     current_value=f"{title_length} chars",
                     recommended_value=f"{self.config.title_min_length}-{self.config.title_max_length} chars",
@@ -162,7 +169,7 @@ class SEOAnalyzer:
             
             # Check pixel width (Google typically shows ~580px on desktop)
             if pixel_width > 580:
-                issues.append(IssueHelper.create_issue(
+                issues.append(create_issue(
                     'title_truncated',
                     pixel_width=pixel_width,
                     max_width=580
@@ -170,7 +177,7 @@ class SEOAnalyzer:
             
             # Check for common issues
             if title.lower() == 'untitled' or title.lower() == 'home':
-                issues.append(IssueHelper.create_issue(
+                issues.append(create_issue(
                     'generic_title',
                     current_title=title
                 ))
@@ -184,7 +191,7 @@ class SEOAnalyzer:
                 
                 max_freq = max(word_freq.values())
                 if max_freq > 2:
-                    issues.append(IssueHelper.create_issue(
+                    issues.append(create_issue(
                         'title_keyword_stuffing',
                         repeated_word_count=max_freq
                     ))
@@ -203,11 +210,11 @@ class SEOAnalyzer:
                 desc_tags.append(meta)
         
         if not desc_tags:
-            issues.append(IssueHelper.create_issue('missing_description'))
+            issues.append(create_issue('missing_description'))
             return {'description': '', 'issues': issues, 'duplicates': 0}
         
         if len(desc_tags) > 1:
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'multiple_descriptions',
                 count=len(desc_tags)
             ))
@@ -216,19 +223,19 @@ class SEOAnalyzer:
         description = desc_tags[0].get('content', '').strip()
         
         if not description:
-            issues.append(IssueHelper.create_issue('empty_description'))
+            issues.append(create_issue('empty_description'))
         else:
             desc_length = len(description)
             pixel_width = self._calculate_pixel_width(description)
             
             if desc_length < self.config.description_min_length:
-                issues.append(IssueHelper.create_issue(
+                issues.append(create_issue(
                     'short_description',
                     current_value=f"{desc_length} chars",
                     recommended_value=f"{self.config.description_min_length}-{self.config.description_max_length} chars"
                 ))
             elif desc_length > self.config.description_max_length:
-                issues.append(IssueHelper.create_issue(
+                issues.append(create_issue(
                     'long_description',
                     current_value=f"{desc_length} chars",
                     recommended_value=f"{self.config.description_min_length}-{self.config.description_max_length} chars"
@@ -290,7 +297,7 @@ class SEOAnalyzer:
         missing_required = [tag for tag in required_tags if tag not in og_tags]
         
         if og_tags and missing_required:
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'incomplete_open_graph',
                 missing_tags=', '.join(missing_required)
             ))
@@ -584,7 +591,7 @@ class SEOAnalyzer:
             return {'url': '', 'issues': issues}
         
         if len(canonical_tags) > 1:
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'multiple_canonicals',
                 count=len(canonical_tags)
             ))
@@ -595,7 +602,7 @@ class SEOAnalyzer:
             # Validate canonical URL
             parsed = urlparse(canonical_url)
             if not parsed.scheme or not parsed.netloc:
-                issues.append(IssueHelper.create_issue('invalid_canonical'))
+                issues.append(create_issue('invalid_canonical'))
         
         return {'url': canonical_url, 'issues': issues}
     
@@ -622,10 +629,10 @@ class SEOAnalyzer:
         
         # Check for problematic directives
         if 'noindex' in directives:
-            issues.append(IssueHelper.create_issue('noindex'))
+            issues.append(create_issue('noindex'))
         
         if 'nofollow' in directives:
-            issues.append(IssueHelper.create_issue('nofollow'))
+            issues.append(create_issue('nofollow'))
         
         if 'nosnippet' in directives:
             issues.append({
@@ -703,7 +710,7 @@ class SEOAnalyzer:
         viewport_tag = soup.find('meta', attrs={'name': 'viewport'})
         
         if not viewport_tag:
-            issues.append(IssueHelper.create_issue('missing_viewport'))
+            issues.append(create_issue('missing_viewport'))
             return {'has_viewport': False, 'content': '', 'issues': issues}
         
         content = viewport_tag.get('content', '')
@@ -748,9 +755,9 @@ class SEOAnalyzer:
         h1_texts = []
         
         if not h1_tags:
-            issues.append(IssueHelper.create_issue('missing_h1'))
+            issues.append(create_issue('missing_h1'))
         elif len(h1_tags) > 1:
-            issues.append(IssueHelper.create_issue(
+            issues.append(create_issue(
                 'multiple_h1',
                 count=len(h1_tags)
             ))
@@ -760,7 +767,7 @@ class SEOAnalyzer:
             if text:
                 h1_texts.append(text)
             else:
-                issues.append(IssueHelper.create_issue('empty_h1'))
+                issues.append(create_issue('empty_h1'))
         
         # Check for excessively long H1
         for text in h1_texts:

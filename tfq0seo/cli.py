@@ -20,11 +20,11 @@ from urllib.parse import urlparse
 
 console = Console()
 
-# Version should be imported from package
+# Version import
 try:
     from . import __version__
 except ImportError:
-    __version__ = '2.1.3'
+    __version__ = '2.2.0'
 
 def setup_logging(verbose: bool, quiet: bool) -> None:
     """Setup logging based on verbosity settings"""
@@ -123,10 +123,9 @@ def cli(ctx, verbose, quiet):
 @click.option('--resume', help='Resume from previous crawl state')
 @click.option('--dry-run', is_flag=True, help='Show what would be crawled without actually crawling')
 @click.option('--sitemap-only', is_flag=True, help='Only crawl URLs from sitemap.xml')
-@click.option('--enhanced', is_flag=True, help='Generate enhanced report with recommendations (HTML format only)')
 @click.pass_context
 def crawl(ctx, url, depth, max_pages, concurrent, delay, format, output, exclude, 
-         no_robots, include_external, user_agent, config, resume, dry_run, sitemap_only, enhanced):
+         no_robots, include_external, user_agent, config, resume, dry_run, sitemap_only):
     """Crawl entire website and analyze SEO"""
     verbose = ctx.obj.get('verbose', False)
     quiet = ctx.obj.get('quiet', False)
@@ -215,14 +214,6 @@ def crawl(ctx, url, depth, max_pages, concurrent, delay, format, output, exclude
                         'config': config.to_dict()
                     }, f)
                 
-                # Generate enhanced report if requested
-                if enhanced and format == 'html':
-                    if not quiet:
-                        console.print("[bold cyan]Generating enhanced report with recommendations...[/bold cyan]")
-                    results = app.generate_enhanced_report(results)
-                elif enhanced and format != 'html':
-                    console.print("[yellow]Warning: --enhanced flag only works with HTML format, ignoring[/yellow]")
-                
                 # Export results
                 exporter = ExportManager()
                 
@@ -266,9 +257,8 @@ def crawl(ctx, url, depth, max_pages, concurrent, delay, format, output, exclude
 @click.option('--depth', type=click.Choice(['basic', 'advanced', 'complete']), default='advanced')
 @click.option('--format', '-f', type=click.Choice(['json', 'csv', 'xlsx', 'html']), default='json')
 @click.option('--output', '-o', help='Output file path')
-@click.option('--enhanced', is_flag=True, help='Generate enhanced report with recommendations (HTML format only)')
 @click.pass_context
-def analyze(ctx, url, comprehensive, target_keyword, competitors, depth, format, output, enhanced):
+def analyze(ctx, url, comprehensive, target_keyword, competitors, depth, format, output):
     """Analyze single URL for SEO"""
     verbose = ctx.obj.get('verbose', False)
     quiet = ctx.obj.get('quiet', False)
@@ -302,26 +292,6 @@ def analyze(ctx, url, comprehensive, target_keyword, competitors, depth, format,
         with console.status("Analyzing page..."):
             try:
                 results = asyncio.run(app.analyze_single(url))
-                
-                # Generate enhanced report if requested
-                if enhanced and format == 'html':
-                    if not quiet:
-                        console.print("[bold cyan]Generating enhanced report with recommendations...[/bold cyan]")
-                    # For single page analysis, we need to wrap it in a crawl-like structure
-                    crawl_results = {
-                        'pages': [results],
-                        'config': config.to_dict(),
-                        'summary': {
-                            'total_pages': 1,
-                            'average_seo_score': results.get('score', 0),
-                            'average_load_time': results.get('performance', {}).get('load_time', 0)
-                        }
-                    }
-                    enhanced_results = app.generate_enhanced_report(crawl_results)
-                    # Extract the single page back out but keep the enhanced data
-                    results = enhanced_results
-                elif enhanced and format != 'html':
-                    console.print("[yellow]Warning: --enhanced flag only works with HTML format, ignoring[/yellow]")
                 
                 # Export results
                 exporter = ExportManager()

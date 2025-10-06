@@ -1,7 +1,9 @@
 """
-Main application module for tfq0seo
+Main application module for tfq0seo - Optimized for speed and accuracy
 """
 import asyncio
+import re
+import textstat
 from typing import Dict, List, Optional, Callable, Any
 from .crawler import WebCrawler
 from .config import Config
@@ -10,21 +12,14 @@ from ..analyzers.content import ContentAnalyzer
 from ..analyzers.technical import TechnicalAnalyzer
 from ..analyzers.performance import PerformanceAnalyzer
 from ..analyzers.links import LinkAnalyzer
-from .error_handler import SmartErrorHandler
-from .recommendations import RecommendationEngine
-from .data_quality import DataQualityScorer
-from .report_generator import EnhancedReportGenerator
-import textstat
-import re
 from bs4 import BeautifulSoup
 import logging
 from contextlib import asynccontextmanager
-import time
 
 logger = logging.getLogger(__name__)
 
 class SEOAnalyzerApp:
-    """Main application class for SEO analysis"""
+    """Main application class for SEO analysis - streamlined and fast"""
     
     def __init__(self, config: Config):
         self.config = config
@@ -34,34 +29,24 @@ class SEOAnalyzerApp:
         self.technical_analyzer = TechnicalAnalyzer(config)
         self.performance_analyzer = PerformanceAnalyzer(config)
         self.link_analyzer = LinkAnalyzer(config)
-        self.error_handler = SmartErrorHandler()
-        self.recommendation_engine = RecommendationEngine()
-        self.data_quality_scorer = DataQualityScorer()
-        self.report_generator = EnhancedReportGenerator()
     
     def _create_soup(self, content: str) -> Optional[BeautifulSoup]:
-        """Create BeautifulSoup object with fallback parser"""
+        """Create BeautifulSoup object - optimized single parser"""
         if not content:
             return None
-            
+        
         try:
-            # Try lxml parser first (faster and more lenient)
+            # Use lxml if available (fastest), otherwise html.parser
             try:
                 import lxml
                 return BeautifulSoup(content, 'lxml')
             except ImportError:
-                pass
-            
-            # Fall back to html.parser (built-in)
-            return BeautifulSoup(content, 'html.parser')
-            
+                return BeautifulSoup(content, 'html.parser')
         except Exception as e:
-            logger.error(f"Error parsing HTML: {e}")
-            # Try with html5lib as last resort (most lenient but slowest)
-            try:
-                return BeautifulSoup(content, 'html5lib')
-            except:
-                return None
+            logger.warning(f"HTML parsing failed: {e}")
+            return None
+    
+
     
     async def crawl(self, progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
         """Crawl website and analyze all pages"""
@@ -155,41 +140,6 @@ class SEOAnalyzerApp:
             logger.error(f"Critical error during crawl: {e}")
             raise
     
-    def generate_enhanced_report(self, analysis_results: Dict) -> Dict:
-        """Generate an enhanced report with actionable recommendations"""
-        try:
-            # Generate the enhanced report using the report generator
-            enhanced_report = self.report_generator.generate_action_plan(analysis_results)
-            
-            # Add original analysis data
-            enhanced_report['analysis_data'] = analysis_results
-            
-            # Add generation metadata
-            import datetime
-            enhanced_report['generated_at'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            enhanced_report['report_version'] = '2.0'
-            enhanced_report['enhancements'] = {
-                'contextual_recommendations': True,
-                'confidence_scoring': True,
-                'implementation_timeline': True,
-                'expected_results': True
-            }
-            
-            return enhanced_report
-            
-        except Exception as e:
-            import traceback
-            logger.error(f"Error generating enhanced report: {e}")
-            logger.error(f"Enhanced report traceback: {traceback.format_exc()}")
-            logger.error(f"analysis_results type: {type(analysis_results)}")
-            logger.error(f"analysis_results keys: {list(analysis_results.keys()) if isinstance(analysis_results, dict) else 'Not a dict'}")
-            # Return basic report on error
-            return {
-                'error': f'Failed to generate enhanced report: {str(e)}',
-                'analysis_data': analysis_results,
-                'generated_at': time.time(),
-                'report_version': '1.0'
-            }
     
     @asynccontextmanager
     async def _crawler_session(self):
@@ -269,123 +219,36 @@ class SEOAnalyzerApp:
             performance_analysis = {}
             link_analysis = {}
             
-            # Run all analyzers with error handling
+            # Run all analyzers - fast and simple error handling
             try:
                 meta_analysis = self.seo_analyzer.analyze_meta_tags(soup) if soup else {'issues': []}
             except Exception as e:
-                logger.error(f"SEO analyzer failed for {url}: {e}")
-                error_result = self.error_handler.handle_analyzer_error(e, {
-                    'url': url,
-                    'analyzer': 'seo',
-                    'content': content[:1000] if content else '',
-                    'raw_html': content
-                })
-                meta_analysis = {
-                    'issues': [{
-                        'type': 'analyzer_error',
-                        'severity': error_result.get('severity', 'warning'),
-                        'message': error_result.get('user_message'),
-                        'recommendation': error_result.get('recommendation'),
-                        'confidence': error_result.get('confidence_level', 0.5)
-                    }]
-                }
-                # Use partial results if available
-                if error_result.get('partial_results'):
-                    meta_analysis.update(error_result['partial_results'])
+                logger.warning(f"SEO analyzer failed for {url}: {e}")
+                meta_analysis = {'issues': [], 'title': '', 'description': ''}
             
             try:
                 content_analysis = self.content_analyzer.analyze(soup, content) if soup else {'issues': []}
             except Exception as e:
-                logger.error(f"Content analyzer failed for {url}: {e}")
-                error_result = self.error_handler.handle_analyzer_error(e, {
-                    'url': url,
-                    'analyzer': 'content',
-                    'partial_content': content[:5000] if content else '',
-                    'raw_html': content
-                })
-                content_analysis = {
-                    'issues': [{
-                        'type': 'analyzer_error',
-                        'severity': error_result.get('severity', 'warning'),
-                        'message': error_result.get('user_message'),
-                        'recommendation': error_result.get('recommendation'),
-                        'confidence': error_result.get('confidence_level', 0.5)
-                    }]
-                }
-                # Use partial results if available
-                if error_result.get('partial_results'):
-                    content_analysis.update(error_result['partial_results'])
+                logger.warning(f"Content analyzer failed for {url}: {e}")
+                content_analysis = {'issues': [], 'word_count': 0}
             
             try:
                 technical_analysis = self.technical_analyzer.analyze(page_data, soup) if soup else {'issues': []}
             except Exception as e:
-                logger.error(f"Technical analyzer failed for {url}: {e}")
-                error_result = self.error_handler.handle_analyzer_error(e, {
-                    'url': url,
-                    'analyzer': 'technical',
-                    'page_data': page_data,
-                    'raw_html': content
-                })
-                technical_analysis = {
-                    'issues': [{
-                        'type': 'analyzer_error',
-                        'severity': error_result.get('severity', 'warning'),
-                        'message': error_result.get('user_message'),
-                        'recommendation': error_result.get('recommendation'),
-                        'confidence': error_result.get('confidence_level', 0.5)
-                    }]
-                }
-                # Use partial results if available
-                if error_result.get('partial_results'):
-                    technical_analysis.update(error_result['partial_results'])
+                logger.warning(f"Technical analyzer failed for {url}: {e}")
+                technical_analysis = {'issues': []}
             
             try:
                 performance_analysis = self.performance_analyzer.analyze(page_data)
             except Exception as e:
-                logger.error(f"Performance analyzer failed for {url}: {e}")
-                error_result = self.error_handler.handle_analyzer_error(e, {
-                    'url': url,
-                    'analyzer': 'performance',
-                    'page_data': page_data
-                })
-                performance_analysis = {
-                    'issues': [{
-                        'type': 'analyzer_error',
-                        'severity': error_result.get('severity', 'warning'),
-                        'message': error_result.get('user_message'),
-                        'recommendation': error_result.get('recommendation'),
-                        'confidence': error_result.get('confidence_level', 0.5)
-                    }]
-                }
-                # Use partial results if available
-                if error_result.get('partial_results'):
-                    performance_analysis.update(error_result['partial_results'])
+                logger.warning(f"Performance analyzer failed for {url}: {e}")
+                performance_analysis = {'issues': [], 'load_time': page_data.get('load_time', 0)}
             
             try:
                 link_analysis = self.link_analyzer.analyze(page_data, soup) if soup else {'issues': []}
             except Exception as e:
-                import traceback
-                logger.error(f"Link analyzer failed for {url}: {e}")
-                logger.error(f"Link analyzer traceback: {traceback.format_exc()}")
-                logger.error(f"page_data type: {type(page_data)}, content: {str(page_data)[:200] if page_data else 'None'}")
-                error_result = self.error_handler.handle_analyzer_error(e, {
-                    'url': url,
-                    'analyzer': 'links',
-                    'page_data': page_data,
-                    'raw_html': content
-                })
-                link_analysis = {
-                    'issues': [{
-                        'type': 'analyzer_error',
-                        'severity': error_result.get('severity', 'warning'),
-                        'message': error_result.get('user_message'),
-                        'recommendation': error_result.get('recommendation'),
-                        'confidence': error_result.get('confidence_level', 0.5)
-                    }]
-                }
-                # Use partial results if available
-                if error_result.get('partial_results'):
-                    link_analysis.update(error_result['partial_results'])
+                logger.warning(f"Link analyzer failed for {url}: {e}")
+                link_analysis = {'issues': []}
             
             # Combine results
             issues = []
@@ -394,26 +257,6 @@ class SEOAnalyzerApp:
             issues.extend(technical_analysis.get('issues', []))
             issues.extend(performance_analysis.get('issues', []))
             issues.extend(link_analysis.get('issues', []))
-            
-            # Assess overall data quality
-            try:
-                data_quality = self.data_quality_scorer.calculate_page_data_quality({
-                    'url': url,
-                    'final_url': page_data.get('final_url', url),
-                    'status_code': page_data.get('status_code', 0),
-                    'title': meta_analysis.get('title', ''),
-                    'meta_description': meta_analysis.get('description', ''),
-                    'meta_tags': meta_analysis,
-                    'content': content_analysis,
-                    'technical': technical_analysis,
-                    'performance': performance_analysis,
-                    'links': link_analysis,
-                    'errors': [issue for issue in issues if issue.get('type') == 'analyzer_error'],
-                    'validation': page_data.get('validation', {})
-                })
-            except Exception as e:
-                logger.error(f"Data quality scoring failed for {url}: {e}")
-                data_quality = {'score': 0.5, 'warnings': [f'Data quality assessment failed: {str(e)}']}
             
             # Calculate comprehensive SEO score
             seo_score = self._calculate_comprehensive_seo_score(
@@ -434,10 +277,8 @@ class SEOAnalyzerApp:
                 'performance': performance_analysis,
                 'links': link_analysis,
                 'issues': issues,
-                'recommendations': self._safe_generate_recommendations(issues, page_data),
                 'score': seo_score['total'],
-                'score_breakdown': seo_score,
-                'data_quality': data_quality
+                'score_breakdown': seo_score
             }
             
         except Exception as e:
@@ -664,64 +505,6 @@ class SEOAnalyzerApp:
         
         return sorted_issues[:10]
     
-    def _safe_generate_recommendations(self, issues: List[Dict], page_data: Dict = None) -> List[Dict]:
-        """Safe wrapper for generating recommendations"""
-        try:
-            return self._generate_recommendations(issues, page_data)
-        except Exception as e:
-            logger.error(f"Error generating recommendations: {e}")
-            return [{
-                'type': 'recommendation_error',
-                'severity': 'notice',
-                'message': f'Failed to generate recommendations: {str(e)}',
-                'priority': 1
-            }]
-    
-    def _generate_recommendations(self, issues: List[Dict], page_data: Dict = None) -> List[Dict]:
-        """Generate actionable recommendations based on issues using RecommendationEngine"""
-        if not page_data:
-            page_data = {}
-        
-        recommendations = []
-        
-        # Generate contextual recommendations for each issue
-        for issue in issues:
-            # Get contextual recommendation from the engine
-            contextual_rec = self.recommendation_engine.generate_contextual_recommendation(
-                issue, 
-                page_data
-            )
-            
-            # Calculate confidence level for this recommendation
-            confidence = self.data_quality_scorer.calculate_recommendation_confidence(
-                contextual_rec,
-                page_data
-            )
-            
-            # Add confidence to recommendation
-            contextual_rec['confidence'] = confidence
-            
-            recommendations.append(contextual_rec)
-        
-        # Prioritize recommendations based on available resources
-        # Default resources - can be made configurable later
-        resources = {
-            'time_hours_per_week': 10,
-            'skill_level': 'intermediate',
-            'budget': 'medium'
-        }
-        
-        # Get prioritized recommendations
-        prioritized = self.recommendation_engine.prioritize_recommendations(
-            recommendations,
-            resources
-        )
-        
-        # Generate implementation timeline
-        timeline = self.recommendation_engine.generate_implementation_timeline(prioritized)
-        
-        # Return list of recommendations as expected by the rest of the code
-        return prioritized if prioritized else recommendations
     
     async def _analyze_competitors(self, analysis: Dict) -> Dict[str, Any]:
         """Analyze competitors and compare"""
