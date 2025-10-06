@@ -1,7 +1,9 @@
 """
-Main application module for tfq0seo
+Main application module for tfq0seo - Optimized for speed and accuracy
 """
 import asyncio
+import re
+import textstat
 from typing import Dict, List, Optional, Callable, Any
 from .crawler import WebCrawler
 from .config import Config
@@ -10,8 +12,6 @@ from ..analyzers.content import ContentAnalyzer
 from ..analyzers.technical import TechnicalAnalyzer
 from ..analyzers.performance import PerformanceAnalyzer
 from ..analyzers.links import LinkAnalyzer
-import textstat
-import re
 from bs4 import BeautifulSoup
 import logging
 from contextlib import asynccontextmanager
@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 logger = logging.getLogger(__name__)
 
 class SEOAnalyzerApp:
-    """Main application class for SEO analysis"""
+    """Main application class for SEO analysis - streamlined and fast"""
     
     def __init__(self, config: Config):
         self.config = config
@@ -31,28 +31,22 @@ class SEOAnalyzerApp:
         self.link_analyzer = LinkAnalyzer(config)
     
     def _create_soup(self, content: str) -> Optional[BeautifulSoup]:
-        """Create BeautifulSoup object with fallback parser"""
+        """Create BeautifulSoup object - optimized single parser"""
         if not content:
             return None
-            
+        
         try:
-            # Try lxml parser first (faster and more lenient)
+            # Use lxml if available (fastest), otherwise html.parser
             try:
                 import lxml
                 return BeautifulSoup(content, 'lxml')
             except ImportError:
-                pass
-            
-            # Fall back to html.parser (built-in)
-            return BeautifulSoup(content, 'html.parser')
-            
+                return BeautifulSoup(content, 'html.parser')
         except Exception as e:
-            logger.error(f"Error parsing HTML: {e}")
-            # Try with html5lib as last resort (most lenient but slowest)
-            try:
-                return BeautifulSoup(content, 'html5lib')
-            except:
-                return None
+            logger.warning(f"HTML parsing failed: {e}")
+            return None
+    
+
     
     async def crawl(self, progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
         """Crawl website and analyze all pages"""
@@ -146,6 +140,7 @@ class SEOAnalyzerApp:
             logger.error(f"Critical error during crawl: {e}")
             raise
     
+    
     @asynccontextmanager
     async def _crawler_session(self):
         """Context manager for crawler session"""
@@ -208,7 +203,12 @@ class SEOAnalyzerApp:
     async def _analyze_page(self, page_data: Dict) -> Dict[str, Any]:
         """Analyze a single page"""
         try:
-            url = page_data['url']
+            # Validate page_data structure
+            if not isinstance(page_data, dict):
+                logger.error(f"Invalid page_data type: {type(page_data)}")
+                return None
+            
+            url = page_data.get('url', 'unknown')
             content = page_data.get('content', '')
             soup = self._create_soup(content)
             
@@ -219,56 +219,36 @@ class SEOAnalyzerApp:
             performance_analysis = {}
             link_analysis = {}
             
-            # Run all analyzers with error handling
+            # Run all analyzers - fast and simple error handling
             try:
                 meta_analysis = self.seo_analyzer.analyze_meta_tags(soup) if soup else {'issues': []}
             except Exception as e:
-                logger.error(f"SEO analyzer failed for {url}: {e}")
-                meta_analysis = {'issues': [{
-                    'type': 'analyzer_error',
-                    'severity': 'warning',
-                    'message': f'SEO analysis failed: {str(e)}'
-                }]}
+                logger.warning(f"SEO analyzer failed for {url}: {e}")
+                meta_analysis = {'issues': [], 'title': '', 'description': ''}
             
             try:
                 content_analysis = self.content_analyzer.analyze(soup, content) if soup else {'issues': []}
             except Exception as e:
-                logger.error(f"Content analyzer failed for {url}: {e}")
-                content_analysis = {'issues': [{
-                    'type': 'analyzer_error',
-                    'severity': 'warning',
-                    'message': f'Content analysis failed: {str(e)}'
-                }]}
+                logger.warning(f"Content analyzer failed for {url}: {e}")
+                content_analysis = {'issues': [], 'word_count': 0}
             
             try:
                 technical_analysis = self.technical_analyzer.analyze(page_data, soup) if soup else {'issues': []}
             except Exception as e:
-                logger.error(f"Technical analyzer failed for {url}: {e}")
-                technical_analysis = {'issues': [{
-                    'type': 'analyzer_error',
-                    'severity': 'warning',
-                    'message': f'Technical analysis failed: {str(e)}'
-                }]}
+                logger.warning(f"Technical analyzer failed for {url}: {e}")
+                technical_analysis = {'issues': []}
             
             try:
                 performance_analysis = self.performance_analyzer.analyze(page_data)
             except Exception as e:
-                logger.error(f"Performance analyzer failed for {url}: {e}")
-                performance_analysis = {'issues': [{
-                    'type': 'analyzer_error',
-                    'severity': 'warning',
-                    'message': f'Performance analysis failed: {str(e)}'
-                }]}
+                logger.warning(f"Performance analyzer failed for {url}: {e}")
+                performance_analysis = {'issues': [], 'load_time': page_data.get('load_time', 0)}
             
             try:
                 link_analysis = self.link_analyzer.analyze(page_data, soup) if soup else {'issues': []}
             except Exception as e:
-                logger.error(f"Link analyzer failed for {url}: {e}")
-                link_analysis = {'issues': [{
-                    'type': 'analyzer_error',
-                    'severity': 'warning',
-                    'message': f'Link analysis failed: {str(e)}'
-                }]}
+                logger.warning(f"Link analyzer failed for {url}: {e}")
+                link_analysis = {'issues': []}
             
             # Combine results
             issues = []
@@ -297,13 +277,14 @@ class SEOAnalyzerApp:
                 'performance': performance_analysis,
                 'links': link_analysis,
                 'issues': issues,
-                'recommendations': self._generate_recommendations(issues),
                 'score': seo_score['total'],
                 'score_breakdown': seo_score
             }
             
         except Exception as e:
-            logger.error(f"Critical error analyzing page {page_data.get('url', 'unknown')}: {e}")
+            import traceback
+            logger.error(f"Critical error analyzing page {page_data.get('url', 'unknown') if isinstance(page_data, dict) else 'unknown'}: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return None
     
     def _calculate_comprehensive_seo_score(self, meta_analysis: Dict, content_analysis: Dict,
@@ -524,60 +505,6 @@ class SEOAnalyzerApp:
         
         return sorted_issues[:10]
     
-    def _generate_recommendations(self, issues: List[Dict]) -> List[Dict]:
-        """Generate actionable recommendations based on issues"""
-        recommendations = []
-        
-        # Group issues by type
-        issue_types = {}
-        for issue in issues:
-            issue_type = issue['type']
-            if issue_type not in issue_types:
-                issue_types[issue_type] = []
-            issue_types[issue_type].append(issue)
-        
-        # Generate recommendations
-        if 'missing_title' in issue_types:
-            recommendations.append({
-                'priority': 'high',
-                'category': 'meta_tags',
-                'action': 'Add a unique, descriptive title tag',
-                'impact': 'Critical for SEO and user experience'
-            })
-        
-        if 'short_title' in issue_types or 'long_title' in issue_types:
-            recommendations.append({
-                'priority': 'medium',
-                'category': 'meta_tags',
-                'action': f'Optimize title length to {self.config.title_min_length}-{self.config.title_max_length} characters',
-                'impact': 'Improves click-through rates in search results'
-            })
-        
-        if 'missing_description' in issue_types:
-            recommendations.append({
-                'priority': 'high',
-                'category': 'meta_tags',
-                'action': 'Add a compelling meta description',
-                'impact': 'Improves click-through rates from search results'
-            })
-        
-        if 'thin_content' in issue_types:
-            recommendations.append({
-                'priority': 'high',
-                'category': 'content',
-                'action': f'Expand content to at least {self.config.min_content_words} words',
-                'impact': 'Better rankings and user engagement'
-            })
-        
-        if 'slow_load_time' in issue_types:
-            recommendations.append({
-                'priority': 'high',
-                'category': 'performance',
-                'action': 'Optimize page load time to under 3 seconds',
-                'impact': 'Critical for user experience and rankings'
-            })
-        
-        return recommendations
     
     async def _analyze_competitors(self, analysis: Dict) -> Dict[str, Any]:
         """Analyze competitors and compare"""

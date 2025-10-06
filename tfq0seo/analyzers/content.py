@@ -1,5 +1,5 @@
 """
-Content analyzer for text analysis and readability
+Content analyzer for text analysis and readability - Optimized
 """
 from typing import Dict, List, Optional, Any, Set, Tuple
 from bs4 import BeautifulSoup, NavigableString, Comment
@@ -15,13 +15,24 @@ import nltk
 
 logger = logging.getLogger(__name__)
 
+# Simple issue creation - fast and lightweight
+def create_issue(issue_type: str, severity: str = 'warning', message: str = '', **kwargs) -> Dict:
+    """Create a simple issue dictionary"""
+    issue = {
+        'type': issue_type,
+        'severity': severity,
+        'message': message or issue_type.replace('_', ' ').title()
+    }
+    issue.update(kwargs)
+    return issue
+
 # Download required NLTK data if not present
 try:
     nltk.data.find('corpora/stopwords')
 except LookupError:
     try:
         nltk.download('stopwords', quiet=True)
-    except:
+    except Exception:
         logger.warning("Could not download NLTK stopwords")
 
 class ContentAnalyzer:
@@ -30,16 +41,24 @@ class ContentAnalyzer:
     def __init__(self, config):
         self.config = config
         self.stemmer = PorterStemmer()
+        
+        # Load stopwords with fallback
         try:
             self.stop_words = set(stopwords.words('english'))
-        except:
-            # Fallback to basic stop words if NLTK data not available
-            self.stop_words = {
-                'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
-                'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the',
-                'to', 'was', 'will', 'with', 'the', 'this', 'but', 'they', 'have',
-                'had', 'what', 'when', 'where', 'who', 'which', 'why', 'how'
-            }
+        except Exception:
+            self.stop_words = self._get_fallback_stopwords()
+    
+    def _get_fallback_stopwords(self):
+        """Get fallback stopwords when NLTK is not available"""
+        return {
+            'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
+            'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the',
+            'to', 'was', 'will', 'with', 'the', 'this', 'but', 'they', 'have',
+            'had', 'what', 'when', 'where', 'who', 'which', 'why', 'how',
+            'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other',
+            'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same',
+            'so', 'than', 'too', 'very', 'can', 'will', 'just', 'should'
+        }
     
     def analyze(self, soup: Optional[BeautifulSoup], raw_html: str = '') -> Dict[str, Any]:
         """Analyze content quality and structure"""
@@ -48,7 +67,12 @@ class ContentAnalyzer:
                 'issues': [{
                     'type': 'no_content',
                     'severity': 'critical',
-                    'message': 'No content to analyze'
+                    'message': 'No content to analyze',
+                    'user_impact': 'Without content, your page cannot be indexed by search engines',
+                    'recommendation': 'Add meaningful content to this page',
+                    'implementation_difficulty': 'medium',
+                    'priority_score': 10,
+                    'estimated_impact': 'high'
                 }]
             }
         
@@ -65,27 +89,32 @@ class ContentAnalyzer:
         
         # Check content length
         if word_count < self.config.min_content_words:
-            issues.append({
-                'type': 'thin_content',
-                'severity': 'warning',
-                'message': f'Content too short ({word_count} words, recommended: {self.config.min_content_words}+)'
-            })
+            issues.append(create_issue(
+                'thin_content',
+                current_value=f"{word_count} words",
+                recommended_value=f"{self.config.min_content_words}+ words"
+            ))
         elif word_count > 5000:
             issues.append({
                 'type': 'very_long_content',
                 'severity': 'notice',
-                'message': f'Very long content ({word_count} words) - consider breaking into multiple pages'
+                'message': f'Very long content ({word_count} words) - consider breaking into multiple pages',
+                'user_impact': 'Very long pages can be overwhelming and may have slower load times',
+                'recommendation': 'Consider splitting this content into multiple focused pages',
+                'implementation_difficulty': 'medium',
+                'priority_score': 3,
+                'estimated_impact': 'low'
             })
         
         # Enhanced readability scores
         readability_data = self._calculate_readability_scores(text_content)
         
         if readability_data['flesch_score'] < self.config.min_readability_score and word_count > 50:
-            issues.append({
-                'type': 'poor_readability',
-                'severity': 'warning',
-                'message': f'Poor readability (Flesch: {readability_data["flesch_score"]:.1f}, recommended: {self.config.min_readability_score}+)'
-            })
+            issues.append(create_issue(
+                'poor_readability',
+                current_value=f"Flesch score: {readability_data['flesch_score']:.1f}",
+                recommended_value=f"{self.config.min_readability_score}+"
+            ))
         
         # Analyze heading structure
         heading_data = self._analyze_headings(soup)
@@ -269,19 +298,19 @@ class ContentAnalyzer:
             
             # Check for skipped levels
             if current_level > prev_level + 1 and prev_level > 0:
-                issues.append({
-                    'type': 'heading_hierarchy_skip',
-                    'severity': 'warning',
-                    'message': f'Heading hierarchy skip: H{prev_level} to H{current_level} "{heading["text"][:50]}..."'
-                })
+                issues.append(create_issue(
+                    'heading_hierarchy_skip',
+                    from_level=f"H{prev_level}",
+                    to_level=f"H{current_level}",
+                    heading_text=heading["text"][:50] + "..." if len(heading["text"]) > 50 else heading["text"]
+                ))
             
             # Check for empty headings
             if not heading['text']:
-                issues.append({
-                    'type': 'empty_heading',
-                    'severity': 'warning',
-                    'message': f'Empty H{current_level} tag found'
-                })
+                issues.append(create_issue(
+                    'empty_heading',
+                    heading_level=f"H{current_level}"
+                ))
             
             prev_level = current_level
         
@@ -292,11 +321,7 @@ class ContentAnalyzer:
             if heading['level'] == 2 and not h1_found:
                 h2_found = True
             if heading['level'] == 1 and h2_found:
-                issues.append({
-                    'type': 'h1_after_h2',
-                    'severity': 'warning',
-                    'message': 'H1 appears after H2 - fix heading order'
-                })
+                issues.append(create_issue('h1_after_h2'))
                 break
         
         return {
@@ -423,38 +448,59 @@ class ContentAnalyzer:
         
         # Generate issues based on stats
         if stats['missing_alt'] > 0:
-            issues.append({
-                'type': 'missing_alt_text',
-                'severity': 'critical',
-                'message': f'{stats["missing_alt"]} images missing alt text - critical for accessibility and SEO'
-            })
+            issues.append(create_issue(
+                'missing_alt_text',
+                count=stats['missing_alt']
+            ))
         
         if stats['empty_alt'] > 0:
             issues.append({
                 'type': 'empty_alt_text',
                 'severity': 'warning',
-                'message': f'{stats["empty_alt"]} images have empty alt text'
+                'message': f'{stats["empty_alt"]} images have empty alt text',
+                'user_impact': 'Empty alt attributes provide no value for SEO or accessibility',
+                'recommendation': 'Add descriptive alt text or remove the empty alt attribute for decorative images',
+                'implementation_difficulty': 'easy',
+                'priority_score': 6,
+                'estimated_impact': 'medium'
             })
         
         if stats['long_alt'] > 0:
             issues.append({
                 'type': 'long_alt_text',
                 'severity': 'notice',
-                'message': f'{stats["long_alt"]} images have alt text > 125 characters'
+                'message': f'{stats["long_alt"]} images have alt text > 125 characters',
+                'user_impact': 'Screen readers may cut off long alt text',
+                'recommendation': 'Keep alt text concise, under 125 characters',
+                'implementation_difficulty': 'easy',
+                'priority_score': 3,
+                'estimated_impact': 'low'
             })
         
         if stats['missing_dimensions'] > 0:
             issues.append({
                 'type': 'missing_image_dimensions',
                 'severity': 'warning',
-                'message': f'{stats["missing_dimensions"]} images missing width/height - can cause layout shift'
+                'message': f'{stats["missing_dimensions"]} images missing width/height - can cause layout shift',
+                'user_impact': 'Missing dimensions cause layout shifts as images load, hurting user experience',
+                'recommendation': 'Add width and height attributes to all images',
+                'example': '<img src="image.jpg" width="800" height="600" alt="Description">',
+                'implementation_difficulty': 'easy',
+                'priority_score': 6,
+                'estimated_impact': 'medium'
             })
         
         if stats['non_descriptive_filename'] > 0:
             issues.append({
                 'type': 'non_descriptive_filenames',
                 'severity': 'notice',
-                'message': f'{stats["non_descriptive_filename"]} images have non-descriptive filenames'
+                'message': f'{stats["non_descriptive_filename"]} images have non-descriptive filenames',
+                'user_impact': 'Descriptive filenames help search engines understand your images',
+                'recommendation': 'Rename image files to describe their content',
+                'example': 'Instead of "IMG_1234.jpg" use "blue-widget-product-photo.jpg"',
+                'implementation_difficulty': 'medium',
+                'priority_score': 4,
+                'estimated_impact': 'low'
             })
         
         # Check for lazy loading
@@ -463,7 +509,13 @@ class ContentAnalyzer:
             issues.append({
                 'type': 'missing_lazy_loading',
                 'severity': 'notice',
-                'message': f'Only {lazy_count}/{len(images)} images use lazy loading'
+                'message': f'Only {lazy_count}/{len(images)} images use lazy loading',
+                'user_impact': 'Not using lazy loading can slow down initial page load',
+                'recommendation': 'Add loading="lazy" to images below the fold',
+                'example': '<img src="image.jpg" loading="lazy" alt="Description">',
+                'implementation_difficulty': 'easy',
+                'priority_score': 5,
+                'estimated_impact': 'medium'
             })
         
         return {
@@ -498,63 +550,56 @@ class ContentAnalyzer:
         
         # Check for common issues
         if not semantic_elements['main']:
-            issues.append({
-                'type': 'missing_main_element',
-                'severity': 'warning',
-                'message': 'No <main> element found - important for accessibility'
-            })
-        elif len(semantic_elements['main']) > 1:
+            issues.append(create_issue('missing_main_element'))
+        
+        if len(semantic_elements['main']) > 1:
             issues.append({
                 'type': 'multiple_main_elements',
                 'severity': 'warning',
-                'message': 'Multiple <main> elements found - only one allowed per page'
+                'message': f'{len(semantic_elements["main"])} <main> elements found - use only one',
+                'user_impact': 'Multiple main elements confuse assistive technologies',
+                'recommendation': 'Use only one <main> element per page',
+                'implementation_difficulty': 'easy',
+                'priority_score': 5,
+                'estimated_impact': 'medium'
             })
         
-        if not semantic_elements['header']:
-            issues.append({
-                'type': 'missing_header_element',
-                'severity': 'notice',
-                'message': 'No <header> element found'
-            })
+        # Calculate text-to-HTML ratio
+        text_length = len(soup.get_text())
+        html_length = len(str(soup))
+        text_ratio = (text_length / html_length * 100) if html_length > 0 else 0
         
-        if not semantic_elements['nav']:
-            issues.append({
-                'type': 'missing_nav_element',
-                'severity': 'notice',
-                'message': 'No <nav> element found for navigation'
-            })
+        if text_ratio < 25 and html_length > 1000:  # Less than 25% text content
+            issues.append(create_issue(
+                'low_text_to_html_ratio',
+                current_ratio=f"{text_ratio:.1f}%",
+                recommended_ratio="25%+"
+            ))
         
-        # Check for figures without figcaption
-        figures_without_caption = 0
-        for figure in semantic_elements['figure']:
-            if not figure.find('figcaption'):
-                figures_without_caption += 1
-        
-        if figures_without_caption > 0:
-            issues.append({
-                'type': 'figure_without_caption',
-                'severity': 'notice',
-                'message': f'{figures_without_caption} <figure> elements without <figcaption>'
-            })
-        
-        # Check time elements for datetime attribute
-        time_without_datetime = 0
-        for time_elem in semantic_elements['time']:
-            if not time_elem.get('datetime'):
-                time_without_datetime += 1
-        
-        if time_without_datetime > 0:
-            issues.append({
-                'type': 'time_without_datetime',
-                'severity': 'notice',
-                'message': f'{time_without_datetime} <time> elements without datetime attribute'
-            })
+        # Check for nav without proper structure
+        for nav in semantic_elements['nav']:
+            if not nav.find(['ul', 'ol']):
+                issues.append({
+                    'type': 'nav_without_list',
+                    'severity': 'notice',
+                    'message': 'Navigation element without list structure',
+                    'user_impact': 'Properly structured navigation helps screen readers',
+                    'recommendation': 'Use <ul> or <ol> inside <nav> elements',
+                    'example': '<nav><ul><li><a href="#">Link</a></li></ul></nav>',
+                    'implementation_difficulty': 'easy',
+                    'priority_score': 3,
+                    'estimated_impact': 'low'
+                })
         
         return {
             'summary': {
-                'total_semantic_elements': usage_count,
-                'elements_used': {k: len(v) for k, v in semantic_elements.items()},
-                'semantic_score': min(100, usage_count * 10)  # Simple scoring
+                'uses_semantic_html': usage_count > 0,
+                'semantic_elements_count': usage_count,
+                'has_main': len(semantic_elements['main']) > 0,
+                'has_nav': len(semantic_elements['nav']) > 0,
+                'has_header': len(semantic_elements['header']) > 0,
+                'has_footer': len(semantic_elements['footer']) > 0,
+                'text_to_html_ratio': round(text_ratio, 1)
             },
             'issues': issues
         }
@@ -791,71 +836,63 @@ class ContentAnalyzer:
         # Find all links
         all_links = soup.find_all('a', href=True)
         
-        # Separate content links from navigation
-        content_links = []
-        nav_elements = soup.find_all(['nav', 'header', 'footer'])
-        nav_links = []
+        internal_links = []
+        external_links = []
         
-        for nav in nav_elements:
-            nav_links.extend(nav.find_all('a', href=True))
-        
-        # Get content links (not in navigation)
         for link in all_links:
-            if link not in nav_links:
-                content_links.append(link)
-        
-        # Analyze content links
-        internal_count = 0
-        external_count = 0
-        nofollow_count = 0
-        broken_anchors = 0
-        
-        for link in content_links:
-            href = link.get('href', '')
-            rel = link.get('rel', [])
-            if isinstance(rel, str):
-                rel = [rel]
+            href = link['href']
             
-            # Check if internal or external
-            if href.startswith(('http://', 'https://')):
-                external_count += 1
-            elif href.startswith(('#', '/', './')):
-                internal_count += 1
+            # Skip anchors and special protocols
+            if href.startswith('#') or href.startswith('javascript:') or href.startswith('mailto:'):
+                continue
             
-            # Check for nofollow
-            if 'nofollow' in rel:
-                nofollow_count += 1
-            
-            # Check for broken anchors
-            if not link.get_text(strip=True):
-                broken_anchors += 1
+            # Classify as internal or external
+            if href.startswith('http://') or href.startswith('https://'):
+                if self.config.url and self.config.url in href:
+                    internal_links.append(href)
+                else:
+                    external_links.append(href)
+            else:
+                # Relative links are internal
+                internal_links.append(href)
         
-        # Generate issues
-        if internal_count == 0 and len(content_links) > 0:
+        # Check for issues
+        if len(internal_links) > 150:
+            issues.append(create_issue(
+                'excessive_internal_links',
+                count=len(internal_links),
+                recommended_max=150
+            ))
+        
+        if len(external_links) == 0 and len(all_links) > 10:
+            issues.append(create_issue('no_external_links'))
+        
+        # Check for links without descriptive text
+        generic_anchor_texts = ['click here', 'here', 'read more', 'more', 'link']
+        generic_links = 0
+        
+        for link in all_links:
+            link_text = link.get_text(strip=True).lower()
+            if link_text in generic_anchor_texts:
+                generic_links += 1
+        
+        if generic_links > 0:
             issues.append({
-                'type': 'no_internal_links',
+                'type': 'generic_anchor_text',
                 'severity': 'warning',
-                'message': 'No internal links in content - missing opportunity for site navigation'
-            })
-        
-        if external_count > internal_count * 2 and external_count > 5:
-            issues.append({
-                'type': 'too_many_external_links',
-                'severity': 'notice',
-                'message': f'High ratio of external links ({external_count} external vs {internal_count} internal)'
-            })
-        
-        if broken_anchors > 0:
-            issues.append({
-                'type': 'empty_link_anchors',
-                'severity': 'warning',
-                'message': f'{broken_anchors} links with empty anchor text'
+                'message': f'{generic_links} links with generic anchor text',
+                'user_impact': 'Generic link text provides no context about the destination',
+                'recommendation': 'Use descriptive anchor text that explains where the link goes',
+                'example': 'Instead of "click here", use "download our SEO guide"',
+                'implementation_difficulty': 'easy',
+                'priority_score': 5,
+                'estimated_impact': 'medium'
             })
         
         return {
-            'internal_count': internal_count,
-            'external_count': external_count,
-            'nofollow_count': nofollow_count,
-            'total_content_links': len(content_links),
+            'internal_count': len(internal_links),
+            'external_count': len(external_links),
+            'total_count': len(all_links),
+            'generic_anchors': generic_links,
             'issues': issues
         } 

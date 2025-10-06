@@ -1,5 +1,5 @@
 """
-Technical SEO analyzer
+Technical SEO analyzer - Optimized
 """
 from typing import Dict, List, Optional, Any, Set
 from bs4 import BeautifulSoup
@@ -9,6 +9,17 @@ import json
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Simple issue creation - fast and lightweight
+def create_issue(issue_type: str, severity: str = 'warning', message: str = '', **kwargs) -> Dict:
+    """Create a simple issue dictionary"""
+    issue = {
+        'type': issue_type,
+        'severity': severity,
+        'message': message or issue_type.replace('_', ' ').title()
+    }
+    issue.update(kwargs)
+    return issue
 
 class TechnicalAnalyzer:
     """Analyzer for technical SEO aspects"""
@@ -26,11 +37,7 @@ class TechnicalAnalyzer:
         is_https = parsed_url.scheme == 'https'
         
         if not is_https:
-            issues.append({
-                'type': 'no_https',
-                'severity': 'critical',
-                'message': 'Page not served over HTTPS'
-            })
+            issues.append(create_issue('no_https'))
         
         # Response headers analysis
         headers = page_data.get('headers', {})
@@ -168,22 +175,21 @@ class TechnicalAnalyzer:
                     })
             else:
                 severity = 'warning' if header == 'Strict-Transport-Security' else 'notice'
-                issues.append({
-                    'type': 'missing_security_header',
-                    'severity': severity,
-                    'message': f'Missing {header} header (protects against {config["protection"]})'
-                })
+                issues.append(create_issue(
+                    'missing_security_header',
+                    header=header,
+                    protection=config['protection']
+                ))
         
         # Check for server information disclosure
         server = headers.get('Server', '')
         x_powered_by = headers.get('X-Powered-By', '')
         
         if server and re.search(r'(apache|nginx|iis|microsoft-iis)/[\d\.]+', server.lower()):
-            issues.append({
-                'type': 'server_version_exposed',
-                'severity': 'notice',
-                'message': f'Server version information exposed: {server}'
-            })
+            issues.append(create_issue(
+                'server_version_exposed',
+                server_info=server
+            ))
         
         if x_powered_by:
             issues.append({
@@ -254,11 +260,7 @@ class TechnicalAnalyzer:
         canonical_link = soup.find('link', {'rel': 'canonical'})
         
         if not canonical_link:
-            issues.append({
-                'type': 'missing_canonical',
-                'severity': 'warning',
-                'message': 'No canonical URL specified'
-            })
+            issues.append(create_issue('missing_canonical'))
             return {'canonical': '', 'is_self': True, 'issues': issues}
         
         canonical_url = canonical_link.get('href', '')
@@ -266,7 +268,13 @@ class TechnicalAnalyzer:
             issues.append({
                 'type': 'empty_canonical',
                 'severity': 'warning',
-                'message': 'Canonical tag exists but href is empty'
+                'message': 'Canonical tag exists but href is empty',
+                'user_impact': 'Search engines can\'t determine the preferred URL',
+                'recommendation': 'Add a valid URL to your canonical link tag',
+                'example': '<link rel="canonical" href="https://example.com/page">',
+                'implementation_difficulty': 'easy',
+                'priority_score': 6,
+                'estimated_impact': 'medium'
             })
             return {'canonical': '', 'is_self': True, 'issues': issues}
         
@@ -325,11 +333,7 @@ class TechnicalAnalyzer:
         viewport = soup.find('meta', attrs={'name': 'viewport'})
         if not viewport:
             is_mobile_friendly = False
-            issues.append({
-                'type': 'no_viewport',
-                'severity': 'critical',
-                'message': 'Missing viewport meta tag'
-            })
+            issues.append(create_issue('no_viewport'))
         else:
             content = viewport.get('content', '')
             features['viewport'] = content
@@ -339,15 +343,17 @@ class TechnicalAnalyzer:
                 issues.append({
                     'type': 'viewport_not_responsive',
                     'severity': 'warning',
-                    'message': 'Viewport not set to device-width'
+                    'message': 'Viewport not set to device-width',
+                    'user_impact': 'Your site may not scale properly on different screen sizes',
+                    'recommendation': 'Include width=device-width in your viewport meta tag',
+                    'example': '<meta name="viewport" content="width=device-width, initial-scale=1">',
+                    'implementation_difficulty': 'easy',
+                    'priority_score': 7,
+                    'estimated_impact': 'high'
                 })
             
             if 'user-scalable=no' in content or 'maximum-scale=1' in content:
-                issues.append({
-                    'type': 'viewport_zoom_disabled',
-                    'severity': 'warning',
-                    'message': 'Viewport disables user zoom - bad for accessibility'
-                })
+                issues.append(create_issue('viewport_zoom_disabled'))
         
         # Check for mobile-specific meta tags
         apple_tags = {
@@ -446,11 +452,10 @@ class TechnicalAnalyzer:
             actual_size = len(page_data['content'].encode('utf-8'))
             
             if not compression and actual_size > 1024:  # 1KB threshold
-                issues.append({
-                    'type': 'no_compression',
-                    'severity': 'warning',
-                    'message': f'Content not compressed ({actual_size} bytes). Use gzip or brotli'
-                })
+                issues.append(create_issue(
+                    'no_compression',
+                    file_size=actual_size
+                ))
                 compression_ratio = 0
             else:
                 # Estimate compression ratio
@@ -490,11 +495,7 @@ class TechnicalAnalyzer:
         max_age = 0
         
         if not cache_control:
-            issues.append({
-                'type': 'no_cache_control',
-                'severity': 'warning',
-                'message': 'No Cache-Control header found'
-            })
+            issues.append(create_issue('no_cache_control'))
         else:
             # Parse cache directives
             directives = [d.strip() for d in cache_control.split(',')]

@@ -1,5 +1,5 @@
 """
-Link analyzer for internal/external links and broken links
+Link analyzer for internal/external links and broken links - Optimized
 """
 from typing import Dict, List, Optional, Any, Set, Tuple
 from bs4 import BeautifulSoup, NavigableString
@@ -8,6 +8,17 @@ import re
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Simple issue creation - fast and lightweight
+def create_issue(issue_type: str, severity: str = 'warning', message: str = '', **kwargs) -> Dict:
+    """Create a simple issue dictionary"""
+    issue = {
+        'type': issue_type,
+        'severity': severity,
+        'message': message or issue_type.replace('_', ' ').title()
+    }
+    issue.update(kwargs)
+    return issue
 
 class LinkAnalyzer:
     """Analyzer for link structure and quality"""
@@ -32,23 +43,47 @@ class LinkAnalyzer:
                 }]
             }
         
+        # Validate page_data
+        if not isinstance(page_data, dict):
+            return {
+                'issues': [{
+                    'type': 'invalid_data',
+                    'severity': 'critical',
+                    'message': 'Invalid page data for link analysis'
+                }]
+            }
+        
         issues = []
         
         # Get all links from page data
         links_data = page_data.get('links', [])
+        if not isinstance(links_data, list):
+            links_data = []
+        
+        # Get current URL safely
+        current_url = page_data.get('url', '')
+        if not current_url:
+            return {
+                'issues': [{
+                    'type': 'missing_url',
+                    'severity': 'critical',
+                    'message': 'Missing URL for link analysis'
+                }]
+            }
         
         # Analyze link structure
-        link_analysis = self._analyze_link_structure(links_data, page_data['url'])
+        link_analysis = self._analyze_link_structure(links_data, current_url)
         
         # Check for broken links
         broken_links = self._identify_broken_links(links_data, page_data)
         if broken_links:
-            issues.append({
-                'type': 'broken_links',
-                'severity': 'critical',
-                'message': f'{len(broken_links)} broken links found',
-                'details': broken_links[:5]  # First 5 for context
-            })
+            issues.append(create_issue(
+                'broken_internal_links',
+                additional_info={
+                    'count': len(broken_links),
+                    'details': broken_links[:5]  # First 5 for context
+                }
+            ))
         
         # Analyze anchor text
         anchor_analysis = self._analyze_anchor_text(links_data, soup)
@@ -61,7 +96,7 @@ class LinkAnalyzer:
         # Analyze internal link structure
         internal_link_analysis = self._analyze_internal_links(
             link_analysis['internal_links'], 
-            page_data['url']
+            current_url
         )
         issues.extend(internal_link_analysis['issues'])
         
@@ -405,8 +440,17 @@ class LinkAnalyzer:
                 download_links += 1
             
             # Check external links without appropriate rel
-            parsed = urlparse(urljoin(soup.find('base', href=True).get('href') if soup.find('base', href=True) else '', href))
-            current_domain = urlparse(str(soup.base.get('href', '') if hasattr(soup, 'base') else '')).netloc
+            base_element = soup.find('base', href=True)
+            base_href = base_element.get('href') if base_element else ''
+            parsed = urlparse(urljoin(base_href, href))
+            
+            # Get current domain safely
+            current_domain = ''
+            if hasattr(soup, 'base') and soup.base is not None:
+                current_domain = urlparse(str(soup.base.get('href', ''))).netloc
+            else:
+                # Fallback - extract domain from first link or use empty string
+                current_domain = ''
             
             if parsed.netloc and parsed.netloc != current_domain:
                 # External link checks
@@ -494,11 +538,11 @@ class LinkAnalyzer:
                 'message': f'Only {len(internal_links)} internal links found'
             })
         elif len(internal_links) > 100:
-            issues.append({
-                'type': 'excessive_internal_links',
-                'severity': 'notice',
-                'message': f'{len(internal_links)} internal links may dilute link equity'
-            })
+            issues.append(create_issue(
+                'excessive_internal_links',
+                current_value=f'{len(internal_links)} internal links',
+                recommended_value='100-150 internal links maximum'
+            ))
         
         # Check for links to important pages
         important_pages = ['/', '/about', '/contact', '/products', '/services']
@@ -695,15 +739,13 @@ class LinkAnalyzer:
         # Check if the current page arrived via redirects
         redirect_chain = page_data.get('redirect_chain', [])
         if len(redirect_chain) > 1:
-            issues.append({
-                'type': 'page_redirect_chain',
-                'severity': 'warning',
-                'message': f'Page reached via {len(redirect_chain)} redirects'
-            })
-            redirect_chains.append({
-                'final_url': page_data['url'],
-                'chain': redirect_chain
-            })
+            issues.append(create_issue(
+                'redirect_chains',
+                additional_info={
+                    'chain_length': len(redirect_chain),
+                    'chain': redirect_chain
+                }
+            ))
         
         # Check for links that might lead to redirects
         # This would need crawl data to properly detect

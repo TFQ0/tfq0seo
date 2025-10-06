@@ -18,12 +18,11 @@ import hashlib
 import ipaddress
 import socket
 from contextlib import asynccontextmanager
-
 console = Console()
 logger = logging.getLogger(__name__)
 
 class WebCrawler:
-    """Asynchronous web crawler for SEO analysis"""
+    """Asynchronous web crawler for SEO analysis - optimized for speed"""
     
     def __init__(self, config):
         self.config = config
@@ -339,6 +338,7 @@ class WebCrawler:
                         except Exception as e:
                             logger.error(f"Error parsing HTML for {url}: {e}")
                     
+                    # Prepare page data
                     return {
                         'url': url,
                         'final_url': final_url,
@@ -349,16 +349,11 @@ class WebCrawler:
                         'load_time': load_time,
                         'links': links,
                         'redirect_chain': redirect_chain,
-                        'crawled_at': time.time(),
                         'content_length': len(content.encode('utf-8')),
                         'response_headers': {
                             'cache_control': headers.get('Cache-Control', ''),
-                            'expires': headers.get('Expires', ''),
-                            'last_modified': headers.get('Last-Modified', ''),
-                            'etag': headers.get('ETag', ''),
                             'content_encoding': headers.get('Content-Encoding', ''),
-                            'server': headers.get('Server', ''),
-                            'x_powered_by': headers.get('X-Powered-By', '')
+                            'server': headers.get('Server', '')
                         }
                     }
                     
@@ -480,7 +475,7 @@ class WebCrawler:
                                 url, depth = batch[i]
                                 logger.error(f"Error processing {url}: {result}")
                 
-                # Clean up large content from results to save memory
+                # Return results with optimized memory usage
                 for url, data in self.results.items():
                     if 'content' in data and len(data['content']) > 100000:  # 100KB
                         # Keep only first 100KB for very large pages

@@ -20,11 +20,11 @@ from urllib.parse import urlparse
 
 console = Console()
 
-# Version should be imported from package
+# Version import
 try:
     from . import __version__
 except ImportError:
-    __version__ = '2.1.3'
+    __version__ = '2.2.0'
 
 def setup_logging(verbose: bool, quiet: bool) -> None:
     """Setup logging based on verbosity settings"""
