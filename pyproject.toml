@@ -1,49 +1,48 @@
 [build-system]
-requires = ["setuptools>=69.0.3", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "tfq0seo"
-dynamic = ["version", "dependencies"]
-description = "Modern SEO analysis and optimization toolkit with advanced reporting"
+version = "2.2.0"
+description = "Fast SEO analysis tool with Lighthouse-quality reports"
+authors = [{name = "TFQ0 SEO Team"}]
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 license = {text = "MIT"}
-keywords = ["seo", "analysis", "optimization", "web", "content", "meta tags", "technical seo", "reporting", "analytics"]
-authors = [
-    {name = "tfq0"}
-]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "Intended Audience :: Information Technology",
     "Topic :: Internet :: WWW/HTTP :: Site Management",
-    "Topic :: Internet :: WWW/HTTP :: Site Management :: Link Checking",
-    "Topic :: Text Processing :: Markup :: HTML",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Environment :: Console",
-    "Operating System :: OS Independent",
+]
+dependencies = [
+    "aiohttp>=3.8.0",
+    "beautifulsoup4>=4.11.0",
+    "click>=8.1.0",
+    "jinja2>=3.1.0",
+    "rich>=12.6.0",
+    "textstat>=0.7.3",
+    "validators>=0.20.0",
+    "pyyaml>=6.0",
+    "python-dateutil>=2.8.0",
+    "urllib3>=1.26.0",
+    "psutil>=5.9.0",
+]
+
+[project.optional-dependencies]
+full = [
+    "lxml>=4.9.0",
+    "openpyxl>=3.0.0",
+    "pandas>=1.5.0",
 ]
 
 [project.scripts]
 tfq0seo = "tfq0seo.cli:main"
 
-[project.urls]
-Homepage = "https://github.com/tfq0/tfq0seo"
-Documentation = "https://github.com/tfq0/tfq0seo#readme"
-Repository = "https://github.com/tfq0/tfq0seo.git"
-"Bug Tracker" = "https://github.com/tfq0/tfq0seo/issues"
-
 [tool.setuptools.packages.find]
-where = ["."]
 include = ["tfq0seo*"]
 
-[tool.setuptools.dynamic]
-version = {attr = "tfq0seo.__version__"}
-dependencies = {file = "requirements.txt"}
+[tool.setuptools.package-data]
+tfq0seo = ["templates/*.html"]

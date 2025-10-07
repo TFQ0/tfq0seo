@@ -1,33 +1,9 @@
-"""
-tfq0seo - Professional SEO Analysis Toolkit (Optimized)
-Open source alternative to Screaming Frog SEO Spider
-"""
+"""TFQ0SEO - Fast SEO analysis tool with Lighthouse-quality reports."""
 
-__version__ = "2.2.0"  # Optimized version
-__author__ = "tfq0"
+__version__ = "2.2.0"
+__author__ = "TFQ0 SEO Team"
 
-# Core imports
-try:
-    from .core.app import SEOAnalyzerApp
-    from .core.crawler import WebCrawler
-    from .core.config import Config
-    from .analyzers.seo import SEOAnalyzer
-    from .exporters.base import ExportManager
-except ImportError as e:
-    import warnings
-    warnings.warn(f"tfq0seo: Failed to import core modules: {e}", ImportWarning)
-    SEOAnalyzerApp = None
-    WebCrawler = None
-    Config = None
-    SEOAnalyzer = None
-    ExportManager = None
+from .core.app import SEOAnalyzer
+from .core.config import Config
 
-__all__ = [
-    "SEOAnalyzerApp",
-    "WebCrawler",
-    "Config",
-    "SEOAnalyzer",
-    "ExportManager"
-] 
-
-
+__all__ = ["SEOAnalyzer", "Config", "__version__"]
