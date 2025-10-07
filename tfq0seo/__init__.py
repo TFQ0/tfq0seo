@@ -1,4 +1,4 @@
-"""TFQ0SEO - Fast SEO analysis tool with  reports."""
+"""TFQ0SEO -  SEO analysis tool with reports."""
 
 __version__ = "2.3.0"
 __author__ = "TFQ0 SEO Team"
