@@ -236,7 +236,7 @@ def extract_meta_tags(soup: BeautifulSoup) -> MetaTagProfile:
             profile.article_tags[prop] = content
     
     # Dublin Core metadata
-    for tag in soup.find_all('meta', attrs={'name': re.compile('^dc\.')}):
+    for tag in soup.find_all('meta', attrs={'name': re.compile(r'^dc\.')}):
         name = tag.get('name')
         content = tag.get('content')
         if name and content:
@@ -1037,7 +1037,7 @@ def analyze_seo(soup: BeautifulSoup, url: str) -> Dict[str, Any]:
             'No sitemap link in HTML'))
     
     # Check for RSS/Atom feeds
-    if not soup.find('link', type=re.compile('application/(rss|atom)\+xml')):
+    if not soup.find('link', type=re.compile(r'application/(rss|atom)\+xml')):
         issues.append(create_issue('Technical SEO', 'notice',
             'No RSS/Atom feed detected'))
     
