@@ -33,7 +33,7 @@ tfq0seo analyze https://example.com
 
 ### Full Site Crawl
 ```bash
-tfq0seo crawl https://example.com --depth 5 --max-pages 500 --format html --output report.html
+tfq0seo crawl https://example.com --depth 5 --max-pages 500 --concurrent 20 --format html --output full-report.html
 ```
 
 ### Batch Analysis
