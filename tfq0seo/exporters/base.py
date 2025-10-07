@@ -374,31 +374,102 @@ class ExportManager:
             'pages': data.get('pages', []),
         }
         
-        # Add new optimized data fields
+        # Handle nested structures from new report format
+        # Check for scores nested structure
+        if 'scores' in data:
+            prepared['overall_score'] = data['scores'].get('overall', 0)
+            prepared['category_scores'] = data['scores'].get('categories', {})
+        
+        # Check for issues nested structure
+        if 'issues' in data and isinstance(data['issues'], dict):
+            if 'counts' in data['issues']:
+                prepared['issue_counts'] = data['issues']['counts']
+        
+        # Ensure scores exist
+        if not prepared['category_scores']:
+            prepared['category_scores'] = {
+                'seo': 0,
+                'content': 0,
+                'technical': 0,
+                'performance': 0,
+                'links': 0
+            }
+        
+        # Add new optimized data fields with defaults
         if 'aggregated_issues' in data:
             prepared['aggregated_issues'] = data['aggregated_issues']
+        else:
+            prepared['aggregated_issues'] = []
         
         if 'aggregation_stats' in data:
             prepared['aggregation_stats'] = data['aggregation_stats']
+        else:
+            prepared['aggregation_stats'] = {}
         
-        if 'enhanced_recommendations' in data:
-            prepared['enhanced_recommendations'] = data['enhanced_recommendations']
-        
-        if 'executive_summary' in data:
-            prepared['executive_summary'] = data['executive_summary']
+        # Handle recommendations - check for new format
+        if 'recommendations' in data and isinstance(data['recommendations'], dict):
+            if 'specific' in data['recommendations']:
+                prepared['enhanced_recommendations'] = data['recommendations']['specific']
+            if 'executive' in data['recommendations']:
+                prepared['executive_summary'] = data['recommendations']['executive']
+        else:
+            # Try direct fields
+            if 'enhanced_recommendations' in data:
+                prepared['enhanced_recommendations'] = data['enhanced_recommendations']
+            else:
+                prepared['enhanced_recommendations'] = []
+            
+            if 'executive_summary' in data:
+                prepared['executive_summary'] = data['executive_summary']
+            else:
+                # Create a default executive summary
+                prepared['executive_summary'] = {
+                    'overview': {
+                        'total_pages_analyzed': data.get('summary', {}).get('total_pages', 1) if 'summary' in data else 1,
+                        'overall_health_score': data.get('overall_score', 0)
+                    },
+                    'key_metrics': {
+                        'average_score': data.get('overall_score', 0),
+                        'critical_issues': data.get('issue_counts', {}).get('critical', 0),
+                        'warnings': data.get('issue_counts', {}).get('warning', 0),
+                        'notices': data.get('issue_counts', {}).get('notice', 0)
+                    },
+                    'top_issues': [],
+                    'quick_wins': []
+                }
         
         if 'performance_metrics' in data:
             prepared['performance_metrics'] = data['performance_metrics']
+        else:
+            prepared['performance_metrics'] = {}
         
-        if 'pages_summary' in data:
-            prepared['pages_summary'] = data['pages_summary']
+        # Handle pages data
+        if 'pages' in data and isinstance(data['pages'], dict):
+            # New format with nested structure
+            if 'summary' in data['pages']:
+                prepared['pages_summary'] = data['pages']['summary']
+            if 'detailed' in data['pages']:
+                prepared['pages'] = data['pages']['detailed']
+        else:
+            # Old format compatibility
+            if 'pages_summary' in data:
+                prepared['pages_summary'] = data['pages_summary']
+            else:
+                prepared['pages_summary'] = []
         
         if 'pages_truncated' in data:
             prepared['pages_truncated'] = data['pages_truncated']
             prepared['pages_truncated_count'] = data.get('pages_truncated_count', 0)
+        else:
+            prepared['pages_truncated'] = False
+            prepared['pages_truncated_count'] = 0
         
         if 'top_issues' in data:
             prepared['top_issues'] = data['top_issues']
+        elif 'issues' in data and isinstance(data['issues'], dict) and 'top_issues' in data['issues']:
+            prepared['top_issues'] = data['issues']['top_issues']
+        else:
+            prepared['top_issues'] = []
         
         # Add performance data
         if 'performance' in data:
@@ -408,10 +479,28 @@ class ExportManager:
         if 'summary' in data:
             prepared['summary'] = data['summary']
         
-        # Sort issues by severity
+        # Handle issues - check if it's a dict (new format) or list (old format)
         severity_order = {'critical': 0, 'warning': 1, 'notice': 2}
-        if prepared['issues']:
-            prepared['issues'].sort(key=lambda x: severity_order.get(x.get('severity', 'notice'), 3))
+        
+        if isinstance(prepared['issues'], dict):
+            # New format: issues is a dict with 'aggregated' key
+            if 'aggregated' in prepared['issues']:
+                issue_list = prepared['issues']['aggregated']
+            elif 'top_issues' in prepared['issues']:
+                issue_list = prepared['issues']['top_issues']
+            else:
+                issue_list = []
+            
+            # Update prepared['issues'] to be the list for template compatibility
+            prepared['issues'] = issue_list
+        else:
+            # Old format: issues is already a list
+            issue_list = prepared['issues']
+        
+        # Sort issues by severity
+        if issue_list and isinstance(issue_list, list):
+            issue_list.sort(key=lambda x: severity_order.get(x.get('severity', 'notice'), 3))
+            prepared['issues'] = issue_list
         
         # Group issues by severity
         prepared['issues_by_severity'] = {

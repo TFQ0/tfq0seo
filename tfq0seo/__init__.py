@@ -1,6 +1,6 @@
 """TFQ0SEO - Fast SEO analysis tool with Lighthouse-quality reports."""
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 __author__ = "TFQ0 SEO Team"
 
 from .core.app import SEOAnalyzer

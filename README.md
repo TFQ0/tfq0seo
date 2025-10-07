@@ -98,7 +98,7 @@ Create a `config.yaml` file:
 crawler:
   max_concurrent: 20
   timeout: 30
-  user_agent: "tfq0seo/2.2.0"
+  user_agent: "tfq0seo/2.3.0"
   follow_redirects: true
   max_redirects: 5
 

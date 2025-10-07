@@ -6,9 +6,9 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="tfq0seo",
-    version="2.2.0",
+    version="2.3.0",
     author="TFQ0 SEO Team",
-    description="Fast SEO analysis tool with Lighthouse-quality reports",
+    description="Fast SEO analysis tool with reports",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/tfq0seo/tfq0seo",

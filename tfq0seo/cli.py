@@ -29,32 +29,86 @@ def create_summary_table(results: dict) -> Table:
     table.add_column("Metric", style="cyan", width=20)
     table.add_column("Value", style="green")
     
-    # Overall score with color coding
-    score = results.get('overall_score', 0)
+    # Overall score - handle both old and new formats
+    score = 0
+    if 'scores' in results and isinstance(results['scores'], dict):
+        score = results['scores'].get('overall', 0)
+    else:
+        score = results.get('overall_score', 0)
+    
     score_style = "green" if score >= 80 else "yellow" if score >= 50 else "red"
     table.add_row("Overall Score", f"[{score_style}]{score:.1f}/100[/{score_style}]")
     
-    # Category scores
-    if 'category_scores' in results:
-        for category, cat_score in results['category_scores'].items():
+    # Category scores - handle both formats
+    category_scores = {}
+    if 'scores' in results and isinstance(results['scores'], dict):
+        category_scores = results['scores'].get('categories', {})
+    elif 'category_scores' in results:
+        category_scores = results['category_scores']
+    
+    if category_scores:
+        for category, cat_score in category_scores.items():
             cat_style = "green" if cat_score >= 80 else "yellow" if cat_score >= 50 else "red"
             table.add_row(f"  {category}", f"[{cat_style}]{cat_score:.1f}[/{cat_style}]")
     
-    # Issue counts
+    # Issue counts - handle both old and new formats
     if 'issues' in results:
-        critical = sum(1 for i in results['issues'] if i.get('severity') == 'critical')
-        warnings = sum(1 for i in results['issues'] if i.get('severity') == 'warning')
-        notices = sum(1 for i in results['issues'] if i.get('severity') == 'notice')
+        if isinstance(results['issues'], dict):
+            # New format with nested structure
+            if 'counts' in results['issues']:
+                counts = results['issues']['counts']
+                critical = counts.get('critical', 0)
+                warnings = counts.get('warning', 0)
+                notices = counts.get('notice', 0)
+            else:
+                # Try to extract from aggregated issues
+                issues_list = results['issues'].get('aggregated', [])
+                critical = sum(1 for i in issues_list if isinstance(i, dict) and i.get('severity') == 'critical')
+                warnings = sum(1 for i in issues_list if isinstance(i, dict) and i.get('severity') == 'warning')
+                notices = sum(1 for i in issues_list if isinstance(i, dict) and i.get('severity') == 'notice')
+        else:
+            # Old format - issues is a list
+            issues_list = results['issues']
+            critical = sum(1 for i in issues_list if isinstance(i, dict) and i.get('severity') == 'critical')
+            warnings = sum(1 for i in issues_list if isinstance(i, dict) and i.get('severity') == 'warning')
+            notices = sum(1 for i in issues_list if isinstance(i, dict) and i.get('severity') == 'notice')
         
         table.add_row("Critical Issues", f"[red]{critical}[/red]")
         table.add_row("Warnings", f"[yellow]{warnings}[/yellow]")
         table.add_row("Notices", f"[blue]{notices}[/blue]")
+    elif 'issue_counts' in results:
+        # Fallback to issue_counts if available
+        counts = results['issue_counts']
+        table.add_row("Critical Issues", f"[red]{counts.get('critical', 0)}[/red]")
+        table.add_row("Warnings", f"[yellow]{counts.get('warning', 0)}[/yellow]")
+        table.add_row("Notices", f"[blue]{counts.get('notice', 0)}[/blue]")
     
-    # Performance metrics
-    if 'performance' in results:
+    # Performance metrics - handle both formats
+    if 'performance_metrics' in results:
+        # New format with detailed metrics
+        perf = results['performance_metrics']
+        if 'load_time_stats' in perf:
+            table.add_row("Avg Load Time", f"{perf['load_time_stats'].get('mean', 0):.2f}s")
+        if 'pages_by_status' in perf:
+            successful = perf['pages_by_status'].get('2xx', 0)
+            table.add_row("Successful Pages", str(successful))
+    elif 'performance' in results:
+        # Old format
         perf = results['performance']
-        table.add_row("Load Time", f"{perf.get('load_time', 0):.2f}s")
-        table.add_row("Content Size", f"{perf.get('content_size', 0) / 1024:.1f}KB")
+        if 'average_load_time' in perf:
+            table.add_row("Avg Load Time", f"{perf['average_load_time']:.2f}s")
+        elif 'load_time' in perf:
+            table.add_row("Load Time", f"{perf.get('load_time', 0):.2f}s")
+        if 'content_size' in perf:
+            table.add_row("Content Size", f"{perf.get('content_size', 0) / 1024:.1f}KB")
+    
+    # Summary information if available
+    if 'summary' in results:
+        summary = results['summary']
+        table.add_row("Total Pages", str(summary.get('total_pages', 0)))
+        table.add_row("Successful Pages", str(summary.get('successful_pages', 0)))
+        if summary.get('failed_pages', 0) > 0:
+            table.add_row("Failed Pages", f"[red]{summary['failed_pages']}[/red]")
     
     return table
 
@@ -84,7 +138,7 @@ def create_issues_table(issues: List[dict], limit: int = 10) -> Table:
 
 
 @click.group()
-@click.version_option(version='2.2.0', prog_name='tfq0seo')
+@click.version_option(version='2.3.0', prog_name='tfq0seo')
 def cli():
     """TFQ0SEO - Fast SEO analysis tool with Lighthouse-quality reports."""
     pass
