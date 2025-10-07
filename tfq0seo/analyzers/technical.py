@@ -1,1082 +1,1104 @@
-"""
-Technical SEO analyzer - Optimized
-"""
-from typing import Dict, List, Optional, Any, Set
-from bs4 import BeautifulSoup
-from urllib.parse import urlparse, urljoin
+"""Advanced technical SEO analyzer with comprehensive security, performance, and crawlability analysis."""
+
 import re
-import json
-import logging
+import ipaddress
+from typing import Dict, List, Any, Optional, Tuple, Set
+from urllib.parse import urlparse, parse_qs, unquote
+from collections import defaultdict, Counter
+from dataclasses import dataclass, field
+from enum import Enum
+from datetime import datetime, timedelta
+from bs4 import BeautifulSoup, Comment
 
-logger = logging.getLogger(__name__)
 
-# Simple issue creation - fast and lightweight
-def create_issue(issue_type: str, severity: str = 'warning', message: str = '', **kwargs) -> Dict:
-    """Create a simple issue dictionary"""
+class SecurityLevel(Enum):
+    """Security implementation levels."""
+    EXCELLENT = "excellent"
+    GOOD = "good"
+    MODERATE = "moderate"
+    POOR = "poor"
+    CRITICAL = "critical"
+
+
+class CrawlabilityStatus(Enum):
+    """Page crawlability status."""
+    FULLY_CRAWLABLE = "fully_crawlable"
+    PARTIALLY_BLOCKED = "partially_blocked"
+    BLOCKED = "blocked"
+    CONDITIONAL = "conditional"
+
+
+class MobileReadiness(Enum):
+    """Mobile optimization levels."""
+    OPTIMIZED = "optimized"
+    RESPONSIVE = "responsive"
+    ADAPTIVE = "adaptive"
+    DESKTOP_ONLY = "desktop_only"
+    BROKEN = "broken"
+
+
+class ProtocolVersion(Enum):
+    """HTTP protocol versions."""
+    HTTP_1_0 = "HTTP/1.0"
+    HTTP_1_1 = "HTTP/1.1"
+    HTTP_2 = "HTTP/2"
+    HTTP_3 = "HTTP/3"
+    UNKNOWN = "Unknown"
+
+
+@dataclass
+class SecurityProfile:
+    """Comprehensive security analysis."""
+    https_enabled: bool = False
+    ssl_version: Optional[str] = None
+    hsts_enabled: bool = False
+    hsts_max_age: int = 0
+    hsts_includesubdomains: bool = False
+    hsts_preload: bool = False
+    csp_enabled: bool = False
+    csp_policy: Optional[str] = None
+    xfo_enabled: bool = False
+    xfo_policy: Optional[str] = None
+    x_content_type_options: bool = False
+    x_xss_protection: bool = False
+    referrer_policy: Optional[str] = None
+    permissions_policy: Optional[str] = None
+    cors_headers: Dict[str, str] = field(default_factory=dict)
+    security_level: SecurityLevel = SecurityLevel.POOR
+    vulnerabilities: List[str] = field(default_factory=list)
+
+
+@dataclass
+class CrawlabilityProfile:
+    """Crawlability and indexability analysis."""
+    status: CrawlabilityStatus = CrawlabilityStatus.FULLY_CRAWLABLE
+    robots_meta: Optional[str] = None
+    x_robots_tag: Optional[str] = None
+    canonical_url: Optional[str] = None
+    noindex: bool = False
+    nofollow: bool = False
+    noarchive: bool = False
+    nosnippet: bool = False
+    max_snippet: Optional[int] = None
+    max_image_preview: Optional[str] = None
+    unavailable_after: Optional[str] = None
+    crawl_delay: Optional[float] = None
+    blocked_resources: List[str] = field(default_factory=list)
+    javascript_required: bool = False
+    ajax_crawlable: bool = False
+
+
+@dataclass
+class MobileProfile:
+    """Mobile optimization analysis."""
+    viewport_configured: bool = False
+    viewport_content: Optional[str] = None
+    mobile_readiness: MobileReadiness = MobileReadiness.DESKTOP_ONLY
+    responsive_images: int = 0
+    total_images: int = 0
+    touch_elements_size: bool = True
+    text_readability: bool = True
+    horizontal_scrolling: bool = False
+    uses_plugins: bool = False
+    amp_version: Optional[str] = None
+    pwa_ready: bool = False
+    app_links: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class PerformanceProfile:
+    """Technical performance indicators."""
+    protocol_version: ProtocolVersion = ProtocolVersion.UNKNOWN
+    compression_enabled: bool = False
+    compression_type: Optional[str] = None
+    compression_ratio: float = 0.0
+    cache_control: Optional[str] = None
+    cache_ttl: int = 0
+    etag_present: bool = False
+    last_modified: Optional[str] = None
+    cdn_detected: bool = False
+    cdn_provider: Optional[str] = None
+    server_push_enabled: bool = False
+    early_hints: bool = False
+    connection_reuse: bool = False
+    keep_alive_timeout: int = 0
+
+
+@dataclass
+class URLProfile:
+    """URL structure and optimization."""
+    length: int = 0
+    depth: int = 0
+    parameters_count: int = 0
+    has_tracking_params: bool = False
+    has_session_id: bool = False
+    is_clean: bool = True
+    is_seo_friendly: bool = True
+    uses_underscores: bool = False
+    uses_uppercase: bool = False
+    has_file_extension: bool = False
+    trailing_slash: bool = False
+    special_characters: List[str] = field(default_factory=list)
+
+
+@dataclass
+class InternationalProfile:
+    """International and localization settings."""
+    language_declared: bool = False
+    language_code: Optional[str] = None
+    hreflang_configured: bool = False
+    hreflang_tags: Dict[str, str] = field(default_factory=dict)
+    geo_targeting: Optional[str] = None
+    charset: Optional[str] = None
+    locale_adaptive: bool = False
+    rtl_support: bool = False
+
+
+def create_issue(category: str, severity: str, message: str, details: Optional[Dict] = None) -> Dict[str, Any]:
+    """Create an enhanced technical issue with detailed recommendations."""
     issue = {
-        'type': issue_type,
+        'category': category,
         'severity': severity,
-        'message': message or issue_type.replace('_', ' ').title()
+        'message': message
     }
-    issue.update(kwargs)
+    if details:
+        issue['details'] = details
+    
+    # Add specific technical recommendations
+    if 'security' in message.lower() or 'https' in message.lower():
+        issue['fix'] = "Implement security headers: HSTS, CSP, X-Frame-Options. Use HTTPS everywhere with modern TLS."
+        issue['impact'] = "Critical - Security issues affect trust, rankings, and user safety"
+    elif 'cache' in message.lower():
+        issue['fix'] = "Configure Cache-Control headers, use CDN, implement browser and edge caching strategies"
+        issue['impact'] = "High - Caching improves performance and reduces server load"
+    elif 'mobile' in message.lower() or 'viewport' in message.lower():
+        issue['fix'] = "Add viewport meta tag, use responsive design, optimize for touch interfaces"
+        issue['impact'] = "Critical - Mobile-first indexing requires mobile optimization"
+    elif 'compression' in message.lower():
+        issue['fix'] = "Enable Gzip or Brotli compression for text resources"
+        issue['impact'] = "High - Compression reduces bandwidth by 70-90%"
+    elif 'protocol' in message.lower() or 'http/2' in message.lower():
+        issue['fix'] = "Upgrade to HTTP/2 or HTTP/3 for multiplexing and better performance"
+        issue['impact'] = "Medium - Modern protocols improve loading speed"
+    elif 'url' in message.lower():
+        issue['fix'] = "Use clean, descriptive URLs without parameters. Implement URL rewriting."
+        issue['impact'] = "Medium - Clean URLs improve UX and SEO"
+    else:
+        issue['fix'] = "Review technical SEO best practices for this issue"
+        issue['impact'] = "Varies based on implementation"
+    
     return issue
 
-class TechnicalAnalyzer:
-    """Analyzer for technical SEO aspects"""
+
+def analyze_security_headers(headers: Dict[str, str]) -> SecurityProfile:
+    """Comprehensive security header analysis."""
+    profile = SecurityProfile()
+    headers_lower = {k.lower(): v for k, v in headers.items()} if headers else {}
     
-    def __init__(self, config):
-        self.config = config
+    # HSTS Analysis
+    hsts = headers_lower.get('strict-transport-security', '')
+    if hsts:
+        profile.hsts_enabled = True
         
-    def analyze(self, page_data: Dict, soup: Optional[BeautifulSoup]) -> Dict[str, Any]:
-        """Analyze technical SEO aspects"""
-        issues = []
+        # Parse max-age
+        max_age_match = re.search(r'max-age=(\d+)', hsts)
+        if max_age_match:
+            profile.hsts_max_age = int(max_age_match.group(1))
         
-        # HTTPS check
-        url = page_data.get('url', '')
-        parsed_url = urlparse(url)
-        is_https = parsed_url.scheme == 'https'
+        profile.hsts_includesubdomains = 'includesubdomains' in hsts.lower()
+        profile.hsts_preload = 'preload' in hsts.lower()
         
-        if not is_https:
-            issues.append(create_issue('no_https'))
-        
-        # Response headers analysis
-        headers = page_data.get('headers', {})
-        header_analysis = self._analyze_headers(headers)
-        issues.extend(header_analysis['issues'])
-        
-        # Robots meta tag analysis
-        robots_analysis = self._analyze_robots_meta(soup) if soup else {}
-        issues.extend(robots_analysis.get('issues', []))
-        
-        # Canonical URL analysis
-        canonical_analysis = self._analyze_canonical(soup, url) if soup else {}
-        issues.extend(canonical_analysis.get('issues', []))
-        
-        # Mobile-friendliness
-        mobile_analysis = self._check_mobile_friendly(soup) if soup else {}
-        issues.extend(mobile_analysis.get('issues', []))
-        
-        # Compression
-        compression_analysis = self._analyze_compression(headers, page_data)
-        issues.extend(compression_analysis['issues'])
-        
-        # Caching headers
-        cache_analysis = self._analyze_caching(headers)
-        issues.extend(cache_analysis['issues'])
-        
-        # XML Sitemap reference
-        sitemap_analysis = self._check_sitemap_reference(soup, page_data) if soup else {}
-        
-        # Hreflang tags
-        hreflang_analysis = self._analyze_hreflang(soup, url) if soup else {}
-        issues.extend(hreflang_analysis.get('issues', []))
-        
-        # AMP version
-        amp_analysis = self._check_amp_version(soup) if soup else {}
-        issues.extend(amp_analysis.get('issues', []))
-        
-        # Structured data validation
-        structured_data = self._analyze_structured_data(soup) if soup else {}
-        issues.extend(structured_data.get('issues', []))
-        
-        # Pagination
-        pagination = self._analyze_pagination(soup) if soup else {}
-        issues.extend(pagination.get('issues', []))
-        
-        # JavaScript framework detection
-        js_frameworks = self._detect_js_frameworks(soup, page_data) if soup else []
-        
-        # DNS prefetch/preconnect
-        resource_hints = self._analyze_resource_hints(soup) if soup else {}
-        
-        # PWA detection
-        pwa_analysis = self._check_pwa(soup, headers) if soup else {}
-        issues.extend(pwa_analysis.get('issues', []))
-        
-        # Cookie analysis
-        cookie_analysis = self._analyze_cookies(headers)
-        issues.extend(cookie_analysis['issues'])
-        
-        # Calculate technical score
-        technical_score = self._calculate_technical_score(issues)
-        
-        return {
-            'https': is_https,
-            'compression': compression_analysis['compression'],
-            'compression_ratio': compression_analysis.get('ratio', 0),
-            'mobile_friendly': mobile_analysis.get('is_mobile_friendly', False),
-            'security_headers': header_analysis['security_headers'],
-            'cache_control': cache_analysis.get('cache_control', ''),
-            'max_age': cache_analysis.get('max_age', 0),
-            'sitemap_referenced': sitemap_analysis.get('found', False),
-            'sitemap_locations': sitemap_analysis.get('locations', []),
-            'canonical_url': canonical_analysis.get('canonical', ''),
-            'is_canonical_self': canonical_analysis.get('is_self', True),
-            'robots_directives': robots_analysis.get('directives', []),
-            'hreflang_tags': hreflang_analysis.get('tags', []),
-            'amp_url': amp_analysis.get('url', ''),
-            'structured_data': structured_data.get('schemas', []),
-            'pagination': pagination.get('pagination', {}),
-            'js_frameworks': js_frameworks,
-            'resource_hints': resource_hints,
-            'pwa_features': pwa_analysis.get('features', {}),
-            'cookies': cookie_analysis.get('cookies', []),
-            'technical_score': technical_score,
-            'issues': issues
-        }
+        # Check for recommended values
+        if profile.hsts_max_age < 31536000:  # Less than 1 year
+            profile.vulnerabilities.append("HSTS max-age less than recommended 1 year")
     
-    def _analyze_headers(self, headers: Dict[str, str]) -> Dict[str, Any]:
-        """Analyze HTTP response headers"""
-        issues = []
-        security_headers = {}
+    # CSP Analysis
+    csp = headers_lower.get('content-security-policy', '')
+    if csp:
+        profile.csp_enabled = True
+        profile.csp_policy = csp
         
-        # Check security headers with recommendations
-        security_header_checks = {
-            'X-Frame-Options': {
-                'protection': 'clickjacking',
-                'recommended': ['DENY', 'SAMEORIGIN']
-            },
-            'X-Content-Type-Options': {
-                'protection': 'MIME sniffing',
-                'recommended': ['nosniff']
-            },
-            'X-XSS-Protection': {
-                'protection': 'XSS attacks',
-                'recommended': ['1; mode=block']
-            },
-            'Strict-Transport-Security': {
-                'protection': 'HTTPS enforcement',
-                'recommended': ['max-age=31536000']
-            },
-            'Content-Security-Policy': {
-                'protection': 'content injection',
-                'recommended': None  # Too complex for simple check
-            },
-            'Referrer-Policy': {
-                'protection': 'referrer information',
-                'recommended': ['no-referrer-when-downgrade', 'strict-origin-when-cross-origin']
-            },
-            'Permissions-Policy': {
-                'protection': 'feature permissions',
-                'recommended': None
-            }
-        }
-        
-        for header, config in security_header_checks.items():
-            value = headers.get(header, '')
-            if value:
-                security_headers[header] = value
-                # Check if value is recommended
-                if config['recommended'] and not any(rec in value for rec in config['recommended']):
-                    issues.append({
-                        'type': 'suboptimal_security_header',
-                        'severity': 'notice',
-                        'message': f'{header} value "{value}" may not be optimal'
-                    })
-            else:
-                severity = 'warning' if header == 'Strict-Transport-Security' else 'notice'
-                issues.append(create_issue(
-                    'missing_security_header',
-                    header=header,
-                    protection=config['protection']
-                ))
-        
-        # Check for server information disclosure
-        server = headers.get('Server', '')
-        x_powered_by = headers.get('X-Powered-By', '')
-        
-        if server and re.search(r'(apache|nginx|iis|microsoft-iis)/[\d\.]+', server.lower()):
-            issues.append(create_issue(
-                'server_version_exposed',
-                server_info=server
-            ))
-        
-        if x_powered_by:
-            issues.append({
-                'type': 'technology_exposed',
-                'severity': 'notice',
-                'message': f'Technology information exposed via X-Powered-By: {x_powered_by}'
-            })
-        
-        # Check for problematic headers
-        if 'P3P' in headers:
-            issues.append({
-                'type': 'deprecated_header',
-                'severity': 'notice',
-                'message': 'P3P header is deprecated and should be removed'
-            })
-        
-        return {
-            'security_headers': security_headers,
-            'issues': issues
-        }
+        # Check for unsafe directives
+        if 'unsafe-inline' in csp:
+            profile.vulnerabilities.append("CSP allows unsafe-inline scripts")
+        if 'unsafe-eval' in csp:
+            profile.vulnerabilities.append("CSP allows unsafe-eval")
+        if '*' in csp and 'default-src' in csp:
+            profile.vulnerabilities.append("CSP default-src allows all origins")
     
-    def _analyze_robots_meta(self, soup: BeautifulSoup) -> Dict[str, Any]:
-        """Analyze robots meta tags"""
-        issues = []
-        directives = []
+    # X-Frame-Options
+    xfo = headers_lower.get('x-frame-options', '')
+    if xfo:
+        profile.xfo_enabled = True
+        profile.xfo_policy = xfo.upper()
         
-        robots_meta = soup.find('meta', attrs={'name': 'robots'})
-        if robots_meta:
-            content = robots_meta.get('content', '').lower()
-            directives = [d.strip() for d in content.split(',')]
-            
-            # Check for problematic directives
-            if 'noindex' in directives:
-                issues.append({
-                    'type': 'noindex_directive',
-                    'severity': 'critical',
-                    'message': 'Page has noindex directive - won\'t appear in search results'
-                })
-            
-            if 'nofollow' in directives:
-                issues.append({
-                    'type': 'nofollow_directive',
-                    'severity': 'warning',
-                    'message': 'Page has nofollow directive - links won\'t be followed'
-                })
-            
-            if 'noarchive' in directives:
-                issues.append({
-                    'type': 'noarchive_directive',
-                    'severity': 'notice',
-                    'message': 'Page has noarchive directive - won\'t be cached by search engines'
-                })
-        
-        # Check for googlebot specific tags
-        googlebot_meta = soup.find('meta', attrs={'name': 'googlebot'})
-        if googlebot_meta:
-            content = googlebot_meta.get('content', '').lower()
-            directives.extend([f'googlebot:{d.strip()}' for d in content.split(',')])
-        
-        return {
-            'directives': directives,
-            'issues': issues
-        }
+        if xfo.upper() not in ['DENY', 'SAMEORIGIN']:
+            profile.vulnerabilities.append(f"Invalid X-Frame-Options value: {xfo}")
     
-    def _analyze_canonical(self, soup: BeautifulSoup, current_url: str) -> Dict[str, Any]:
-        """Analyze canonical URL"""
-        issues = []
-        canonical_link = soup.find('link', {'rel': 'canonical'})
-        
-        if not canonical_link:
-            issues.append(create_issue('missing_canonical'))
-            return {'canonical': '', 'is_self': True, 'issues': issues}
-        
-        canonical_url = canonical_link.get('href', '')
-        if not canonical_url:
-            issues.append({
-                'type': 'empty_canonical',
-                'severity': 'warning',
-                'message': 'Canonical tag exists but href is empty',
-                'user_impact': 'Search engines can\'t determine the preferred URL',
-                'recommendation': 'Add a valid URL to your canonical link tag',
-                'example': '<link rel="canonical" href="https://example.com/page">',
-                'implementation_difficulty': 'easy',
-                'priority_score': 6,
-                'estimated_impact': 'medium'
-            })
-            return {'canonical': '', 'is_self': True, 'issues': issues}
-        
-        # Make canonical URL absolute
-        canonical_url = urljoin(current_url, canonical_url)
-        
-        # Check if canonical points to self
-        is_self = self._normalize_url(canonical_url) == self._normalize_url(current_url)
-        
-        # Validate canonical URL
-        parsed = urlparse(canonical_url)
-        if not parsed.scheme or not parsed.netloc:
-            issues.append({
-                'type': 'invalid_canonical',
-                'severity': 'critical',
-                'message': f'Invalid canonical URL: {canonical_url}'
-            })
-        
-        # Check for protocol mismatch
-        current_parsed = urlparse(current_url)
-        if parsed.scheme != current_parsed.scheme:
-            issues.append({
-                'type': 'canonical_protocol_mismatch',
-                'severity': 'warning',
-                'message': f'Canonical URL protocol ({parsed.scheme}) differs from current ({current_parsed.scheme})'
-            })
-        
-        # Check for domain mismatch
-        if parsed.netloc != current_parsed.netloc:
-            issues.append({
-                'type': 'canonical_cross_domain',
-                'severity': 'notice',
-                'message': f'Canonical URL points to different domain: {parsed.netloc}'
-            })
-        
-        return {
-            'canonical': canonical_url,
-            'is_self': is_self,
-            'issues': issues
-        }
+    # Other security headers
+    profile.x_content_type_options = 'x-content-type-options' in headers_lower
+    profile.x_xss_protection = 'x-xss-protection' in headers_lower
+    profile.referrer_policy = headers_lower.get('referrer-policy')
+    profile.permissions_policy = headers_lower.get('permissions-policy') or headers_lower.get('feature-policy')
     
-    def _normalize_url(self, url: str) -> str:
-        """Normalize URL for comparison"""
-        parsed = urlparse(url.lower())
-        # Remove trailing slash, fragments, and normalize empty path
-        path = parsed.path.rstrip('/') or '/'
-        return f'{parsed.scheme}://{parsed.netloc}{path}'
+    # CORS headers
+    cors_headers = ['access-control-allow-origin', 'access-control-allow-methods', 
+                   'access-control-allow-headers', 'access-control-allow-credentials']
+    for header in cors_headers:
+        if header in headers_lower:
+            profile.cors_headers[header] = headers_lower[header]
     
-    def _check_mobile_friendly(self, soup: BeautifulSoup) -> Dict[str, Any]:
-        """Check mobile-friendliness indicators"""
-        issues = []
-        is_mobile_friendly = True
-        features = {}
+    # Check for wildcard CORS
+    if profile.cors_headers.get('access-control-allow-origin') == '*':
+        profile.vulnerabilities.append("CORS allows all origins (wildcard)")
+    
+    # Calculate security level
+    security_score = 0
+    if profile.hsts_enabled:
+        security_score += 20
+        if profile.hsts_max_age >= 31536000:
+            security_score += 10
+    if profile.csp_enabled:
+        security_score += 20
+        if 'unsafe' not in (profile.csp_policy or ''):
+            security_score += 10
+    if profile.xfo_enabled:
+        security_score += 15
+    if profile.x_content_type_options:
+        security_score += 10
+    if profile.referrer_policy:
+        security_score += 10
+    if profile.permissions_policy:
+        security_score += 15
+    
+    if security_score >= 80:
+        profile.security_level = SecurityLevel.EXCELLENT
+    elif security_score >= 60:
+        profile.security_level = SecurityLevel.GOOD
+    elif security_score >= 40:
+        profile.security_level = SecurityLevel.MODERATE
+    elif security_score >= 20:
+        profile.security_level = SecurityLevel.POOR
+    else:
+        profile.security_level = SecurityLevel.CRITICAL
+    
+    return profile
+
+
+def analyze_crawlability(soup: BeautifulSoup, headers: Dict[str, str] = None) -> CrawlabilityProfile:
+    """Analyze crawlability and indexability factors."""
+    profile = CrawlabilityProfile()
+    headers_lower = {k.lower(): v for k, v in headers.items()} if headers else {}
+    
+    # Check robots meta tag
+    robots_meta = soup.find('meta', attrs={'name': 'robots'})
+    if robots_meta:
+        profile.robots_meta = robots_meta.get('content', '').lower()
         
-        # Check viewport meta tag
-        viewport = soup.find('meta', attrs={'name': 'viewport'})
-        if not viewport:
-            is_mobile_friendly = False
-            issues.append(create_issue('no_viewport'))
+        # Parse directives
+        if 'noindex' in profile.robots_meta:
+            profile.noindex = True
+            profile.status = CrawlabilityStatus.BLOCKED
+        if 'nofollow' in profile.robots_meta:
+            profile.nofollow = True
+        if 'noarchive' in profile.robots_meta:
+            profile.noarchive = True
+        if 'nosnippet' in profile.robots_meta:
+            profile.nosnippet = True
+        
+        # Parse max-snippet
+        max_snippet_match = re.search(r'max-snippet:(-?\d+)', profile.robots_meta)
+        if max_snippet_match:
+            profile.max_snippet = int(max_snippet_match.group(1))
+        
+        # Parse max-image-preview
+        max_image_match = re.search(r'max-image-preview:(\w+)', profile.robots_meta)
+        if max_image_match:
+            profile.max_image_preview = max_image_match.group(1)
+        
+        # Parse unavailable_after
+        unavailable_match = re.search(r'unavailable_after:\s*([^,]+)', profile.robots_meta)
+        if unavailable_match:
+            profile.unavailable_after = unavailable_match.group(1)
+    
+    # Check X-Robots-Tag header
+    x_robots = headers_lower.get('x-robots-tag')
+    if x_robots:
+        profile.x_robots_tag = x_robots.lower()
+        
+        if 'noindex' in profile.x_robots_tag:
+            profile.noindex = True
+            profile.status = CrawlabilityStatus.BLOCKED
+        if 'nofollow' in profile.x_robots_tag:
+            profile.nofollow = True
+    
+    # Check canonical URL
+    canonical = soup.find('link', attrs={'rel': 'canonical'})
+    if canonical:
+        profile.canonical_url = canonical.get('href')
+    
+    # Check for JavaScript dependency
+    noscript = soup.find('noscript')
+    if noscript:
+        # Check if critical content is in noscript
+        noscript_text = noscript.get_text(strip=True)
+        if len(noscript_text) > 100:  # Substantial content in noscript
+            profile.javascript_required = True
+            profile.status = CrawlabilityStatus.CONDITIONAL
+    
+    # Check for AJAX crawlability (deprecated but still check)
+    ajax_meta = soup.find('meta', attrs={'name': 'fragment'})
+    if ajax_meta and ajax_meta.get('content') == '!':
+        profile.ajax_crawlable = True
+    
+    # Check for blocked resources
+    # Look for robots.txt references in comments
+    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+        if 'disallow' in comment.lower() or 'robots.txt' in comment.lower():
+            profile.blocked_resources.append(comment[:100])
+    
+    # Determine final status
+    if profile.noindex:
+        profile.status = CrawlabilityStatus.BLOCKED
+    elif profile.javascript_required or profile.ajax_crawlable:
+        profile.status = CrawlabilityStatus.CONDITIONAL
+    elif profile.blocked_resources:
+        profile.status = CrawlabilityStatus.PARTIALLY_BLOCKED
+    else:
+        profile.status = CrawlabilityStatus.FULLY_CRAWLABLE
+    
+    return profile
+
+
+def analyze_mobile_optimization(soup: BeautifulSoup) -> MobileProfile:
+    """Comprehensive mobile optimization analysis."""
+    profile = MobileProfile()
+    
+    # Check viewport
+    viewport = soup.find('meta', attrs={'name': 'viewport'})
+    if viewport:
+        profile.viewport_configured = True
+        profile.viewport_content = viewport.get('content', '')
+        
+        # Analyze viewport settings
+        viewport_lower = profile.viewport_content.lower()
+        
+        has_device_width = 'width=device-width' in viewport_lower
+        has_initial_scale = 'initial-scale=1' in viewport_lower
+        prevents_zoom = 'user-scalable=no' in viewport_lower or 'maximum-scale=1' in viewport_lower
+        
+        if has_device_width and has_initial_scale and not prevents_zoom:
+            profile.mobile_readiness = MobileReadiness.OPTIMIZED
+        elif has_device_width:
+            profile.mobile_readiness = MobileReadiness.RESPONSIVE
         else:
-            content = viewport.get('content', '')
-            features['viewport'] = content
-            
-            # Check viewport configuration
-            if 'width=device-width' not in content:
-                issues.append({
-                    'type': 'viewport_not_responsive',
-                    'severity': 'warning',
-                    'message': 'Viewport not set to device-width',
-                    'user_impact': 'Your site may not scale properly on different screen sizes',
-                    'recommendation': 'Include width=device-width in your viewport meta tag',
-                    'example': '<meta name="viewport" content="width=device-width, initial-scale=1">',
-                    'implementation_difficulty': 'easy',
-                    'priority_score': 7,
-                    'estimated_impact': 'high'
-                })
-            
-            if 'user-scalable=no' in content or 'maximum-scale=1' in content:
-                issues.append(create_issue('viewport_zoom_disabled'))
-        
-        # Check for mobile-specific meta tags
-        apple_tags = {
-            'apple-mobile-web-app-capable': 'iOS app capable',
-            'apple-mobile-web-app-status-bar-style': 'iOS status bar',
-            'apple-mobile-web-app-title': 'iOS app title'
-        }
-        
-        for name, description in apple_tags.items():
-            tag = soup.find('meta', attrs={'name': name})
-            if tag:
-                features[name] = tag.get('content', '')
-        
-        # Check for responsive images
-        pictures = soup.find_all('picture')
-        if pictures:
-            features['responsive_images'] = len(pictures)
-        
-        # Check for mobile-first CSS (media queries)
-        styles = soup.find_all('style')
-        mobile_queries = 0
-        desktop_queries = 0
-        
-        for style in styles:
-            if style.string:
-                mobile_queries += len(re.findall(r'@media[^{]*max-width', style.string))
-                desktop_queries += len(re.findall(r'@media[^{]*min-width', style.string))
-        
-        # Also check linked stylesheets
-        for link in soup.find_all('link', {'rel': 'stylesheet'}):
-            media = link.get('media', '')
-            if 'max-width' in media:
-                mobile_queries += 1
-            elif 'min-width' in media:
-                desktop_queries += 1
-        
-        features['mobile_first_css'] = mobile_queries > desktop_queries
-        
-        # Check for touch icons
-        touch_icons = soup.find_all('link', {'rel': re.compile(r'apple-touch-icon|icon')})
-        features['touch_icons'] = len(touch_icons)
-        
-        # Check font sizes (more comprehensive)
-        small_fonts = self._check_font_sizes(soup)
-        if small_fonts:
-            issues.append({
-                'type': 'small_font_sizes',
-                'severity': 'warning',
-                'message': f'Found {small_fonts} text elements with small font sizes (<14px)'
-            })
-        
-        return {
-            'is_mobile_friendly': is_mobile_friendly,
-            'features': features,
-            'issues': issues
-        }
+            profile.mobile_readiness = MobileReadiness.ADAPTIVE
     
-    def _check_font_sizes(self, soup: BeautifulSoup) -> int:
-        """Check for small font sizes in inline styles"""
-        small_count = 0
-        
-        # Check inline styles
-        elements_with_style = soup.find_all(style=True)
-        for element in elements_with_style:
-            style = element.get('style', '')
-            match = re.search(r'font-size:\s*(\d+(?:\.\d+)?)(px|pt)', style)
-            if match:
-                size = float(match.group(1))
-                unit = match.group(2)
-                # Convert pt to px (1pt ≈ 1.333px)
-                if unit == 'pt':
-                    size = size * 1.333
-                if size < 14:
-                    small_count += 1
-        
-        # Check style tags
-        for style in soup.find_all('style'):
-            if style.string:
-                matches = re.findall(r'font-size:\s*(\d+(?:\.\d+)?)(px|pt)', style.string)
-                for size_str, unit in matches:
-                    size = float(size_str)
-                    if unit == 'pt':
-                        size = size * 1.333
-                    if size < 14:
-                        small_count += 1
-        
-        return small_count
+    # Check responsive images
+    images = soup.find_all('img')
+    profile.total_images = len(images)
     
-    def _analyze_compression(self, headers: Dict[str, str], page_data: Dict) -> Dict[str, Any]:
-        """Analyze content compression"""
-        issues = []
-        compression = headers.get('Content-Encoding', '')
-        content_length = int(headers.get('Content-Length', 0))
-        
-        if page_data.get('content'):
-            actual_size = len(page_data['content'].encode('utf-8'))
-            
-            if not compression and actual_size > 1024:  # 1KB threshold
-                issues.append(create_issue(
-                    'no_compression',
-                    file_size=actual_size
-                ))
-                compression_ratio = 0
-            else:
-                # Estimate compression ratio
-                if content_length > 0:
-                    compression_ratio = round((1 - content_length / actual_size) * 100, 1)
-                else:
-                    compression_ratio = 0
-                
-                # Check compression effectiveness
-                if compression and compression_ratio < 50 and actual_size > 10240:  # 10KB
-                    issues.append({
-                        'type': 'poor_compression',
-                        'severity': 'notice',
-                        'message': f'Poor compression ratio: {compression_ratio}%'
-                    })
+    for img in images:
+        # Check for responsive attributes
+        if any([
+            img.get('srcset'),
+            img.get('sizes'),
+            'max-width' in img.get('style', ''),
+            'width: 100%' in img.get('style', ''),
+            any(cls in ' '.join(img.get('class', [])) for cls in ['responsive', 'fluid', 'img-fluid'])
+        ]):
+            profile.responsive_images += 1
+    
+    # Check for plugins
+    plugins = soup.find_all(['embed', 'object', 'applet'])
+    profile.uses_plugins = len(plugins) > 0
+    
+    # Check for Flash
+    for plugin in plugins:
+        if 'flash' in str(plugin).lower() or '.swf' in str(plugin):
+            profile.uses_plugins = True
+            profile.mobile_readiness = MobileReadiness.BROKEN
+    
+    # Check for AMP
+    amp_html = soup.find('html', attrs={'amp': True}) or soup.find('html', attrs={'⚡': True})
+    if amp_html:
+        profile.amp_version = 'AMP'
+    
+    amp_link = soup.find('link', attrs={'rel': 'amphtml'})
+    if amp_link:
+        profile.amp_version = 'AMP Available'
+    
+    # Check for PWA indicators
+    manifest = soup.find('link', attrs={'rel': 'manifest'})
+    service_worker = soup.find('script', string=re.compile(r'serviceWorker'))
+    
+    if manifest and service_worker:
+        profile.pwa_ready = True
+    
+    # Check for app links
+    # iOS
+    ios_app = soup.find('meta', attrs={'name': 'apple-itunes-app'})
+    if ios_app:
+        profile.app_links['ios'] = ios_app.get('content', '')
+    
+    # Android
+    android_app = soup.find('link', attrs={'rel': 'alternate', 'href': re.compile(r'android-app://')})
+    if android_app:
+        profile.app_links['android'] = android_app.get('href', '')
+    
+    # Check touch icon
+    touch_icon = soup.find('link', attrs={'rel': re.compile(r'apple-touch-icon')})
+    if touch_icon:
+        profile.app_links['touch_icon'] = touch_icon.get('href', '')
+    
+    # Check for horizontal scrolling indicators
+    tables_without_scroll = soup.find_all('table', attrs={'width': re.compile(r'\d{4,}')})
+    if tables_without_scroll:
+        profile.horizontal_scrolling = True
+    
+    # Check text size
+    small_fonts = soup.find_all(style=re.compile(r'font-size:\s*(\d+)(px|pt)'))
+    for element in small_fonts:
+        style = element.get('style', '')
+        size_match = re.search(r'font-size:\s*(\d+)', style)
+        if size_match:
+            size = int(size_match.group(1))
+            if size < 12:  # Less than 12px is too small for mobile
+                profile.text_readability = False
+                break
+    
+    return profile
+
+
+def analyze_performance_indicators(headers: Dict[str, str] = None, soup: BeautifulSoup = None) -> PerformanceProfile:
+    """Analyze technical performance indicators."""
+    profile = PerformanceProfile()
+    headers_lower = {k.lower(): v for k, v in headers.items()} if headers else {}
+    
+    # Detect protocol version
+    if headers:
+        # Check for HTTP/2 indicators
+        if ':status' in headers_lower or 'http2-settings' in headers_lower:
+            profile.protocol_version = ProtocolVersion.HTTP_2
+        # Check for HTTP/3 indicators
+        elif 'alt-svc' in headers_lower and 'h3' in headers_lower['alt-svc']:
+            profile.protocol_version = ProtocolVersion.HTTP_3
         else:
-            compression_ratio = 0
-        
-        # Check for better compression algorithms
-        if compression == 'gzip' and 'br' not in headers.get('Accept-Encoding', ''):
-            issues.append({
-                'type': 'suboptimal_compression',
-                'severity': 'notice',
-                'message': 'Consider using Brotli compression for better performance'
-            })
-        
-        return {
-            'compression': compression,
-            'ratio': compression_ratio,
-            'issues': issues
-        }
+            # Default to HTTP/1.1 for most cases
+            profile.protocol_version = ProtocolVersion.HTTP_1_1
     
-    def _analyze_caching(self, headers: Dict[str, str]) -> Dict[str, Any]:
-        """Analyze caching headers"""
-        issues = []
-        cache_control = headers.get('Cache-Control', '')
-        max_age = 0
+    # Check compression
+    content_encoding = headers_lower.get('content-encoding', '')
+    if content_encoding:
+        profile.compression_enabled = True
+        profile.compression_type = content_encoding
         
-        if not cache_control:
-            issues.append(create_issue('no_cache_control'))
+        # Estimate compression ratio based on encoding type
+        if 'br' in content_encoding:
+            profile.compression_ratio = 0.8  # Brotli typically 20-30% better than gzip
+        elif 'gzip' in content_encoding:
+            profile.compression_ratio = 0.7  # Gzip typically 70% compression
+        elif 'deflate' in content_encoding:
+            profile.compression_ratio = 0.65
+    
+    # Cache analysis
+    cache_control = headers_lower.get('cache-control', '')
+    if cache_control:
+        profile.cache_control = cache_control
+        
+        # Parse max-age
+        max_age_match = re.search(r'max-age=(\d+)', cache_control)
+        if max_age_match:
+            profile.cache_ttl = int(max_age_match.group(1))
+        
+        # Check for no-cache/no-store
+        if 'no-store' in cache_control or 'no-cache' in cache_control:
+            profile.cache_ttl = 0
+    
+    # Check for ETag
+    profile.etag_present = 'etag' in headers_lower
+    
+    # Check for Last-Modified
+    profile.last_modified = headers_lower.get('last-modified')
+    
+    # CDN detection
+    cdn_headers = {
+        'cloudflare': ['cf-ray', 'cf-cache-status'],
+        'cloudfront': ['x-amz-cf-id', 'x-amz-cf-pop'],
+        'akamai': ['x-akamai-transformed', 'x-akamai-request-id'],
+        'fastly': ['x-served-by', 'x-fastly-request-id'],
+        'maxcdn': ['x-maxcdn-request-id'],
+        'keycdn': ['x-keycdn-cache', 'x-keycdn-request-id'],
+        'bunny': ['x-bunny-request-id']
+    }
+    
+    for cdn_name, cdn_indicators in cdn_headers.items():
+        if any(header in headers_lower for header in cdn_indicators):
+            profile.cdn_detected = True
+            profile.cdn_provider = cdn_name
+            break
+    
+    # Check for server push (HTTP/2)
+    if 'link' in headers_lower and 'rel=preload' in headers_lower['link']:
+        if 'nopush' not in headers_lower['link']:
+            profile.server_push_enabled = True
+    
+    # Check for early hints (103 status)
+    if headers_lower.get('status') == '103':
+        profile.early_hints = True
+    
+    # Connection settings
+    connection = headers_lower.get('connection', '')
+    if 'keep-alive' in connection.lower():
+        profile.connection_reuse = True
+        
+        # Parse Keep-Alive timeout
+        keep_alive = headers_lower.get('keep-alive', '')
+        timeout_match = re.search(r'timeout=(\d+)', keep_alive)
+        if timeout_match:
+            profile.keep_alive_timeout = int(timeout_match.group(1))
+    
+    return profile
+
+
+def analyze_url_structure(url: str) -> URLProfile:
+    """Analyze URL structure and SEO-friendliness."""
+    profile = URLProfile()
+    
+    # Basic metrics
+    profile.length = len(url)
+    
+    # Parse URL
+    parsed = urlparse(url)
+    
+    # Calculate depth (number of path segments)
+    path_segments = [s for s in parsed.path.split('/') if s]
+    profile.depth = len(path_segments)
+    
+    # Count parameters
+    if parsed.query:
+        params = parse_qs(parsed.query)
+        profile.parameters_count = len(params)
+        
+        # Check for tracking parameters
+        tracking_params = {
+            'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+            'fbclid', 'gclid', 'msclkid', 'ref', 'source', 'track'
+        }
+        if any(param in params for param in tracking_params):
+            profile.has_tracking_params = True
+        
+        # Check for session IDs
+        session_patterns = ['sessionid', 'session_id', 'sid', 'phpsessid', 'jsessionid']
+        if any(param.lower() in session_patterns for param in params):
+            profile.has_session_id = True
+            profile.is_clean = False
+    
+    # Check for underscores
+    if '_' in parsed.path:
+        profile.uses_underscores = True
+        profile.is_seo_friendly = False
+    
+    # Check for uppercase
+    if any(c.isupper() for c in parsed.path):
+        profile.uses_uppercase = True
+        profile.is_seo_friendly = False
+    
+    # Check for file extensions
+    if re.search(r'\.\w{2,4}$', parsed.path):
+        profile.has_file_extension = True
+    
+    # Check trailing slash
+    if parsed.path.endswith('/') and len(parsed.path) > 1:
+        profile.trailing_slash = True
+    
+    # Check for special characters
+    special_chars = re.findall(r'[^a-zA-Z0-9\-/._~:?#\[\]@!$&\'()*+,;=]', url)
+    if special_chars:
+        profile.special_characters = list(set(special_chars))
+        profile.is_seo_friendly = False
+    
+    # Determine if URL is clean
+    if (profile.parameters_count == 0 and 
+        not profile.uses_underscores and 
+        not profile.uses_uppercase and 
+        not profile.special_characters):
+        profile.is_clean = True
+    else:
+        profile.is_clean = False
+    
+    # SEO-friendly check
+    if (profile.is_clean and 
+        profile.length < 100 and 
+        profile.depth < 5 and 
+        not profile.has_session_id):
+        profile.is_seo_friendly = True
+    else:
+        profile.is_seo_friendly = False
+    
+    return profile
+
+
+def analyze_international_setup(soup: BeautifulSoup, headers: Dict[str, str] = None) -> InternationalProfile:
+    """Analyze international and localization configuration."""
+    profile = InternationalProfile()
+    headers_lower = {k.lower(): v for k, v in headers.items()} if headers else {}
+    
+    # Check language declaration
+    html_tag = soup.find('html')
+    if html_tag and html_tag.get('lang'):
+        profile.language_declared = True
+        profile.language_code = html_tag.get('lang')
+    
+    # Check for hreflang tags
+    hreflang_links = soup.find_all('link', attrs={'rel': 'alternate', 'hreflang': True})
+    if hreflang_links:
+        profile.hreflang_configured = True
+        for link in hreflang_links:
+            lang = link.get('hreflang')
+            href = link.get('href')
+            if lang and href:
+                profile.hreflang_tags[lang] = href
+    
+    # Check charset
+    charset_meta = soup.find('meta', charset=True)
+    if charset_meta:
+        profile.charset = charset_meta.get('charset')
+    else:
+        content_type = soup.find('meta', attrs={'http-equiv': 'Content-Type'})
+        if content_type:
+            content = content_type.get('content', '')
+            charset_match = re.search(r'charset=([^;]+)', content)
+            if charset_match:
+                profile.charset = charset_match.group(1).strip()
+    
+    # Check for geo-targeting meta tags
+    geo_tags = ['geo.region', 'geo.placename', 'geo.position', 'ICBM']
+    for tag_name in geo_tags:
+        geo_tag = soup.find('meta', attrs={'name': tag_name})
+        if geo_tag:
+            profile.geo_targeting = f"{tag_name}: {geo_tag.get('content', '')}"
+            break
+    
+    # Check for RTL support
+    if html_tag and html_tag.get('dir') == 'rtl':
+        profile.rtl_support = True
+    
+    # Check for locale-adaptive content
+    if 'content-language' in headers_lower:
+        profile.locale_adaptive = True
+    
+    # Check for language negotiation
+    if 'vary' in headers_lower and 'accept-language' in headers_lower['vary'].lower():
+        profile.locale_adaptive = True
+    
+    return profile
+
+
+def detect_javascript_seo_issues(soup: BeautifulSoup) -> Dict[str, Any]:
+    """Detect JavaScript SEO issues and recommendations."""
+    issues = {
+        'client_side_rendering': False,
+        'spa_detected': False,
+        'lazy_loaded_content': False,
+        'infinite_scroll': False,
+        'ajax_navigation': False,
+        'javascript_redirects': False,
+        'dynamic_meta_tags': False,
+        'recommendations': []
+    }
+    
+    # Check for React/Vue/Angular indicators
+    spa_indicators = [
+        ('div', {'id': 'root'}),  # React
+        ('div', {'id': 'app'}),   # Vue
+        ('app-root', {}),          # Angular
+        ('div', {'ng-app': True}), # AngularJS
+    ]
+    
+    for tag, attrs in spa_indicators:
+        if soup.find(tag, attrs):
+            issues['spa_detected'] = True
+            issues['client_side_rendering'] = True
+            break
+    
+    # Check for lazy loading indicators
+    lazy_indicators = [
+        ('img', {'loading': 'lazy'}),
+        ('iframe', {'loading': 'lazy'}),
+        (None, {'data-src': True}),
+        (None, {'data-lazy': True}),
+    ]
+    
+    for tag, attrs in lazy_indicators:
+        elements = soup.find_all(tag, attrs) if tag else soup.find_all(attrs=attrs)
+        if elements:
+            issues['lazy_loaded_content'] = True
+            break
+    
+    # Check for infinite scroll
+    infinite_scroll_scripts = soup.find_all('script', string=re.compile(r'(IntersectionObserver|infinite.?scroll|waypoint)', re.I))
+    if infinite_scroll_scripts:
+        issues['infinite_scroll'] = True
+    
+    # Check for AJAX navigation
+    ajax_nav_patterns = [
+        r'history\.pushState',
+        r'window\.history\.replaceState',
+        r'ajax.*navigation',
+        r'pjax'
+    ]
+    
+    for script in soup.find_all('script'):
+        if script.string:
+            for pattern in ajax_nav_patterns:
+                if re.search(pattern, script.string, re.I):
+                    issues['ajax_navigation'] = True
+                    break
+    
+    # Check for JavaScript redirects
+    js_redirect_patterns = [
+        r'window\.location',
+        r'location\.href',
+        r'location\.replace',
+        r'meta.*refresh'
+    ]
+    
+    for script in soup.find_all('script'):
+        if script.string:
+            for pattern in js_redirect_patterns:
+                if re.search(pattern, script.string):
+                    issues['javascript_redirects'] = True
+                    break
+    
+    # Generate recommendations
+    if issues['spa_detected']:
+        issues['recommendations'].append("Use server-side rendering (SSR) or pre-rendering for better SEO")
+    
+    if issues['infinite_scroll']:
+        issues['recommendations'].append("Provide paginated alternatives for infinite scroll content")
+    
+    if issues['ajax_navigation']:
+        issues['recommendations'].append("Ensure all navigation states have unique URLs and are crawlable")
+    
+    if issues['javascript_redirects']:
+        issues['recommendations'].append("Replace JavaScript redirects with server-side 301/302 redirects")
+    
+    return issues
+
+
+def analyze_technical(soup: BeautifulSoup, url: str, headers: Dict[str, str] = None, status_code: int = 200) -> Dict[str, Any]:
+    """Advanced technical SEO analysis with comprehensive checks."""
+    issues = []
+    data = {}
+    
+    # Parse URL
+    parsed_url = urlparse(url)
+    
+    # HTTPS check
+    data['https'] = parsed_url.scheme == 'https'
+    if not data['https']:
+        issues.append(create_issue('Security', 'critical', 'Site not using HTTPS'))
+    
+    # Status code analysis
+    data['status_code'] = status_code
+    if status_code >= 500:
+        issues.append(create_issue('Availability', 'critical', f'Server error status code {status_code}'))
+    elif status_code >= 400:
+        issues.append(create_issue('Availability', 'critical', f'Client error status code {status_code}'))
+    elif status_code >= 300:
+        if status_code == 301:
+            issues.append(create_issue('Redirects', 'notice', 'Permanent redirect (301)'))
+        elif status_code == 302:
+            issues.append(create_issue('Redirects', 'warning', 'Temporary redirect (302) - consider using 301 for SEO'))
         else:
-            # Parse cache directives
-            directives = [d.strip() for d in cache_control.split(',')]
-            
-            # Check for no-cache/no-store
-            if 'no-cache' in directives or 'no-store' in directives:
-                issues.append({
-                    'type': 'no_caching',
-                    'severity': 'notice',
-                    'message': 'Page is not cacheable (no-cache/no-store directive)'
-                })
-            
-            # Extract max-age
-            for directive in directives:
-                if directive.startswith('max-age='):
-                    try:
-                        max_age = int(directive.split('=')[1])
-                    except:
-                        pass
-            
-            # Check if max-age is too short
-            if 0 < max_age < 3600:  # Less than 1 hour
-                issues.append({
-                    'type': 'short_cache_duration',
-                    'severity': 'notice',
-                    'message': f'Short cache duration: {max_age} seconds'
-                })
-        
-        # Check ETag
-        if not headers.get('ETag') and not headers.get('Last-Modified'):
-            issues.append({
-                'type': 'no_cache_validation',
-                'severity': 'notice',
-                'message': 'No ETag or Last-Modified header for cache validation'
-            })
-        
-        # Check Expires header (legacy)
-        if headers.get('Expires') and not cache_control:
-            issues.append({
-                'type': 'legacy_caching',
-                'severity': 'notice',
-                'message': 'Using legacy Expires header instead of Cache-Control'
-            })
-        
-        return {
-            'cache_control': cache_control,
-            'max_age': max_age,
-            'issues': issues
-        }
+            issues.append(create_issue('Redirects', 'warning', f'Redirect status {status_code}'))
     
-    def _check_sitemap_reference(self, soup: BeautifulSoup, page_data: Dict) -> Dict[str, Any]:
-        """Check for sitemap references"""
-        locations = []
-        
-        # Check HTML link
-        sitemap_link = soup.find('link', {'rel': 'sitemap'})
-        if sitemap_link:
-            href = sitemap_link.get('href', '')
-            if href:
-                locations.append({'type': 'html_link', 'url': urljoin(page_data['url'], href)})
-        
-        # Check if this might be the homepage to look for common sitemap locations
-        parsed = urlparse(page_data['url'])
-        if parsed.path in ['/', '', '/index.html', '/index.php']:
-            # Common sitemap URLs to check in robots.txt during crawl
-            locations.append({'type': 'standard', 'url': f'{parsed.scheme}://{parsed.netloc}/sitemap.xml'})
-            locations.append({'type': 'standard', 'url': f'{parsed.scheme}://{parsed.netloc}/sitemap_index.xml'})
-        
-        return {
-            'found': len(locations) > 0,
-            'locations': locations
-        }
+    # Security analysis
+    security_profile = analyze_security_headers(headers)
+    data['security'] = {
+        'level': security_profile.security_level.value,
+        'https': data['https'],
+        'hsts': security_profile.hsts_enabled,
+        'hsts_max_age': security_profile.hsts_max_age,
+        'csp': security_profile.csp_enabled,
+        'xfo': security_profile.xfo_enabled,
+        'x_content_type_options': security_profile.x_content_type_options,
+        'vulnerabilities': security_profile.vulnerabilities[:5]  # Limit to top 5
+    }
     
-    def _analyze_hreflang(self, soup: BeautifulSoup, current_url: str) -> Dict[str, Any]:
-        """Analyze hreflang tags for international SEO"""
-        issues = []
-        hreflang_tags = []
-        seen_langs = set()
-        has_x_default = False
-        
-        links = soup.find_all('link', {'rel': 'alternate'})
-        for link in links:
-            hreflang = link.get('hreflang')
-            if hreflang:
-                href = link.get('href', '')
-                if not href:
-                    issues.append({
-                        'type': 'empty_hreflang_url',
-                        'severity': 'critical',
-                        'message': f'Empty URL for hreflang="{hreflang}"'
-                    })
-                    continue
-                
-                # Make URL absolute
-                href = urljoin(current_url, href)
-                
-                hreflang_tags.append({
-                    'lang': hreflang,
-                    'url': href
-                })
-                
-                # Validate hreflang value
-                if hreflang == 'x-default':
-                    has_x_default = True
-                else:
-                    # Check format (language-country)
-                    if not re.match(r'^[a-z]{2}(-[A-Z]{2})?$', hreflang):
-                        issues.append({
-                            'type': 'invalid_hreflang_format',
-                            'severity': 'warning',
-                            'message': f'Invalid hreflang format: "{hreflang}" (expected: en-US)'
-                        })
-                
-                # Check for duplicates
-                if hreflang in seen_langs:
-                    issues.append({
-                        'type': 'duplicate_hreflang',
-                        'severity': 'critical',
-                        'message': f'Duplicate hreflang: "{hreflang}"'
-                    })
-                seen_langs.add(hreflang)
-        
-        # Additional checks if hreflang tags exist
-        if hreflang_tags:
-            # Check for self-reference
-            current_lang = None
-            for tag in hreflang_tags:
-                if self._normalize_url(tag['url']) == self._normalize_url(current_url):
-                    current_lang = tag['lang']
-                    break
-            
-            if not current_lang:
-                issues.append({
-                    'type': 'missing_self_hreflang',
-                    'severity': 'warning',
-                    'message': 'No hreflang tag points to current page'
-                })
-            
-            # Check for x-default
-            if not has_x_default and len(hreflang_tags) > 2:
-                issues.append({
-                    'type': 'missing_x_default_hreflang',
-                    'severity': 'notice',
-                    'message': 'Consider adding x-default hreflang for language selector'
-                })
-        
-        return {
-            'tags': hreflang_tags,
-            'issues': issues
-        }
+    # Report security issues
+    if not security_profile.hsts_enabled and data['https']:
+        issues.append(create_issue('Security', 'warning', 'Missing HSTS header for HTTPS site'))
     
-    def _check_amp_version(self, soup: BeautifulSoup) -> Dict[str, Any]:
-        """Check for AMP version of the page"""
-        issues = []
-        amp_link = soup.find('link', {'rel': 'amphtml'})
-        amp_url = ''
-        
-        if amp_link:
-            amp_url = amp_link.get('href', '')
-            if not amp_url:
-                issues.append({
-                    'type': 'empty_amp_url',
-                    'severity': 'warning',
-                    'message': 'AMP link exists but href is empty'
-                })
-            else:
-                # Validate AMP URL
-                if not amp_url.startswith(('http://', 'https://', '/')):
-                    issues.append({
-                        'type': 'invalid_amp_url',
-                        'severity': 'warning',
-                        'message': f'Invalid AMP URL: {amp_url}'
-                    })
-        
-        # Check if this IS an AMP page
-        html_tag = soup.find('html')
-        if html_tag and (html_tag.get('amp') is not None or html_tag.get('⚡') is not None):
-            # This is an AMP page, check for canonical
-            canonical = soup.find('link', {'rel': 'canonical'})
-            if not canonical:
-                issues.append({
-                    'type': 'amp_missing_canonical',
-                    'severity': 'critical',
-                    'message': 'AMP page missing canonical link to regular version'
-                })
-        
-        return {
-            'url': amp_url,
-            'issues': issues
-        }
+    if security_profile.hsts_enabled and security_profile.hsts_max_age < 31536000:
+        issues.append(create_issue('Security', 'notice', 
+            f'HSTS max-age too short ({security_profile.hsts_max_age}s), recommend 31536000'))
     
-    def _analyze_structured_data(self, soup: BeautifulSoup) -> Dict[str, Any]:
-        """Analyze structured data (JSON-LD, Microdata, RDFa)"""
-        issues = []
-        schemas = []
-        
-        # Check JSON-LD
-        json_ld_scripts = soup.find_all('script', {'type': 'application/ld+json'})
-        for script in json_ld_scripts:
-            try:
-                data = json.loads(script.string)
-                if isinstance(data, list):
-                    for item in data:
-                        schemas.append({
-                            'type': 'json-ld',
-                            'schema': item.get('@type', 'Unknown'),
-                            'data': item
-                        })
-                else:
-                    schemas.append({
-                        'type': 'json-ld',
-                        'schema': data.get('@type', 'Unknown'),
-                        'data': data
-                    })
-                    
-                # Validate common required fields
-                self._validate_structured_data(data, issues)
-                
-            except json.JSONDecodeError as e:
-                issues.append({
-                    'type': 'invalid_json_ld',
-                    'severity': 'critical',
-                    'message': f'Invalid JSON-LD: {str(e)}'
-                })
-            except Exception as e:
-                logger.error(f"Error parsing JSON-LD: {e}")
-        
-        # Check Microdata
-        microdata_items = soup.find_all(attrs={'itemscope': True})
-        for item in microdata_items:
-            item_type = item.get('itemtype', '')
-            if item_type:
-                schemas.append({
-                    'type': 'microdata',
-                    'schema': item_type.split('/')[-1] if '/' in item_type else item_type,
-                    'data': {'itemtype': item_type}
-                })
-        
-        # Check RDFa
-        rdfa_items = soup.find_all(attrs={'typeof': True})
-        for item in rdfa_items:
-            schemas.append({
-                'type': 'rdfa',
-                'schema': item.get('typeof', ''),
-                'data': {'typeof': item.get('typeof', '')}
-            })
-        
-        # Check for common issues
-        if not schemas:
-            issues.append({
-                'type': 'no_structured_data',
-                'severity': 'notice',
-                'message': 'No structured data found (JSON-LD, Microdata, or RDFa)'
-            })
-        
-        return {
-            'schemas': schemas,
-            'issues': issues
-        }
+    if not security_profile.csp_enabled:
+        issues.append(create_issue('Security', 'warning', 'Missing Content Security Policy'))
     
-    def _validate_structured_data(self, data: Any, issues: List[Dict]) -> None:
-        """Validate structured data against common requirements"""
-        if isinstance(data, list):
-            for item in data:
-                self._validate_structured_data(item, issues)
-            return
-        
-        if not isinstance(data, dict):
-            return
-        
-        schema_type = data.get('@type', '')
-        
-        # Common validation rules
-        if schema_type == 'Article':
-            required = ['headline', 'datePublished', 'author']
-            for field in required:
-                if field not in data:
-                    issues.append({
-                        'type': 'missing_structured_data_field',
-                        'severity': 'warning',
-                        'message': f'Article schema missing required field: {field}'
-                    })
-        
-        elif schema_type == 'Product':
-            required = ['name', 'description']
-            recommended = ['offers', 'aggregateRating', 'image']
-            
-            for field in required:
-                if field not in data:
-                    issues.append({
-                        'type': 'missing_structured_data_field',
-                        'severity': 'warning',
-                        'message': f'Product schema missing required field: {field}'
-                    })
-            
-            for field in recommended:
-                if field not in data:
-                    issues.append({
-                        'type': 'missing_structured_data_field',
-                        'severity': 'notice',
-                        'message': f'Product schema missing recommended field: {field}'
-                    })
-        
-        elif schema_type == 'Organization':
-            recommended = ['logo', 'url', 'contactPoint']
-            for field in recommended:
-                if field not in data:
-                    issues.append({
-                        'type': 'missing_structured_data_field',
-                        'severity': 'notice',
-                        'message': f'Organization schema missing recommended field: {field}'
-                    })
+    if not security_profile.xfo_enabled:
+        issues.append(create_issue('Security', 'notice', 'Missing X-Frame-Options header'))
     
-    def _analyze_pagination(self, soup: BeautifulSoup) -> Dict[str, Any]:
-        """Analyze pagination implementation"""
-        issues = []
-        pagination = {}
-        
-        # Check for rel="prev" and rel="next"
-        prev_link = soup.find('link', {'rel': 'prev'})
-        next_link = soup.find('link', {'rel': 'next'})
-        
-        if prev_link:
-            pagination['prev'] = prev_link.get('href', '')
-        
-        if next_link:
-            pagination['next'] = next_link.get('href', '')
-        
-        # Check for common pagination patterns in content
-        if not prev_link and not next_link:
-            # Look for pagination in common selectors
-            pagination_selectors = [
-                'nav.pagination', 'div.pagination', 'ul.pagination',
-                '.page-numbers', '.pager', 'nav[aria-label*="pagination"]'
-            ]
-            
-            for selector in pagination_selectors:
-                element = soup.select_one(selector)
-                if element:
-                    pagination['has_pagination_ui'] = True
-                    
-                    # If UI exists but no rel links, it's an issue
-                    issues.append({
-                        'type': 'missing_pagination_links',
-                        'severity': 'notice',
-                        'message': 'Pagination UI found but missing rel="prev/next" links'
-                    })
-                    break
-        
-        # Check for view-all link
-        view_all = soup.find('link', {'rel': 'canonical'})
-        if view_all and 'view-all' in view_all.get('href', ''):
-            pagination['has_view_all'] = True
-        
-        return {
-            'pagination': pagination,
-            'issues': issues
-        }
+    for vulnerability in security_profile.vulnerabilities[:3]:
+        issues.append(create_issue('Security', 'warning', vulnerability))
     
-    def _detect_js_frameworks(self, soup: BeautifulSoup, page_data: Dict) -> List[str]:
-        """Detect JavaScript frameworks and libraries"""
-        frameworks = []
-        content = page_data.get('content', '')
-        
-        # Check for common framework indicators
-        framework_patterns = {
-            'React': [
-                r'react(?:\.min)?\.js',
-                r'_react',
-                r'React\.createElement',
-                r'__REACT_DEVTOOLS_GLOBAL_HOOK__'
-            ],
-            'Vue.js': [
-                r'vue(?:\.min)?\.js',
-                r'new Vue\(',
-                r'v-[a-z]+="',
-                r'__VUE_DEVTOOLS_GLOBAL_HOOK__'
-            ],
-            'Angular': [
-                r'angular(?:\.min)?\.js',
-                r'ng-[a-z]+="',
-                r'\[\(ngModel\)\]',
-                r'@angular/'
-            ],
-            'jQuery': [
-                r'jquery(?:\.min)?\.js',
-                r'jQuery\(',
-                r'\$\(document\)\.ready'
-            ],
-            'Bootstrap': [
-                r'bootstrap(?:\.min)?\.(?:js|css)',
-                r'class="[^"]*\b(?:btn|col-|container|row)\b'
-            ],
-            'WordPress': [
-                r'/wp-content/',
-                r'/wp-includes/',
-                r'wp-json'
-            ],
-            'Next.js': [
-                r'_next/static',
-                r'__NEXT_DATA__'
-            ],
-            'Gatsby': [
-                r'gatsby-',
-                r'___gatsby'
-            ]
-        }
-        
-        for framework, patterns in framework_patterns.items():
-            for pattern in patterns:
-                if re.search(pattern, content, re.IGNORECASE):
-                    frameworks.append(framework)
-                    break
-        
-        # Check meta generators
-        generator = soup.find('meta', {'name': 'generator'})
-        if generator:
-            content = generator.get('content', '')
-            if content and content not in frameworks:
-                frameworks.append(content.split()[0])  # Get first word
-        
-        return list(set(frameworks))  # Remove duplicates
+    if security_profile.security_level == SecurityLevel.CRITICAL:
+        issues.append(create_issue('Security', 'critical', 'Critical security issues detected'))
     
-    def _analyze_resource_hints(self, soup: BeautifulSoup) -> Dict[str, Any]:
-        """Analyze resource hints (dns-prefetch, preconnect, prefetch, preload)"""
-        hints = {
-            'dns-prefetch': [],
-            'preconnect': [],
-            'prefetch': [],
-            'preload': [],
-            'prerender': []
-        }
-        
-        for hint_type in hints.keys():
-            links = soup.find_all('link', {'rel': hint_type})
-            for link in links:
-                href = link.get('href', '')
-                if href:
-                    hint_data = {'url': href}
-                    
-                    # Additional attributes for preload
-                    if hint_type == 'preload':
-                        hint_data['as'] = link.get('as', '')
-                        hint_data['type'] = link.get('type', '')
-                        hint_data['crossorigin'] = link.get('crossorigin', '')
-                    
-                    hints[hint_type].append(hint_data)
-        
-        # Count total hints
-        total_hints = sum(len(h) for h in hints.values())
-        hints['total'] = total_hints
-        
-        return hints
+    # Crawlability analysis
+    crawl_profile = analyze_crawlability(soup, headers)
+    data['crawlability'] = {
+        'status': crawl_profile.status.value,
+        'noindex': crawl_profile.noindex,
+        'nofollow': crawl_profile.nofollow,
+        'canonical': crawl_profile.canonical_url,
+        'javascript_required': crawl_profile.javascript_required
+    }
     
-    def _check_pwa(self, soup: BeautifulSoup, headers: Dict[str, str]) -> Dict[str, Any]:
-        """Check for Progressive Web App features"""
-        issues = []
-        features = {
-            'has_manifest': False,
-            'has_service_worker': False,
-            'has_theme_color': False,
-            'is_installable': False
-        }
+    if crawl_profile.noindex:
+        issues.append(create_issue('Crawlability', 'critical', 'Page is set to noindex'))
+    
+    if crawl_profile.nofollow:
+        issues.append(create_issue('Crawlability', 'warning', 'Page is set to nofollow'))
+    
+    if crawl_profile.javascript_required:
+        issues.append(create_issue('Crawlability', 'warning', 'Content requires JavaScript for crawling'))
+    
+    # Mobile optimization analysis
+    mobile_profile = analyze_mobile_optimization(soup)
+    data['mobile'] = {
+        'readiness': mobile_profile.mobile_readiness.value,
+        'viewport_configured': mobile_profile.viewport_configured,
+        'responsive_images': f"{mobile_profile.responsive_images}/{mobile_profile.total_images}",
+        'amp': mobile_profile.amp_version,
+        'pwa_ready': mobile_profile.pwa_ready
+    }
+    
+    if not mobile_profile.viewport_configured:
+        issues.append(create_issue('Mobile', 'critical', 'Missing viewport meta tag'))
+    elif mobile_profile.viewport_content and 'user-scalable=no' in mobile_profile.viewport_content:
+        issues.append(create_issue('Mobile', 'warning', 'Viewport prevents user zooming (accessibility issue)'))
+    
+    if mobile_profile.uses_plugins:
+        issues.append(create_issue('Mobile', 'critical', 'Uses plugins not supported on mobile'))
+    
+    if mobile_profile.mobile_readiness == MobileReadiness.DESKTOP_ONLY:
+        issues.append(create_issue('Mobile', 'critical', 'Site not optimized for mobile'))
+    
+    if mobile_profile.horizontal_scrolling:
+        issues.append(create_issue('Mobile', 'warning', 'Content causes horizontal scrolling on mobile'))
+    
+    # Performance indicators
+    perf_profile = analyze_performance_indicators(headers, soup)
+    data['performance'] = {
+        'protocol': perf_profile.protocol_version.value,
+        'compression': perf_profile.compression_type,
+        'cache_ttl': perf_profile.cache_ttl,
+        'cdn': perf_profile.cdn_provider or 'None detected',
+        'etag': perf_profile.etag_present,
+        'server_push': perf_profile.server_push_enabled
+    }
+    
+    if not perf_profile.compression_enabled:
+        issues.append(create_issue('Performance', 'warning', 'Content not compressed'))
+    
+    if perf_profile.cache_ttl == 0:
+        issues.append(create_issue('Performance', 'warning', 'No caching configured'))
+    elif perf_profile.cache_ttl < 3600:  # Less than 1 hour
+        issues.append(create_issue('Performance', 'notice', f'Short cache TTL ({perf_profile.cache_ttl}s)'))
+    
+    if not perf_profile.cdn_detected:
+        issues.append(create_issue('Performance', 'notice', 'No CDN detected'))
+    
+    if perf_profile.protocol_version in [ProtocolVersion.HTTP_1_0, ProtocolVersion.HTTP_1_1]:
+        issues.append(create_issue('Performance', 'notice', 'Not using HTTP/2 or HTTP/3'))
+    
+    # URL structure analysis
+    url_profile = analyze_url_structure(url)
+    data['url'] = {
+        'length': url_profile.length,
+        'depth': url_profile.depth,
+        'parameters': url_profile.parameters_count,
+        'is_clean': url_profile.is_clean,
+        'is_seo_friendly': url_profile.is_seo_friendly
+    }
+    
+    if url_profile.length > 100:
+        issues.append(create_issue('URL Structure', 'warning', f'URL too long ({url_profile.length} chars)'))
+    
+    if url_profile.depth > 4:
+        issues.append(create_issue('URL Structure', 'notice', f'Deep URL structure (depth: {url_profile.depth})'))
+    
+    if url_profile.has_session_id:
+        issues.append(create_issue('URL Structure', 'critical', 'Session ID in URL'))
+    
+    if url_profile.uses_underscores:
+        issues.append(create_issue('URL Structure', 'notice', 'URL uses underscores instead of hyphens'))
+    
+    if url_profile.uses_uppercase:
+        issues.append(create_issue('URL Structure', 'warning', 'URL contains uppercase characters'))
+    
+    if not url_profile.is_seo_friendly:
+        issues.append(create_issue('URL Structure', 'warning', 'URL is not SEO-friendly'))
+    
+    # International setup
+    intl_profile = analyze_international_setup(soup, headers)
+    data['international'] = {
+        'language': intl_profile.language_code,
+        'charset': intl_profile.charset,
+        'hreflang_count': len(intl_profile.hreflang_tags),
+        'geo_targeting': intl_profile.geo_targeting
+    }
+    
+    if not intl_profile.language_declared:
+        issues.append(create_issue('International', 'warning', 'Missing language declaration'))
+    
+    if intl_profile.charset and intl_profile.charset.lower() != 'utf-8':
+        issues.append(create_issue('International', 'warning', f'Non-UTF-8 charset: {intl_profile.charset}'))
+    
+    # JavaScript SEO issues
+    js_issues = detect_javascript_seo_issues(soup)
+    data['javascript_seo'] = js_issues
+    
+    if js_issues['spa_detected']:
+        issues.append(create_issue('JavaScript SEO', 'warning', 'Single Page Application detected'))
+    
+    if js_issues['infinite_scroll']:
+        issues.append(create_issue('JavaScript SEO', 'notice', 'Infinite scroll detected'))
+    
+    if js_issues['javascript_redirects']:
+        issues.append(create_issue('JavaScript SEO', 'warning', 'JavaScript redirects detected'))
+    
+    # Mixed content check (for HTTPS sites)
+    if data['https']:
+        mixed_content = []
         
-        # Check for web app manifest
-        manifest_link = soup.find('link', {'rel': 'manifest'})
-        if manifest_link:
-            features['has_manifest'] = True
-            manifest_href = manifest_link.get('href', '')
-            if not manifest_href:
-                issues.append({
-                    'type': 'empty_manifest_href',
-                    'severity': 'warning',
-                    'message': 'Web app manifest link has empty href'
-                })
-        
-        # Check for theme color
-        theme_color = soup.find('meta', {'name': 'theme-color'})
-        if theme_color:
-            features['has_theme_color'] = True
-            features['theme_color'] = theme_color.get('content', '')
-        
-        # Check for service worker registration (basic check in HTML)
-        content = str(soup)
-        if 'serviceWorker' in content and 'register' in content:
-            features['has_service_worker'] = True
-        
-        # Check if potentially installable
-        if features['has_manifest'] and features['has_service_worker']:
-            features['is_installable'] = True
-        
-        # PWA-related meta tags
-        pwa_meta_tags = [
-            'apple-mobile-web-app-capable',
-            'apple-mobile-web-app-status-bar-style',
-            'apple-mobile-web-app-title'
+        # Check various resource types
+        resource_tags = [
+            ('img', 'src'),
+            ('script', 'src'),
+            ('link', 'href'),
+            ('iframe', 'src'),
+            ('source', 'src'),
+            ('video', 'src'),
+            ('audio', 'src'),
+            ('embed', 'src'),
+            ('object', 'data')
         ]
         
-        for tag_name in pwa_meta_tags:
-            tag = soup.find('meta', {'name': tag_name})
-            if tag:
-                features[tag_name] = tag.get('content', '')
+        for tag_name, attr_name in resource_tags:
+            for element in soup.find_all(tag_name):
+                resource_url = element.get(attr_name, '')
+                if resource_url.startswith('http://'):
+                    mixed_content.append({
+                        'type': tag_name,
+                        'url': resource_url[:100]  # Truncate long URLs
+                    })
         
-        return {
-            'features': features,
-            'issues': issues
-        }
+        if mixed_content:
+            issues.append(create_issue('Security', 'critical', 
+                f'Mixed content: {len(mixed_content)} insecure resources on HTTPS page'))
+            data['mixed_content'] = mixed_content[:10]  # Limit to first 10
     
-    def _analyze_cookies(self, headers: Dict[str, str]) -> Dict[str, Any]:
-        """Analyze cookies for security and privacy"""
-        issues = []
-        cookies = []
-        
-        # Parse Set-Cookie headers
-        set_cookie = headers.get('Set-Cookie', '')
-        if set_cookie:
-            # Basic cookie parsing (in real implementation, use proper cookie parser)
-            cookie_parts = set_cookie.split(';')
-            cookie_name = cookie_parts[0].split('=')[0].strip() if cookie_parts else 'unknown'
-            
-            cookie_info = {
-                'name': cookie_name,
-                'secure': False,
-                'httponly': False,
-                'samesite': None
-            }
-            
-            # Check cookie attributes
-            for part in cookie_parts[1:]:
-                part = part.strip().lower()
-                if part == 'secure':
-                    cookie_info['secure'] = True
-                elif part == 'httponly':
-                    cookie_info['httponly'] = True
-                elif part.startswith('samesite='):
-                    cookie_info['samesite'] = part.split('=')[1]
-            
-            cookies.append(cookie_info)
-            
-            # Security checks
-            if not cookie_info['secure']:
-                issues.append({
-                    'type': 'insecure_cookie',
-                    'severity': 'warning',
-                    'message': f'Cookie "{cookie_name}" missing Secure flag'
-                })
-            
-            if not cookie_info['httponly'] and 'session' in cookie_name.lower():
-                issues.append({
-                    'type': 'session_cookie_not_httponly',
-                    'severity': 'warning',
-                    'message': f'Session cookie "{cookie_name}" missing HttpOnly flag'
-                })
-            
-            if not cookie_info['samesite']:
-                issues.append({
-                    'type': 'cookie_no_samesite',
-                    'severity': 'notice',
-                    'message': f'Cookie "{cookie_name}" missing SameSite attribute'
-                })
-        
-        return {
-            'cookies': cookies,
-            'issues': issues
-        }
+    # Check for deprecated technologies
+    deprecated_found = []
     
-    def _calculate_technical_score(self, issues: List[Dict]) -> float:
-        """Calculate technical SEO score based on issues"""
-        score = 100.0
-        
-        # Define score deductions
-        deductions = {
-            'critical': 15,
-            'warning': 7,
-            'notice': 3
-        }
-        
-        # Calculate deductions
-        for issue in issues:
-            severity = issue.get('severity', 'notice')
-            score -= deductions.get(severity, 0)
-        
-        # Ensure score doesn't go below 0
-        return max(0, score) 
+    # Flash
+    if soup.find_all(['embed', 'object'], attrs={'type': 'application/x-shockwave-flash'}):
+        deprecated_found.append('Flash')
+    
+    # Frameset
+    if soup.find('frameset'):
+        deprecated_found.append('Frameset')
+    
+    # Font tag
+    if soup.find('font'):
+        deprecated_found.append('Font tags')
+    
+    # Center tag
+    if soup.find('center'):
+        deprecated_found.append('Center tags')
+    
+    if deprecated_found:
+        issues.append(create_issue('Compatibility', 'warning', 
+            f'Deprecated technologies: {", ".join(deprecated_found)}'))
+    
+    # Check DOCTYPE
+    doctype = None
+    for item in soup.contents:
+        if str(item).startswith('<!DOCTYPE'):
+            doctype = str(item)
+            break
+    
+    if not doctype:
+        issues.append(create_issue('HTML Standards', 'warning', 'Missing DOCTYPE declaration'))
+    elif 'html5' not in doctype.lower() and '<!doctype html>' not in doctype.lower():
+        issues.append(create_issue('HTML Standards', 'notice', 'Non-HTML5 DOCTYPE'))
+    
+    # Check for structured data
+    json_ld = soup.find_all('script', type='application/ld+json')
+    microdata = soup.find_all(attrs={'itemscope': True})
+    rdfa = soup.find_all(attrs={'typeof': True})
+    
+    data['structured_data_types'] = {
+        'json_ld': len(json_ld),
+        'microdata': len(microdata),
+        'rdfa': len(rdfa)
+    }
+    
+    # Calculate technical score
+    score = 100
+    
+    for issue in issues:
+        if issue['severity'] == 'critical':
+            score -= 15
+        elif issue['severity'] == 'warning':
+            score -= 7
+        elif issue['severity'] == 'notice':
+            score -= 3
+    
+    # Additional scoring based on profiles
+    if security_profile.security_level in [SecurityLevel.POOR, SecurityLevel.CRITICAL]:
+        score -= 10
+    
+    if crawl_profile.status == CrawlabilityStatus.BLOCKED:
+        score -= 20
+    
+    if mobile_profile.mobile_readiness in [MobileReadiness.DESKTOP_ONLY, MobileReadiness.BROKEN]:
+        score -= 15
+    
+    if not url_profile.is_seo_friendly:
+        score -= 5
+    
+    score = max(0, min(100, score))
+    
+    # Generate recommendations
+    recommendations = []
+    
+    if not data['https']:
+        recommendations.append("Priority: Migrate to HTTPS immediately for security and SEO")
+    
+    if security_profile.security_level in [SecurityLevel.POOR, SecurityLevel.CRITICAL]:
+        recommendations.append("Priority: Implement security headers (HSTS, CSP, X-Frame-Options)")
+    
+    if mobile_profile.mobile_readiness == MobileReadiness.DESKTOP_ONLY:
+        recommendations.append("Priority: Implement responsive design for mobile-first indexing")
+    
+    if perf_profile.protocol_version == ProtocolVersion.HTTP_1_1:
+        recommendations.append("Upgrade to HTTP/2 or HTTP/3 for better performance")
+    
+    if not perf_profile.cdn_detected:
+        recommendations.append("Consider using a CDN for global performance")
+    
+    if js_issues['spa_detected']:
+        recommendations.append("Implement server-side rendering for SPA SEO")
+    
+    data['recommendations'] = recommendations
+    
+    return {
+        'score': score,
+        'issues': issues,
+        'data': data
+    }

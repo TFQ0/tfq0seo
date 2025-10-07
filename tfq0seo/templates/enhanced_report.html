@@ -3,533 +3,824 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enhanced SEO Analysis Report - {{ analysis_data.config.url }}</title>
+    <title>SEO Analysis Report - {{ url }}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --color-pass: #0cce6b;
+            --color-average: #ffa400;
+            --color-fail: #ff4e42;
+            --color-primary: #4285f4;
+            --color-dark: #202124;
+            --color-gray: #5f6368;
+            --color-light-gray: #f8f9fa;
+            --color-border: #dadce0;
+            --shadow-sm: 0 1px 2px 0 rgba(60,64,67,.3), 0 1px 3px 1px rgba(60,64,67,.15);
+            --shadow-md: 0 1px 3px 0 rgba(60,64,67,.3), 0 4px 8px 3px rgba(60,64,67,.15);
+        }
+        
+        /* Dark mode variables */
+        [data-theme="dark"] {
+            --color-dark: #ffffff;
+            --color-gray: #9aa0a6;
+            --color-light-gray: #202124;
+            --color-border: #3c4043;
+            --bg-primary: #202124;
+            --bg-secondary: #292a2d;
+        }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             line-height: 1.6;
-            color: #333;
-            background-color: #f5f7fa;
+            color: var(--color-dark);
+            background: var(--color-light-gray);
+            transition: background 0.3s, color 0.3s;
+        }
+        
+        [data-theme="dark"] body {
+            background: var(--bg-primary);
         }
         
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 20px;
         }
         
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 40px 0;
-            margin-bottom: 30px;
-            border-radius: 10px;
-            text-align: center;
-        }
-        
-        .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
-        
-        .header .url {
-            font-size: 1.2em;
-            opacity: 0.9;
-        }
-        
-        .header .date {
-            font-size: 0.9em;
-            opacity: 0.8;
-            margin-top: 10px;
-        }
-        
-        /* Executive Summary */
-        .executive-summary {
+        /* Header with dark mode toggle */
+        header {
             background: white;
-            border-radius: 10px;
             padding: 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            border-radius: 8px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
         }
         
+        [data-theme="dark"] header {
+            background: var(--bg-secondary);
+        }
+        
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .dark-mode-toggle {
+            padding: 8px 16px;
+            border: 1px solid var(--color-border);
+            border-radius: 20px;
+            background: transparent;
+            color: var(--color-dark);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .dark-mode-toggle:hover {
+            background: var(--color-light-gray);
+        }
+        
+        /* Navigation tabs */
+        .nav-tabs {
+            display: flex;
+            gap: 24px;
+            border-bottom: 1px solid var(--color-border);
+            padding-bottom: 0;
+            margin-top: 24px;
+            overflow-x: auto;
+        }
+        
+        .nav-tab {
+            padding: 12px 0;
+            background: none;
+            border: none;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--color-gray);
+            cursor: pointer;
+            position: relative;
+            white-space: nowrap;
+            transition: color 0.3s;
+        }
+        
+        .nav-tab:hover {
+            color: var(--color-dark);
+        }
+        
+        .nav-tab.active {
+            color: var(--color-primary);
+        }
+        
+        .nav-tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--color-primary);
+        }
+        
+        .tab-panel {
+            display: none;
+            animation: fadeIn 0.3s;
+        }
+        
+        .tab-panel.active {
+            display: block;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        /* Score cards grid */
         .score-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
             gap: 20px;
-            margin-top: 20px;
+            margin-bottom: 24px;
         }
         
         .score-card {
-            background: #f8f9fa;
-            padding: 20px;
+            background: white;
+            padding: 24px;
             border-radius: 8px;
-            text-align: center;
-            border: 2px solid transparent;
-            transition: all 0.3s ease;
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        [data-theme="dark"] .score-card {
+            background: var(--bg-secondary);
         }
         
         .score-card:hover {
-            border-color: #667eea;
             transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
         }
         
-        .score-value {
-            font-size: 2.5em;
-            font-weight: bold;
-            color: #667eea;
-        }
-        
-        .score-label {
-            color: #666;
-            margin-top: 5px;
-        }
-        
-        .improvement-arrow {
-            color: #10b981;
-            font-size: 1.2em;
-            margin-left: 10px;
-        }
-        
-        /* Action Plan Sections */
-        .action-section {
-            background: white;
-            border-radius: 10px;
-            padding: 30px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-        }
-        
-        .action-section h2 {
-            color: #333;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .action-section h2 .badge {
-            font-size: 0.7em;
-            padding: 4px 12px;
-            border-radius: 20px;
-            background: #667eea;
-            color: white;
-        }
-        
-        /* Issue Cards */
-        .issue-card {
-            background: #f8f9fa;
-            border-left: 4px solid #667eea;
-            padding: 20px;
-            margin-bottom: 15px;
-            border-radius: 5px;
-            position: relative;
-            transition: all 0.3s ease;
-        }
-        
-        .issue-card:hover {
-            transform: translateX(5px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
-        
-        .issue-card.critical { border-left-color: #ef4444; }
-        .issue-card.warning { border-left-color: #f59e0b; }
-        .issue-card.notice { border-left-color: #3b82f6; }
-        
-        .issue-header {
+        .score-card-header {
             display: flex;
             justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 10px;
+            align-items: center;
+            margin-bottom: 16px;
         }
         
-        .issue-title {
+        .score-card-title {
+            font-size: 16px;
             font-weight: 600;
-            color: #333;
-            flex: 1;
         }
         
-        .issue-badges {
-            display: flex;
-            gap: 5px;
-            flex-wrap: wrap;
+        .score-card-value {
+            font-size: 32px;
+            font-weight: bold;
         }
         
-        .badge {
-            font-size: 0.75em;
-            padding: 2px 8px;
-            border-radius: 12px;
-            white-space: nowrap;
+        .score-card-chart {
+            height: 120px;
+            margin-top: 16px;
         }
         
-        .badge.severity-critical { background: #fee2e2; color: #dc2626; }
-        .badge.severity-warning { background: #fef3c7; color: #d97706; }
-        .badge.severity-notice { background: #dbeafe; color: #2563eb; }
-        
-        .badge.confidence-high { background: #d1fae5; color: #059669; }
-        .badge.confidence-medium { background: #fef3c7; color: #d97706; }
-        .badge.confidence-low { background: #fee2e2; color: #dc2626; }
-        
-        .badge.difficulty-easy { background: #d1fae5; color: #059669; }
-        .badge.difficulty-medium { background: #e0e7ff; color: #4f46e5; }
-        .badge.difficulty-hard { background: #fce7f3; color: #be185d; }
-        
-        .issue-content {
-            margin-top: 15px;
+        /* Charts section */
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin-bottom: 24px;
         }
         
-        .issue-impact {
-            background: #fff;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 10px;
+        .chart-card {
+            background: white;
+            padding: 24px;
+            border-radius: 8px;
+            box-shadow: var(--shadow-sm);
         }
         
-        .issue-impact h4 {
-            color: #666;
-            font-size: 0.9em;
-            margin-bottom: 5px;
+        [data-theme="dark"] .chart-card {
+            background: var(--bg-secondary);
         }
         
-        .issue-recommendation {
-            background: #f0fdf4;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 10px;
-            border: 1px solid #86efac;
+        .chart-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 20px;
         }
         
-        .issue-example {
-            background: #f8fafc;
-            padding: 15px;
-            border-radius: 5px;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9em;
-            overflow-x: auto;
-            border: 1px solid #e2e8f0;
+        /* Performance metrics */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
         }
         
-        /* Implementation Timeline */
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: var(--shadow-sm);
+        }
+        
+        [data-theme="dark"] .metric-card {
+            background: var(--bg-secondary);
+        }
+        
+        .metric-icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+        
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        
+        .metric-label {
+            font-size: 12px;
+            color: var(--color-gray);
+            text-transform: uppercase;
+        }
+        
+        /* Timeline view */
         .timeline {
             position: relative;
-            padding-left: 30px;
+            padding: 20px 0;
         }
         
         .timeline::before {
             content: '';
             position: absolute;
-            left: 0;
+            left: 20px;
             top: 0;
             bottom: 0;
             width: 2px;
-            background: #e5e7eb;
+            background: var(--color-border);
         }
         
         .timeline-item {
             position: relative;
-            padding-bottom: 30px;
+            padding-left: 50px;
+            margin-bottom: 24px;
         }
         
-        .timeline-item::before {
-            content: '';
+        .timeline-marker {
             position: absolute;
-            left: -34px;
-            top: 5px;
-            width: 10px;
-            height: 10px;
+            left: 12px;
+            top: 0;
+            width: 16px;
+            height: 16px;
             border-radius: 50%;
-            background: #667eea;
-            border: 2px solid white;
-            box-shadow: 0 0 0 3px #e5e7eb;
-        }
-        
-        .timeline-header {
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 5px;
+            background: white;
+            border: 2px solid var(--color-primary);
         }
         
         .timeline-content {
-            background: #f3f4f6;
-            padding: 15px;
-            border-radius: 5px;
-            margin-top: 10px;
+            background: white;
+            padding: 16px;
+            border-radius: 8px;
+            box-shadow: var(--shadow-sm);
         }
         
-        /* Expected Results */
-        .results-grid {
+        [data-theme="dark"] .timeline-content {
+            background: var(--bg-secondary);
+        }
+        
+        /* Export buttons */
+        .export-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+        }
+        
+        .export-button {
+            padding: 8px 16px;
+            border: 1px solid var(--color-primary);
+            background: white;
+            color: var(--color-primary);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .export-button:hover {
+            background: var(--color-primary);
+            color: white;
+        }
+        
+        /* Comparison mode */
+        .comparison-container {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: 1fr 1fr;
             gap: 20px;
-            margin-top: 20px;
         }
         
-        .result-card {
-            background: #f0fdf4;
+        .comparison-column {
+            background: white;
             padding: 20px;
             border-radius: 8px;
-            border: 1px solid #86efac;
+            box-shadow: var(--shadow-sm);
         }
         
-        .result-card h4 {
-            color: #059669;
-            margin-bottom: 10px;
+        [data-theme="dark"] .comparison-column {
+            background: var(--bg-secondary);
         }
         
-        .result-value {
-            font-size: 1.5em;
-            font-weight: bold;
-            color: #333;
+        .improvement {
+            color: var(--color-pass);
         }
         
-        /* Resources Section */
-        .resources-list {
-            list-style: none;
-            margin-top: 15px;
+        .regression {
+            color: var(--color-fail);
         }
         
-        .resources-list li {
-            padding: 10px 0;
-            border-bottom: 1px solid #e5e7eb;
+        /* Loading skeleton */
+        .skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
         }
         
-        .resources-list li:last-child {
-            border-bottom: none;
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        
+        /* Tooltips */
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            cursor: help;
+        }
+        
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: 200px;
+            background-color: var(--color-dark);
+            color: white;
+            text-align: center;
+            padding: 8px;
+            border-radius: 6px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -100px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
+        
+        /* Progressive disclosure */
+        .expandable {
+            max-height: 200px;
+            overflow: hidden;
+            position: relative;
+            transition: max-height 0.3s;
+        }
+        
+        .expandable.expanded {
+            max-height: none;
+        }
+        
+        .expand-button {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 20px;
+            background: linear-gradient(to top, white, transparent);
+            text-align: center;
         }
         
         /* Responsive */
         @media (max-width: 768px) {
-            .container { padding: 10px; }
-            .header h1 { font-size: 1.8em; }
-            .score-grid { grid-template-columns: 1fr 1fr; }
-            .action-section { padding: 20px; }
+            .score-grid,
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .comparison-container {
+                grid-template-columns: 1fr;
+            }
+            
+            .nav-tabs {
+                overflow-x: scroll;
+            }
+        }
+        
+        /* Print optimization */
+        @media print {
+            body {
+                background: white;
+            }
+            
+            .dark-mode-toggle,
+            .export-buttons {
+                display: none;
+            }
+            
+            .expandable {
+                max-height: none;
+            }
+            
+            .expand-button {
+                display: none;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
-        <div class="header">
-            <h1>Enhanced SEO Analysis Report</h1>
-            <div class="url">{{ analysis_data.config.url }}</div>
-                            <div class="date">Generated on {{ generated_at }}</div>
-        </div>
-        
-        <!-- Executive Summary -->
-        {% if executive_summary %}
-        <div class="executive-summary">
-            <h2>Executive Summary</h2>
+        <header>
+            <div class="header-top">
+                <div>
+                    <h1>🚀 TFQ0SEO Enhanced Analysis Report</h1>
+                    <div class="url-info">
+                        <a href="{{ url }}" target="_blank">{{ url }}</a>
+                    </div>
+                </div>
+                <button class="dark-mode-toggle" onclick="toggleDarkMode()">🌙 Dark Mode</button>
+            </div>
             
+            <nav class="nav-tabs">
+                <button class="nav-tab active" data-tab="overview">📊 Overview</button>
+                <button class="nav-tab" data-tab="seo">🔍 SEO</button>
+                <button class="nav-tab" data-tab="content">📝 Content</button>
+                <button class="nav-tab" data-tab="technical">⚙️ Technical</button>
+                <button class="nav-tab" data-tab="performance">⚡ Performance</button>
+                <button class="nav-tab" data-tab="links">🔗 Links</button>
+                <button class="nav-tab" data-tab="issues">⚠️ Issues</button>
+                <button class="nav-tab" data-tab="recommendations">💡 Recommendations</button>
+            </nav>
+        </header>
+        
+        <!-- Overview Tab -->
+        <div class="tab-panel active" id="overview">
             <div class="score-grid">
                 <div class="score-card">
-                    <div class="score-value">
-                        {{ executive_summary.current_score }}
-                        <span class="improvement-arrow">→ {{ executive_summary.projected_score }}</span>
+                    <div class="score-card-header">
+                        <h3 class="score-card-title">Overall Score</h3>
+                        <span class="tooltip">ℹ️
+                            <span class="tooltiptext">Weighted average of all category scores</span>
+                        </span>
                     </div>
-                    <div class="score-label">SEO Score</div>
+                    <div class="score-card-value" style="color: {% if overall_score >= 80 %}var(--color-pass){% elif overall_score >= 50 %}var(--color-average){% else %}var(--color-fail){% endif %}">
+                        {{ overall_score|round|int }}/100
+                    </div>
+                    <div class="score-card-chart">
+                        <canvas id="overallChart"></canvas>
+                    </div>
                 </div>
                 
+                {% for category, score in category_scores.items() %}
                 <div class="score-card">
-                    <div class="score-value">{{ executive_summary.total_issues }}</div>
-                    <div class="score-label">Issues Found</div>
-                </div>
-                
-                <div class="score-card">
-                    <div class="score-value">{{ executive_summary.critical_issues }}</div>
-                    <div class="score-label">Critical Issues</div>
-                </div>
-                
-                <div class="score-card">
-                    <div class="score-value">{{ executive_summary.estimated_time }}h</div>
-                    <div class="score-label">Est. Time to Fix</div>
-                </div>
-            </div>
-            
-            <div style="margin-top: 20px;">
-                <h3>Main Concerns</h3>
-                <ul>
-                    {% for concern in executive_summary.main_concerns %}
-                    <li>{{ concern }}</li>
-                    {% endfor %}
-                </ul>
-            </div>
-        </div>
-        {% endif %}
-        
-        <!-- Action Plan -->
-        {% if action_plan %}
-        <div class="action-section">
-            <h2>Action Plan <span class="badge">{{ action_plan.quick_wins|length + action_plan.major_projects|length }} items</span></h2>
-            
-            <!-- Quick Wins -->
-            {% if action_plan.quick_wins %}
-            <div style="margin-bottom: 30px;">
-                <h3 style="color: #059669; margin-bottom: 15px;">🚀 Quick Wins (High Impact, Low Effort)</h3>
-                {% for issue in action_plan.quick_wins %}
-                <div class="issue-card {{ issue.severity }}">
-                    <div class="issue-header">
-                        <div class="issue-title">{{ issue.message|default(issue.type) }}</div>
-                        <div class="issue-badges">
-                            <span class="badge severity-{{ issue.severity }}">{{ issue.severity }}</span>
-                            {% if issue.confidence %}
-                            <span class="badge confidence-{{ issue.confidence.level }}">{{ issue.confidence.level }} confidence</span>
-                            {% endif %}
-                            {% if issue.implementation_difficulty %}
-                            <span class="badge difficulty-{{ issue.implementation_difficulty }}">{{ issue.implementation_difficulty }}</span>
-                            {% endif %}
-                        </div>
+                    <div class="score-card-header">
+                        <h3 class="score-card-title">{{ category|title }}</h3>
                     </div>
-                    
-                    <div class="issue-content">
-                        {% if issue.user_impact %}
-                        <div class="issue-impact">
-                            <h4>User Impact</h4>
-                            <p>{{ issue.user_impact }}</p>
-                        </div>
-                        {% endif %}
-                        
-                        {% if issue.recommendation or issue.contextual_recommendation %}
-                        <div class="issue-recommendation">
-                            <h4>Recommendation</h4>
-                            <p>{{ issue.contextual_recommendation|default(issue.recommendation) }}</p>
-                        </div>
-                        {% endif %}
-                        
-                        {% if issue.example %}
-                        <div class="issue-example">
-                            <h4>Example</h4>
-                            <pre>{{ issue.example }}</pre>
-                        </div>
-                        {% endif %}
+                    <div class="score-card-value" style="color: {% if score >= 80 %}var(--color-pass){% elif score >= 50 %}var(--color-average){% else %}var(--color-fail){% endif %}">
+                        {{ score|round|int }}/100
                     </div>
+                    <progress value="{{ score }}" max="100" style="width: 100%; height: 8px;"></progress>
                 </div>
                 {% endfor %}
             </div>
-            {% endif %}
             
-            <!-- Major Projects -->
-            {% if action_plan.major_projects %}
-            <div>
-                <h3 style="color: #7c3aed; margin-bottom: 15px;">🔨 Major Projects (High Impact, High Effort)</h3>
-                {% for issue in action_plan.major_projects %}
-                <div class="issue-card {{ issue.severity }}">
-                    <div class="issue-header">
-                        <div class="issue-title">{{ issue.message|default(issue.type) }}</div>
-                        <div class="issue-badges">
-                            <span class="badge severity-{{ issue.severity }}">{{ issue.severity }}</span>
-                            {% if issue.confidence %}
-                            <span class="badge confidence-{{ issue.confidence.level }}">{{ issue.confidence.level }} confidence</span>
-                            {% endif %}
-                            {% if issue.implementation_difficulty %}
-                            <span class="badge difficulty-{{ issue.implementation_difficulty }}">{{ issue.implementation_difficulty }}</span>
-                            {% endif %}
-                        </div>
-                    </div>
-                    
-                    <div class="issue-content">
-                        {% if issue.user_impact %}
-                        <div class="issue-impact">
-                            <h4>User Impact</h4>
-                            <p>{{ issue.user_impact }}</p>
-                        </div>
-                        {% endif %}
-                        
-                        {% if issue.recommendation or issue.contextual_recommendation %}
-                        <div class="issue-recommendation">
-                            <h4>Recommendation</h4>
-                            <p>{{ issue.contextual_recommendation|default(issue.recommendation) }}</p>
-                        </div>
-                        {% endif %}
-                    </div>
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <h3 class="chart-title">Issue Distribution</h3>
+                    <canvas id="issueChart"></canvas>
                 </div>
-                {% endfor %}
+                
+                <div class="chart-card">
+                    <h3 class="chart-title">Category Scores</h3>
+                    <canvas id="categoryChart"></canvas>
+                </div>
             </div>
-            {% endif %}
-        </div>
-        {% endif %}
-        
-        <!-- Implementation Timeline -->
-        {% if implementation_timeline %}
-        <div class="action-section">
-            <h2>📅 Implementation Timeline</h2>
             
+            <div class="export-buttons">
+                <button class="export-button" onclick="window.print()">📄 Print Report</button>
+                <button class="export-button" onclick="exportJSON()">💾 Export JSON</button>
+                <button class="export-button" onclick="shareReport()">📤 Share Report</button>
+            </div>
+        </div>
+        
+        <!-- SEO Tab -->
+        <div class="tab-panel" id="seo">
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-icon">📋</div>
+                    <div class="metric-value">{% if seo_data %}{{ seo_data.title|length }}{% else %}N/A{% endif %}</div>
+                    <div class="metric-label">Title Length</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">📝</div>
+                    <div class="metric-value">{% if seo_data %}{{ seo_data.description|length }}{% else %}N/A{% endif %}</div>
+                    <div class="metric-label">Description Length</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">🏷️</div>
+                    <div class="metric-value">{% if seo_data %}{{ seo_data.open_graph|length }}{% else %}0{% endif %}</div>
+                    <div class="metric-label">OG Tags</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">📊</div>
+                    <div class="metric-value">{% if seo_data %}{{ seo_data.structured_data|length }}{% else %}0{% endif %}</div>
+                    <div class="metric-label">Structured Data</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Content Tab -->
+        <div class="tab-panel" id="content">
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-icon">📖</div>
+                    <div class="metric-value">{% if content_data %}{{ content_data.word_count }}{% else %}0{% endif %}</div>
+                    <div class="metric-label">Word Count</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">📚</div>
+                    <div class="metric-value">{% if content_data %}{{ content_data.flesch_reading_ease|round|int }}{% else %}N/A{% endif %}</div>
+                    <div class="metric-label">Readability</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">🎯</div>
+                    <div class="metric-value">{% if content_data %}{{ content_data.average_grade_level|round|int }}{% else %}N/A{% endif %}</div>
+                    <div class="metric-label">Grade Level</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">🖼️</div>
+                    <div class="metric-value">{% if content_data %}{{ content_data.image_count }}{% else %}0{% endif %}</div>
+                    <div class="metric-label">Images</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Technical Tab -->
+        <div class="tab-panel" id="technical">
             <div class="timeline">
-                {% for phase, details in implementation_timeline.items() %}
+                {% if technical_data %}
                 <div class="timeline-item">
-                    <div class="timeline-header">{{ details.timeframe }}</div>
-                    <div style="color: #666; margin-bottom: 10px;">{{ details.focus }}</div>
+                    <div class="timeline-marker"></div>
                     <div class="timeline-content">
-                        <p><strong>Estimated Time:</strong> {{ details.estimated_hours }} hours</p>
-                        <p><strong>Expected Impact:</strong> {{ details.expected_impact }}</p>
-                        {% if details.tasks %}
-                        <p style="margin-top: 10px;"><strong>Tasks:</strong> {{ details.tasks|length }} items</p>
-                        {% endif %}
+                        <h4>HTTPS Status</h4>
+                        <p>{% if technical_data.https %}✅ Secure{% else %}❌ Not Secure{% endif %}</p>
                     </div>
                 </div>
+                <div class="timeline-item">
+                    <div class="timeline-marker"></div>
+                    <div class="timeline-content">
+                        <h4>Mobile Friendly</h4>
+                        <p>{% if technical_data.has_viewport %}✅ Yes{% else %}❌ No{% endif %}</p>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-marker"></div>
+                    <div class="timeline-content">
+                        <h4>Compression</h4>
+                        <p>{{ technical_data.compression|default('Not detected') }}</p>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Performance Tab -->
+        <div class="tab-panel" id="performance">
+            <div class="metrics-grid">
+                {% if performance_data %}
+                <div class="metric-card">
+                    <div class="metric-icon">⏱️</div>
+                    <div class="metric-value">{{ performance_data.load_time|round(2) }}s</div>
+                    <div class="metric-label">Load Time</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">📦</div>
+                    <div class="metric-value">{{ performance_data.content_size_mb|round(2) }}MB</div>
+                    <div class="metric-label">Page Size</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">🎨</div>
+                    <div class="metric-value">{{ performance_data.lcp_estimate|round(2) }}s</div>
+                    <div class="metric-label">LCP Estimate</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">👆</div>
+                    <div class="metric-value">{{ performance_data.fid_estimate }}ms</div>
+                    <div class="metric-label">FID Estimate</div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Links Tab -->
+        <div class="tab-panel" id="links">
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <h3 class="chart-title">Link Distribution</h3>
+                    <canvas id="linkChart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Issues Tab -->
+        <div class="tab-panel" id="issues">
+            <div class="issues-list">
+                {% for severity, issues_list in issues_by_severity.items() %}
+                    <h3>{{ severity|title }} Issues ({{ issues_list|length }})</h3>
+                    <div class="expandable">
+                        {% for issue in issues_list %}
+                        <div class="issue-card {{ severity }}">
+                            <strong>{{ issue.category }}</strong>: {{ issue.message }}
+                        </div>
+                        {% endfor %}
+                    </div>
                 {% endfor %}
             </div>
         </div>
-        {% endif %}
         
-        <!-- Expected Results -->
-        {% if expected_results %}
-        <div class="action-section">
-            <h2>📈 Expected Results</h2>
-            
-            <div class="results-grid">
-                {% if expected_results.seo_score_improvement %}
-                <div class="result-card">
-                    <h4>SEO Score Improvement</h4>
-                    <div class="result-value">+{{ expected_results.seo_score_improvement.estimated_points }} points</div>
-                    <p style="color: #666; margin-top: 5px;">{{ expected_results.seo_score_improvement.timeframe }}</p>
-                </div>
-                {% endif %}
-                
-                {% if expected_results.traffic_potential %}
-                <div class="result-card">
-                    <h4>Traffic Potential</h4>
-                    <div class="result-value">{{ expected_results.traffic_potential.range }}</div>
-                    <p style="color: #666; margin-top: 5px;">{{ expected_results.traffic_potential.confidence }} confidence</p>
-                </div>
-                {% endif %}
-                
-                {% if expected_results.technical_health %}
-                <div class="result-card">
-                    <h4>Technical Health</h4>
-                    <div class="result-value">{{ expected_results.technical_health.expected_health }}</div>
-                    <p style="color: #666; margin-top: 5px;">{{ expected_results.technical_health.fixes_planned }} fixes planned</p>
-                </div>
-                {% endif %}
-            </div>
-            
-            {% if expected_results.user_experience_gains %}
-            <div style="margin-top: 20px;">
-                <h4>User Experience Improvements</h4>
-                <ul>
-                    {% for gain in expected_results.user_experience_gains %}
-                    <li>{{ gain }}</li>
-                    {% endfor %}
-                </ul>
-            </div>
-            {% endif %}
+        <!-- Recommendations Tab -->
+        <div class="tab-panel" id="recommendations">
+            <ol class="recommendation-list">
+                {% for rec in recommendations %}
+                <li class="recommendation-item">
+                    <div class="recommendation-number">{{ loop.index }}</div>
+                    <div class="recommendation-text">{{ rec }}</div>
+                </li>
+                {% endfor %}
+            </ol>
         </div>
-        {% endif %}
-        
-        <!-- Resources Needed -->
-        {% if resources_needed %}
-        <div class="action-section">
-            <h2>🛠️ Resources Needed</h2>
-            
-            <ul class="resources-list">
-                <li><strong>Total Time Required:</strong> {{ resources_needed.total_hours }} hours</li>
-                <li><strong>Skill Level Required:</strong> {{ resources_needed.skill_level }}</li>
-                {% if resources_needed.tools %}
-                <li><strong>Recommended Tools:</strong> {{ resources_needed.tools|join(", ") }}</li>
-                {% endif %}
-            </ul>
-        </div>
-        {% endif %}
     </div>
+    
+    <script>
+        // Dark mode toggle
+        function toggleDarkMode() {
+            const html = document.documentElement;
+            const currentTheme = html.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            html.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            
+            // Update button text
+            const button = document.querySelector('.dark-mode-toggle');
+            button.textContent = newTheme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+        }
+        
+        // Load saved theme
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme) {
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            const button = document.querySelector('.dark-mode-toggle');
+            button.textContent = savedTheme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+        }
+        
+        // Tab switching
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                // Update active tab
+                document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                
+                // Show corresponding panel
+                const tabName = this.getAttribute('data-tab');
+                document.querySelectorAll('.tab-panel').forEach(panel => {
+                    panel.classList.remove('active');
+                });
+                document.getElementById(tabName).classList.add('active');
+            });
+        });
+        
+        // Charts
+        const chartColors = {
+            pass: 'rgb(12, 206, 107)',
+            average: 'rgb(255, 164, 0)',
+            fail: 'rgb(255, 78, 66)',
+            primary: 'rgb(66, 133, 244)'
+        };
+        
+        // Issue distribution chart
+        const issueCtx = document.getElementById('issueChart');
+        if (issueCtx) {
+            new Chart(issueCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Critical', 'Warnings', 'Notices'],
+                    datasets: [{
+                        data: [
+                            {{ issue_counts.critical|default(0) }},
+                            {{ issue_counts.warning|default(0) }},
+                            {{ issue_counts.notice|default(0) }}
+                        ],
+                        backgroundColor: [
+                            chartColors.fail,
+                            chartColors.average,
+                            chartColors.primary
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+        }
+        
+        // Category scores chart
+        const categoryCtx = document.getElementById('categoryChart');
+        if (categoryCtx) {
+            new Chart(categoryCtx, {
+                type: 'radar',
+                data: {
+                    labels: {{ category_scores.keys()|list|tojson }},
+                    datasets: [{
+                        label: 'Scores',
+                        data: {{ category_scores.values()|list|tojson }},
+                        borderColor: chartColors.primary,
+                        backgroundColor: 'rgba(66, 133, 244, 0.2)'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        r: {
+                            beginAtZero: true,
+                            max: 100
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Overall score gauge
+        const overallCtx = document.getElementById('overallChart');
+        if (overallCtx) {
+            const score = {{ overall_score|round|int }};
+            const color = score >= 80 ? chartColors.pass : score >= 50 ? chartColors.average : chartColors.fail;
+            
+            new Chart(overallCtx, {
+                type: 'doughnut',
+                data: {
+                    datasets: [{
+                        data: [score, 100 - score],
+                        backgroundColor: [color, '#e8eaed'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '70%',
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            enabled: false
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Export functions
+        function exportJSON() {
+            const data = {{ data|tojson }};
+            const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'seo-report.json';
+            a.click();
+        }
+        
+        function shareReport() {
+            if (navigator.share) {
+                navigator.share({
+                    title: 'SEO Analysis Report',
+                    text: 'Check out this SEO analysis report',
+                    url: window.location.href
+                });
+            } else {
+                // Fallback to copying URL
+                navigator.clipboard.writeText(window.location.href);
+                alert('Report URL copied to clipboard!');
+            }
+        }
+    </script>
 </body>
-</html> 
+</html>
