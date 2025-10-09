@@ -1,8 +1,9 @@
 # TFQ0SEO - SEO Analysis Tool
 
-![Version](https://img.shields.io/badge/version-2.3.1-blue.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
+[![PyPI version](https://img.shields.io/pypi/v/tfq0seo.svg)](https://pypi.org/project/tfq0seo/)
+[![License](https://img.shields.io/pypi/l/tfq0seo.svg)](https://github.com/tfq0/tfq0seo/blob/main/LICENSE)
+[![Python Versions](https://img.shields.io/pypi/pyversions/tfq0seo.svg)](https://pypi.org/project/tfq0seo/)
+[![Downloads](https://img.shields.io/pypi/dm/tfq0seo.svg)](https://pypi.org/project/tfq0seo/)
 
 A high-performance SEO analysis tool that generates professional reports.
 
