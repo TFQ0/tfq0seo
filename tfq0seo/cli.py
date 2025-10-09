@@ -138,7 +138,7 @@ def create_issues_table(issues: List[dict], limit: int = 10) -> Table:
 
 
 @click.group()
-@click.version_option(version='2.3.0', prog_name='tfq0seo')
+@click.version_option(version='2.3.2', prog_name='tfq0seo')
 def cli():
     """TFQ0SEO - Fast SEO analysis tool with reports."""
     pass

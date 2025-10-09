@@ -149,7 +149,7 @@ class EnhancedCrawler:
         # Configuration with defaults
         self.max_concurrent = self.config.get('max_concurrent', 10)
         self.timeout = self.config.get('timeout', 30)
-        self.user_agent = self.config.get('user_agent', 'tfq0seo/2.3.0 (Advanced Crawler)')
+        self.user_agent = self.config.get('user_agent', 'tfq0seo/2.3.2 (Advanced Crawler)')
         self.follow_redirects = self.config.get('follow_redirects', True)
         self.max_redirects = self.config.get('max_redirects', 5)
         self.max_pages = self.config.get('max_pages', 500)

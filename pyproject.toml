@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tfq0seo"
-version = "2.3.0"
+version = "2.3.2"
 description = "Fast SEO analysis tool with reports"
 authors = [{name = "TFQ0 SEO Team"}]
 readme = "README.md"
