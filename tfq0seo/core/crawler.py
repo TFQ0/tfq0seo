@@ -167,7 +167,7 @@ class EnhancedCrawler:
         self.timeout = option('timeout', 30)
         self.connect_timeout = option('connect_timeout', 10)
         self.read_timeout = option('read_timeout', self.timeout)
-        self.user_agent = option('user_agent', 'tfq0seo/2.3.2 (SEO Crawler)')
+        self.user_agent = option('user_agent', 'tfq0seo/3.0.0 (SEO Crawler)')
         self.follow_redirects = option('follow_redirects', True)
         self.max_redirects = option('max_redirects', 5)
         self.max_pages = option('max_pages', 500)

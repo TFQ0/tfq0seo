@@ -345,7 +345,7 @@ Complete this one-time setup before publishing a release:
 
 For each release, update `tfq0seo/__init__.py` to a new, unused package version,
 commit it, then create and push a tag that is `v` followed by that version
-(for example, `v2.3.3`). Pushing a `v*` tag triggers the workflow; no package-name
+(for example, `v3.0.0`). Pushing a `v*` tag triggers the workflow; no package-name
 prefix or GitHub release is required. Branch pushes, other tag names, and tag
 deletions do not publish. The version check reads the built wheel's metadata
 without installing or hard-coding the package name. Approve the `pypi`

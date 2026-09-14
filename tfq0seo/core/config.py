@@ -61,7 +61,7 @@ class CrawlerConfig:
     total_timeout: int = 300
     
     # User agent and headers
-    user_agent: str = "tfq0seo/2.3.2 (+https://github.com/TFQ0/tfq0seo)"
+    user_agent: str = "tfq0seo/3.0.0 (+https://github.com/TFQ0/tfq0seo)"
     custom_headers: Dict[str, str] = field(default_factory=dict)
     rotate_user_agents: bool = False
     user_agent_list: List[str] = field(default_factory=list)
@@ -451,7 +451,7 @@ class Config:
     export: Optional[ExportConfig] = None
     monitoring: Optional[MonitoringConfig] = None
     profile: ConfigProfile = ConfigProfile.STANDARD
-    version: str = '2.3.2'
+    version: str = '3.0.0'
     debug: bool = False
     dry_run: bool = False
     continue_on_error: bool = True
