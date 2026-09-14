@@ -1,41 +1,40 @@
-"""Advanced async crawler module with intelligent features and optimizations."""
+"""Bounded asynchronous crawling, URL discovery, and response collection."""
 
 import asyncio
-import time
-import hashlib
-import random
-from typing import Dict, List, Set, Optional, Any, Tuple
-from urllib.parse import urljoin, urlparse, urlunparse, parse_qs, urlencode
-from urllib.robotparser import RobotFileParser
-from collections import deque, defaultdict
-from dataclasses import dataclass, field
-import re
-import warnings
+import heapq
+import itertools
 import logging
+import math
+import re
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import urlparse, urlunparse
+from urllib.robotparser import RobotFileParser
+from xml.etree import ElementTree
 
 import aiohttp
-from aiohttp import ClientTimeout, ClientError, ServerTimeoutError
-from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
-import validators
+from aiohttp import ClientError, ClientTimeout
+from bs4 import BeautifulSoup, FeatureNotFound, UnicodeDammit
+from ..urls import resolve_url
+from .models import FetchResult, normalize_fetch_result
 
-# Suppress XML parsing warnings when handling sitemaps
-warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
-
-# Setup logging
 logger = logging.getLogger(__name__)
 
+# XML discovery deliberately does not depend on the optional HTML parser.
 try:
-    from lxml import etree, html
+    import lxml.html as HTML_PARSER
     PARSER = 'lxml'
-    HTML_PARSER = html
 except ImportError:
-    PARSER = 'html.parser'
     HTML_PARSER = None
+    PARSER = 'html.parser'
 
 
 @dataclass
 class CrawlStats:
-    """Statistics tracker for crawl performance."""
     start_time: float = field(default_factory=time.time)
     requests_made: int = 0
     bytes_downloaded: int = 0
@@ -43,767 +42,925 @@ class CrawlStats:
     rate_limit_hits: int = 0
     robots_blocked: int = 0
     redirects_followed: int = 0
-    
+
     def get_summary(self) -> Dict[str, Any]:
-        elapsed = time.time() - self.start_time
+        elapsed = max(0, time.time() - self.start_time)
         return {
             'elapsed_seconds': elapsed,
             'requests_made': self.requests_made,
-            'requests_per_second': self.requests_made / elapsed if elapsed > 0 else 0,
+            'requests_per_second': self.requests_made / elapsed if elapsed else 0,
             'bytes_downloaded': self.bytes_downloaded,
             'mb_downloaded': self.bytes_downloaded / (1024 * 1024),
             'errors': self.errors_encountered,
             'rate_limits': self.rate_limit_hits,
             'robots_blocked': self.robots_blocked,
-            'redirects': self.redirects_followed
+            'redirects': self.redirects_followed,
         }
 
 
 class URLQueue:
-    """Priority queue for URL management with deduplication."""
-    
-    def __init__(self):
-        self.queue = deque()
+    """A bounded heap; the caller supplies normalized URL identities."""
+
+    def __init__(self, max_size: Optional[int] = None):
+        self.queue = []
         self.seen = set()
-        self.priorities = {}
-        
-    def add(self, url: str, priority: int = 5, depth: int = 0):
-        """Add URL with priority (lower = higher priority)."""
-        url_hash = hashlib.md5(url.encode()).hexdigest()
-        if url_hash not in self.seen:
-            self.seen.add(url_hash)
-            self.queue.append((priority, depth, url))
-            # Keep queue sorted by priority
-            self.queue = deque(sorted(self.queue, key=lambda x: (x[0], x[1])))
-    
+        self.max_size = max_size
+        self._sequence = itertools.count()
+
+    def add(self, url: str, priority: int = 5, depth: int = 0) -> bool:
+        if url in self.seen:
+            return False
+        if self.max_size is not None and len(self.seen) >= self.max_size:
+            return False
+        self.seen.add(url)
+        heapq.heappush(self.queue, (depth, priority, next(self._sequence), url))
+        return True
+
     def get(self) -> Optional[Tuple[int, int, str]]:
-        """Get next URL from queue."""
-        if self.queue:
-            return self.queue.popleft()
-        return None
-    
+        if not self.queue:
+            return None
+        depth, priority, _, url = heapq.heappop(self.queue)
+        return priority, depth, url
+
     def __len__(self):
         return len(self.queue)
-    
+
     def has_url(self, url: str) -> bool:
-        """Check if URL has been seen."""
-        url_hash = hashlib.md5(url.encode()).hexdigest()
-        return url_hash in self.seen
+        return url in self.seen
 
 
 class RateLimiter:
-    """Adaptive rate limiter for respectful crawling."""
-    
-    def __init__(self, initial_delay: float = 0.1, max_delay: float = 5.0):
+    """Serialize request starts per origin, independently of request duration."""
+
+    def __init__(self, initial_delay: float = 0.1, max_delay: float = 5.0,
+                 adaptive: bool = True):
         self.delay = initial_delay
-        self.max_delay = max_delay
+        self.max_delay = max(initial_delay, max_delay)
+        self.adaptive = adaptive
         self.last_request_time = defaultdict(float)
-        self.response_times = defaultdict(list)
+        self.response_times = defaultdict(lambda: deque(maxlen=10))
         self.error_counts = defaultdict(int)
-    
+        self._locks = defaultdict(asyncio.Lock)
+        self._minimum_delays = defaultdict(float)
+        self._adaptive_delays = defaultdict(lambda: initial_delay)
+        self._not_before = defaultdict(float)
+
+    def set_minimum_delay(self, domain: str, delay: float):
+        self._minimum_delays[domain] = max(self._minimum_delays[domain], delay)
+
+    def defer(self, domain: str, delay: float):
+        self._not_before[domain] = max(self._not_before[domain], time.monotonic() + delay)
+
     async def wait(self, domain: str):
-        """Wait appropriate time before next request."""
-        now = time.time()
-        elapsed = now - self.last_request_time[domain]
-        
-        # Adaptive delay based on response times and errors
-        if self.error_counts[domain] > 3:
-            self.delay = min(self.delay * 2, self.max_delay)
-        elif self.response_times[domain]:
-            avg_response = sum(self.response_times[domain][-10:]) / len(self.response_times[domain][-10:])
-            if avg_response > 2.0:  # Slow server
-                self.delay = min(self.delay * 1.5, self.max_delay)
-            elif avg_response < 0.5:  # Fast server
-                self.delay = max(self.delay * 0.8, 0.05)
-        
-        wait_time = max(0, self.delay - elapsed)
-        if wait_time > 0:
-            await asyncio.sleep(wait_time)
-        
-        self.last_request_time[domain] = time.time()
-    
+        async with self._locks[domain]:
+            delay = max(self.delay, self._minimum_delays[domain],
+                        self._adaptive_delays[domain] if self.adaptive else 0)
+            while True:
+                ready_at = max(self.last_request_time[domain] + delay,
+                               self._not_before[domain])
+                remaining = ready_at - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(remaining)
+            self.last_request_time[domain] = time.monotonic()
+
     def record_response(self, domain: str, response_time: float, is_error: bool = False):
-        """Record response metrics for adaptive throttling."""
         self.response_times[domain].append(response_time)
+        self.error_counts[domain] = (self.error_counts[domain] + 1 if is_error
+                                     else max(0, self.error_counts[domain] - 1))
+        if not self.adaptive:
+            return
+        current = self._adaptive_delays[domain]
         if is_error:
-            self.error_counts[domain] += 1
-        else:
-            self.error_counts[domain] = max(0, self.error_counts[domain] - 1)
+            current = min(self.max_delay, max(0.05, current) * 2)
+        elif response_time > 2:
+            current = min(self.max_delay, max(0.05, current) * 1.5)
+        elif response_time < 0.5:
+            current = max(self.delay, current * 0.8)
+        self._adaptive_delays[domain] = current
+
+
+class _SitemapTreeBuilder(ElementTree.TreeBuilder):
+    def doctype(self, name, pubid, system):
+        raise ValueError('Sitemaps containing a document type declaration are not supported')
 
 
 class EnhancedCrawler:
-    """Advanced async crawler with intelligent features."""
-    
+    """Collect terminal page outcomes within an origin and resource budget.
+
+    Direct/batch fetches use each supplied URL as their scope. Site crawling and
+    sitemap discovery stay on the starting hostname and port; changing between
+    standard HTTP and HTTPS ports is allowed. allowed_domains overrides that
+    scope using exact hostnames or explicit *.example.com subdomain patterns.
+    """
+
     def __init__(self, config=None):
-        """Initialize enhanced crawler with configuration."""
-        self.config = config or {}
+        self.config = dict(config or {})
+
+        def option(name, default, *aliases):
+            for key in (name,) + aliases:
+                if key in self.config:
+                    return self.config[key]
+            return default
+
+        self.max_concurrent = option('max_concurrent', 10, 'concurrent_requests')
+        self.timeout = option('timeout', 30)
+        self.connect_timeout = option('connect_timeout', 10)
+        self.read_timeout = option('read_timeout', self.timeout)
+        self.user_agent = option('user_agent', 'tfq0seo/2.3.2 (SEO Crawler)')
+        self.follow_redirects = option('follow_redirects', True)
+        self.max_redirects = option('max_redirects', 5)
+        self.max_pages = option('max_pages', 500)
+        self.max_depth = option('max_depth', 5)
+        self.max_crawl_time = option('max_crawl_time', 3600)
+        self.allowed_domains = option('allowed_domains', [])
+        self.allowed_schemes = option('allowed_schemes', ['http', 'https'])
+        self.excluded_patterns = option('excluded_patterns', [])
+        self.respect_robots = option('respect_robots_txt', True)
+        self.robots_cache_ttl = option('robots_cache_ttl', 86400)
+        self.crawl_delay_factor = option('crawl_delay_factor', 1.0)
+        self.max_content_length = option('max_page_size', 10 * 1024 * 1024, 'max_content_length')
+        self.retry_attempts = option('max_retries', 3, 'retry_attempts')
+        self.retry_on_status = option('retry_on_status', [429, 500, 502, 503, 504])
+        self.retry_delay = option('retry_backoff_factor', 2.0, 'retry_delay')
+        self.adaptive_throttle = option('adaptive_delay', True, 'adaptive_throttle')
+        self.parse_javascript = option('parse_javascript', False)
+        self.store_html = option('store_html', True)
+        self.follow_sitemap = option('use_sitemap', True, 'follow_sitemap')
+        self.discover_sitemaps = option('discover_sitemaps', True)
+        self.verify_ssl = option('verify_ssl', True)
+        self.proxy = option('proxy', None)
+        self._base_url = None
+        self._deadline = None
+        self._interrupted_fetches = None
+        self._validate_config()
+
+        delay = max(option('delay_between_requests', 0), option('min_delay', 0))
+        rate = option('rate_limit_per_second', None)
+        if rate is not None:
+            delay = max(delay, 1 / rate)
+        self.rate_limiter = RateLimiter(delay, option('max_delay', 5), self.adaptive_throttle)
         self.visited_urls: Set[str] = set()
-        self.failed_urls: Dict[str, str] = {}  # URL -> error message
+        self.failed_urls: Dict[str, str] = {}
         self.results: List[Dict[str, Any]] = []
-        self.robots_cache: Dict[str, Tuple[RobotFileParser, float]] = {}  # Include expiry time
+        self.robots_cache: Dict[str, Tuple[RobotFileParser, float]] = {}
+        self._robots_locks = defaultdict(asyncio.Lock)
+        self._robots_sitemaps = {}
         self.session: Optional[aiohttp.ClientSession] = None
-        self.url_queue = URLQueue()
-        self.rate_limiter = RateLimiter()
+        self.url_queue = URLQueue(max_size=self._frontier_limit(self.max_pages))
+        self._parents = {}
         self.stats = CrawlStats()
-        
-        # Configuration with defaults
-        self.max_concurrent = self.config.get('max_concurrent', 10)
-        self.timeout = self.config.get('timeout', 30)
-        self.user_agent = self.config.get('user_agent', 'tfq0seo/2.3.2 (Advanced Crawler)')
-        self.follow_redirects = self.config.get('follow_redirects', True)
-        self.max_redirects = self.config.get('max_redirects', 5)
-        self.max_pages = self.config.get('max_pages', 500)
-        self.max_depth = self.config.get('max_depth', 5)
-        self.allowed_domains = self.config.get('allowed_domains', [])
-        self.excluded_patterns = self.config.get('excluded_patterns', [])
-        self.respect_robots = self.config.get('respect_robots_txt', True)
-        self.max_content_length = self.config.get('max_content_length', 1024 * 1024)  # 1MB
-        self.retry_attempts = self.config.get('retry_attempts', 2)
-        self.retry_delay = self.config.get('retry_delay', 1.0)
-        self.adaptive_throttle = self.config.get('adaptive_throttle', True)
-        self.parse_javascript = self.config.get('parse_javascript', False)
-        self.store_html = self.config.get('store_html', True)
-        self.follow_sitemap = self.config.get('follow_sitemap', True)
-        
-        # Advanced browser headers for better compatibility
+        self.limit_reasons: Set[str] = set()
+        self.discovery_errors: List[Dict[str, str]] = []
         self.headers = {
             'User-Agent': self.user_agent,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Encoding': 'gzip, deflate',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Cache-Control': 'max-age=0'
         }
-    
+        for key, value in option('custom_headers', {}).items():
+            previous = next((name for name in self.headers if name.lower() == key.lower()), None)
+            if previous:
+                del self.headers[previous]
+            self.headers[key] = value
+        self.user_agent = next((value for key, value in self.headers.items()
+                                if key.lower() == 'user-agent'), self.user_agent)
+
+    def _validate_config(self):
+        positive = {
+            'max_concurrent': self.max_concurrent, 'timeout': self.timeout,
+            'connect_timeout': self.connect_timeout, 'read_timeout': self.read_timeout,
+            'max_pages': self.max_pages, 'max_page_size': self.max_content_length,
+            'max_crawl_time': self.max_crawl_time,
+            'max_connections_per_host': self.config.get('max_connections_per_host', self.max_concurrent),
+        }
+        nonnegative = {
+            'max_depth': self.max_depth, 'max_redirects': self.max_redirects,
+            'max_retries': self.retry_attempts, 'retry_backoff_factor': self.retry_delay,
+            'robots_cache_ttl': self.robots_cache_ttl, 'crawl_delay_factor': self.crawl_delay_factor,
+            'dns_cache_ttl': self.config.get('dns_cache_ttl', 300),
+        }
+        for name in ('delay_between_requests', 'min_delay', 'max_delay'):
+            nonnegative[name] = self.config.get(name, 0)
+        if self.config.get('rate_limit_per_second') is not None:
+            positive['rate_limit_per_second'] = self.config['rate_limit_per_second']
+        for name, value in positive.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                raise ValueError(f'{name} must be a positive finite number')
+        for name, value in nonnegative.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                raise ValueError(f'{name} must be a non-negative finite number')
+        for name, value in (
+            ('max_concurrent', self.max_concurrent), ('max_pages', self.max_pages),
+            ('max_page_size', self.max_content_length), ('max_depth', self.max_depth),
+            ('max_redirects', self.max_redirects), ('max_retries', self.retry_attempts),
+        ):
+            if not isinstance(value, int):
+                raise ValueError(f'{name} must be an integer')
+        if not isinstance(self.allowed_schemes, (list, tuple)) or not self.allowed_schemes or any(s not in ('http', 'https') for s in self.allowed_schemes):
+            raise ValueError('allowed_schemes must contain only http and/or https')
+        for name, values in (('allowed_domains', self.allowed_domains), ('excluded_patterns', self.excluded_patterns)):
+            if not isinstance(values, (list, tuple)) or any(not isinstance(v, str) for v in values):
+                raise ValueError(f'{name} must be a list of strings')
+        try:
+            self._excluded = [re.compile(pattern) for pattern in self.excluded_patterns]
+        except re.error as exc:
+            raise ValueError(f'Invalid excluded_patterns expression: {exc}') from exc
+        if not isinstance(self.retry_on_status, (list, tuple)) or any(not isinstance(s, int) or not 400 <= s <= 599 for s in self.retry_on_status):
+            raise ValueError('retry_on_status must be a list of HTTP error status codes')
+        headers = self.config.get('custom_headers', {})
+        if not isinstance(headers, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in headers.items()):
+            raise ValueError('custom_headers must be a dictionary of strings')
+        for key in ('verify_ssl', 'follow_redirects', 'respect_robots_txt', 'store_html',
+                    'use_sitemap', 'discover_sitemaps', 'adaptive_delay', 'use_connection_pooling'):
+            if key in self.config and not isinstance(self.config[key], bool):
+                raise ValueError(f'{key} must be a boolean')
+
     async def __aenter__(self):
-        """Async context manager entry."""
-        # Advanced connector with connection pooling
         connector = aiohttp.TCPConnector(
-            limit=self.max_concurrent * 2,
-            limit_per_host=self.max_concurrent,
-            ttl_dns_cache=300,
-            enable_cleanup_closed=True,
-            force_close=False,
-            keepalive_timeout=30
+            limit=self.max_concurrent,
+            limit_per_host=self.config.get('max_connections_per_host', self.max_concurrent),
+            ttl_dns_cache=self.config.get('dns_cache_ttl', 300),
+            ssl=self.verify_ssl,
+            force_close=not self.config.get('use_connection_pooling', True),
         )
-        
-        timeout = ClientTimeout(
-            total=self.timeout,
-            connect=10,
-            sock_connect=10,
-            sock_read=self.timeout
-        )
-        
-        # Cookie jar for session persistence
-        jar = aiohttp.CookieJar()
-        
         self.session = aiohttp.ClientSession(
             connector=connector,
-            timeout=timeout,
+            timeout=ClientTimeout(total=self.timeout, connect=self.connect_timeout,
+                                  sock_connect=self.connect_timeout, sock_read=self.read_timeout),
             headers=self.headers,
-            cookie_jar=jar,
-            trust_env=True,
-            trace_configs=[self._create_trace_config()]
+            trust_env=False,
         )
         return self
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
         if self.session:
             await self.session.close()
-            # Wait a bit for connections to close properly
-            await asyncio.sleep(0.25)
-    
-    def _create_trace_config(self) -> aiohttp.TraceConfig:
-        """Create trace config for request monitoring."""
-        trace_config = aiohttp.TraceConfig()
-        
-        async def on_request_start(session, trace_config_ctx, params):
-            trace_config_ctx.start = asyncio.get_event_loop().time()
-            self.stats.requests_made += 1
-        
-        async def on_request_end(session, trace_config_ctx, params):
-            elapsed = asyncio.get_event_loop().time() - trace_config_ctx.start
-            domain = urlparse(str(params.url)).netloc
-            self.rate_limiter.record_response(domain, elapsed)
-        
-        trace_config.on_request_start.append(on_request_start)
-        trace_config.on_request_end.append(on_request_end)
-        return trace_config
-    
+
+    @staticmethod
+    def _host(parsed):
+        return (parsed.hostname or '').rstrip('.').encode('idna').decode('ascii').lower()
+
+    @staticmethod
+    def _port(parsed):
+        return parsed.port if parsed.port is not None else (443 if parsed.scheme == 'https' else 80)
+
     def normalize_url(self, url: str) -> str:
-        """Advanced URL normalization for better deduplication."""
-        # Parse URL
-        parsed = urlparse(url.lower())
-        
-        # Normalize the domain
-        netloc = parsed.netloc
-        if netloc.startswith('www.'):
-            netloc = netloc[4:]
-        
-        # Normalize the path
-        path = parsed.path
-        path = re.sub(r'/+', '/', path)  # Remove duplicate slashes
-        path = path.rstrip('/') if path != '/' else '/'
-        
-        # Sort and normalize query parameters
-        query_params = parse_qs(parsed.query)
-        # Remove common tracking parameters
-        tracking_params = {'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 
-                          'utm_content', 'fbclid', 'gclid', 'ref', 'source'}
-        query_params = {k: v for k, v in query_params.items() if k not in tracking_params}
-        
-        # Sort parameters for consistency
-        sorted_query = urlencode(sorted(query_params.items()), doseq=True)
-        
-        # Reconstruct normalized URL
-        normalized = urlunparse((
-            'https' if parsed.scheme == 'https' else 'http',
-            netloc,
-            path,
-            parsed.params,
-            sorted_query,
-            ''  # Remove fragment
-        ))
-        
-        return normalized
-    
-    def is_valid_url(self, url: str, base_domain: str) -> bool:
-        """Enhanced URL validation with more checks."""
-        # Basic validation
-        if not validators.url(url):
+        """Normalize the authority and fragment without changing path/query semantics."""
+        try:
+            parsed = urlparse(url)
+            host = self._host(parsed)
+            if ':' in host:
+                host = f'[{host}]'
+            port = parsed.port
+            if port is not None and port != (443 if parsed.scheme.lower() == 'https' else 80):
+                host += f':{port}'
+            normalized = urlunparse((parsed.scheme.lower(), host, parsed.path or '/',
+                                     parsed.params, parsed.query, ''))
+            if '?' in url.split('#', 1)[0] and not parsed.query:
+                normalized += '?'
+            return normalized
+        except (ValueError, UnicodeError, TypeError):
+            return url
+
+    def _valid_url(self, url: str, base_url: str, page: bool = True,
+                   apply_filters: bool = True) -> bool:
+        if not isinstance(url, str) or re.search(r'[\x00-\x20\x7f]', url):
             return False
-        
-        parsed = urlparse(url)
-        
-        # Check protocol
-        if parsed.scheme not in ('http', 'https'):
+        if resolve_url(url, url) is None:
             return False
-        
-        # Check for data URLs or javascript
-        if parsed.scheme in ('data', 'javascript', 'mailto', 'tel', 'ftp'):
-            return False
-        
-        # Check domain restrictions
-        if self.allowed_domains:
-            if not any(domain in parsed.netloc for domain in self.allowed_domains):
+        try:
+            parsed = urlparse(url)
+            host = self._host(parsed)
+            if parsed.scheme not in self.allowed_schemes or not host or parsed.username is not None or parsed.password is not None:
                 return False
-        else:
-            # Default to same domain as base
-            base_parsed = urlparse(base_domain)
-            base_domain = base_parsed.netloc.replace('www.', '')
-            current_domain = parsed.netloc.replace('www.', '')
-            if base_domain != current_domain:
+            if self._port(parsed) == 0:
                 return False
-        
-        # Check excluded patterns
-        for pattern in self.excluded_patterns:
-            if re.search(pattern, url):
+            if self.allowed_domains:
+                allowed = False
+                for domain in self.allowed_domains:
+                    wildcard = domain.startswith('*.')
+                    configured = urlparse('//' + (domain[2:] if wildcard else domain))
+                    configured_host = self._host(configured)
+                    match = (host.endswith('.' + configured_host) if wildcard else host == configured_host)
+                    if match and (configured.port is None or self._port(parsed) == configured.port):
+                        allowed = True
+                        break
+                if not allowed:
+                    return False
+            else:
+                base = urlparse(base_url)
+                if host != self._host(base):
+                    return False
+                default_transition = (
+                    self._port(parsed) == (443 if parsed.scheme == 'https' else 80)
+                    and self._port(base) == (443 if base.scheme == 'https' else 80)
+                )
+                if not default_transition and self._port(parsed) != self._port(base):
+                    return False
+        except (ValueError, UnicodeError, TypeError, AttributeError):
+            return False
+        if apply_filters and any(pattern.search(url) for pattern in self._excluded):
+            return False
+        if page:
+            path = parsed.path.lower()
+            extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.ico',
+                          '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+                          '.zip', '.rar', '.tar', '.gz', '.7z', '.mp3', '.mp4',
+                          '.avi', '.mov', '.wmv', '.flv', '.css', '.js', '.json',
+                          '.xml', '.txt', '.woff', '.woff2', '.ttf', '.eot')
+            if path.endswith(extensions):
                 return False
-        
-        # Skip common non-HTML resources
-        path = parsed.path.lower()
-        skip_extensions = (
-            '.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.ico',
-            '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-            '.zip', '.rar', '.tar', '.gz', '.7z',
-            '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv',
-            '.css', '.js', '.json', '.xml', '.txt',
-            '.woff', '.woff2', '.ttf', '.eot'
-        )
-        if path.endswith(skip_extensions):
-            return False
-        
-        # Skip admin/login/logout URLs
-        skip_paths = ['/wp-admin', '/admin', '/login', '/logout', '/signin', 
-                     '/signout', '/register', '/wp-login', '/user/login']
-        if any(skip in path for skip in skip_paths):
-            return False
-        
+            if any(re.search(r'/' + part + r'(?:/|$|\.)', path)
+                   for part in ('wp-admin', 'admin', 'login', 'logout', 'signin',
+                                'signout', 'register', 'wp-login')):
+                return False
         return True
-    
+
+    def is_valid_url(self, url: str, base_domain: str) -> bool:
+        return self._valid_url(url, self._base_url or base_domain)
+
+    def _origin(self, url):
+        parsed = urlparse(self.normalize_url(url))
+        return f'{parsed.scheme}://{parsed.netloc}'
+
+    def _failure(self, url: str, message: str, **fields) -> Dict[str, Any]:
+        result = {'url': url, 'requested_url': url, 'status_code': 0,
+                  'error': message, 'outcome': 'failed', 'headers': None,
+                  'redirect_chain': [], 'load_time': None, 'timestamp': time.time(),
+                  'timings': {'headers_seconds': None, 'download_seconds': None,
+                              'network_seconds': None, 'total_seconds': None}}
+        result.update(fields)
+        return result
+
+    @staticmethod
+    def _response_headers(headers):
+        values, seen = {}, set()
+        for key in headers:
+            if key.lower() in seen:
+                continue
+            seen.add(key.lower())
+            instances = headers.getall(key)
+            values[key] = instances if len(instances) > 1 else instances[0]
+        return values
+
+    async def _read_bounded(self, response, limit):
+        content = bytearray()
+        async for chunk in response.content.iter_chunked(min(16384, limit + 1)):
+            self.stats.bytes_downloaded += len(chunk)
+            remaining = limit - len(content)
+            content.extend(chunk[:remaining])
+            if len(chunk) > remaining:
+                return bytes(content), True
+        return bytes(content), False
+
+    def _retry_after(self, value: Optional[str], attempt: int) -> float:
+        delay = self.retry_delay * (2 ** min(attempt, 20))
+        if value:
+            try:
+                seconds = float(value)
+            except ValueError:
+                try:
+                    date = parsedate_to_datetime(value)
+                    if date.tzinfo is None:
+                        date = date.replace(tzinfo=timezone.utc)
+                    seconds = (date - datetime.now(timezone.utc)).total_seconds()
+                except (ValueError, TypeError, OverflowError):
+                    seconds = 0
+            if math.isfinite(seconds):
+                delay = max(delay, seconds)
+        return max(0, delay)
+
+    async def _request(self, url: str, base_url: str, kind: str = 'page',
+                       max_bytes: Optional[int] = None, retry_count: int = 0):
+        """Fetch bounded bytes; validate every redirect before sending it."""
+        if self.session is None:
+            return self._failure(url, 'Crawler must be used as an async context manager')
+        requested_url = url
+        current = url
+        chain = []
+        redirects_seen = set()
+        started = time.monotonic()
+        network_seconds = 0.0
+        limit = max_bytes if max_bytes is not None else self.max_content_length
+        while True:
+            if not self._valid_url(current, base_url, page=(kind == 'page'),
+                                   apply_filters=(kind != 'robots')):
+                return self._failure(requested_url, 'URL is invalid, excluded, or outside crawl scope',
+                                     blocked_url=current, redirect_chain=chain,
+                                     outcome='skipped', skipped=True)
+            normalized = self.normalize_url(current)
+            if normalized in redirects_seen:
+                return self._failure(requested_url, 'Redirect loop', redirect_chain=chain)
+            redirects_seen.add(normalized)
+            if kind != 'robots' and not await self.check_robots_txt(current):
+                return self._failure(requested_url, 'Blocked by robots.txt',
+                                     blocked_url=current, redirect_chain=chain,
+                                     outcome='skipped', skipped=True)
+            origin = self._origin(current)
+            response_data = None
+            for attempt in range(retry_count, self.retry_attempts + 1):
+                await self.rate_limiter.wait(origin)
+                request_started = time.monotonic()
+                try:
+                    self.stats.requests_made += 1
+                    async with self.session.get(current, allow_redirects=False,
+                                                ssl=self.verify_ssl, proxy=self.proxy) as response:
+                        headers_seconds = time.monotonic() - request_started
+                        content, truncated = await self._read_bounded(response, limit)
+                        request_seconds = time.monotonic() - request_started
+                        network_seconds += request_seconds
+                        status = response.status
+                        response_data = {
+                            'url': str(response.url), 'requested_url': requested_url,
+                            'status_code': status, 'headers': self._response_headers(response.headers),
+                            'content_type': response.headers.get('Content-Type', '').lower(),
+                            'content': content, 'content_length': len(content),
+                            'truncated': truncated, 'redirect_chain': list(chain),
+                            'load_time': network_seconds, 'timestamp': time.time(),
+                            'timings': {'headers_seconds': headers_seconds,
+                                        'download_seconds': request_seconds - headers_seconds,
+                                        'network_seconds': network_seconds,
+                                        'total_seconds': time.monotonic() - started},
+                            'outcome': 'success',
+                        }
+                        retry_after = response.headers.get('Retry-After')
+                        location = response.headers.get('Location')
+                    self.rate_limiter.record_response(origin, request_seconds, status >= 400)
+                    if status == 429:
+                        self.stats.rate_limit_hits += 1
+                    if status >= 400:
+                        self.stats.errors_encountered += 1
+                        if retry_after:
+                            self.rate_limiter.defer(origin, self._retry_after(retry_after, attempt))
+                    if status in self.retry_on_status and attempt < self.retry_attempts:
+                        self.rate_limiter.defer(origin, self._retry_after(retry_after, attempt))
+                        continue
+                    if status >= 400:
+                        response_data.update(error=f'HTTP {status}', outcome='failed')
+                    break
+                except asyncio.CancelledError:
+                    raise
+                except (asyncio.TimeoutError, ClientError, OSError, ValueError) as exc:
+                    network_seconds += time.monotonic() - request_started
+                    self.stats.errors_encountered += 1
+                    self.rate_limiter.record_response(origin, 0, True)
+                    certificate_error = isinstance(exc, (aiohttp.ClientConnectorCertificateError,
+                                                         aiohttp.ClientConnectorSSLError))
+                    if attempt < self.retry_attempts and not certificate_error and not isinstance(exc, ValueError):
+                        self.rate_limiter.defer(origin, self._retry_after(None, attempt))
+                        continue
+                    message = 'Timeout' if isinstance(exc, asyncio.TimeoutError) else str(exc)
+                    return self._failure(
+                        requested_url, message, redirect_chain=chain,
+                        timings={'headers_seconds': None, 'download_seconds': None,
+                                 'network_seconds': network_seconds,
+                                 'total_seconds': time.monotonic() - started},
+                    )
+            if response_data is None:
+                return self._failure(requested_url, 'Retry budget exhausted', redirect_chain=chain)
+            status = response_data['status_code']
+            if status in (301, 302, 303, 307, 308) and location:
+                if not self.follow_redirects:
+                    response_data.update(error='Redirect not followed', outcome='skipped', skipped=True)
+                    return response_data
+                if len(chain) >= self.max_redirects:
+                    response_data.update(error='Maximum redirects exceeded', outcome='failed')
+                    return response_data
+                target = resolve_url(location, response_data['url'])
+                if target is None:
+                    response_data.update(error='Invalid redirect Location', outcome='failed')
+                    return response_data
+                chain.append({'url': response_data['url'], 'status_code': status, 'location': target})
+                self.stats.redirects_followed += 1
+                current = target
+                continue
+            response_data['redirected_from'] = requested_url if chain else None
+            if response_data['truncated']:
+                response_data.update(error='Response exceeds max_page_size', outcome='failed')
+                self.limit_reasons.add('max_page_size')
+            return response_data
+
+    async def _get_robots(self, url: str):
+        origin = self._origin(url)
+        robots_url = origin + '/robots.txt'
+        async with self._robots_locks[origin]:
+            cached = self.robots_cache.get(robots_url)
+            if cached and cached[1] > time.monotonic():
+                return cached[0]
+            response = await self._request(robots_url, self._base_url or url, kind='robots',
+                                           max_bytes=min(self.max_content_length, 512000))
+            rp = RobotFileParser()
+            status = response['status_code']
+            if status == 200 and not response.get('error'):
+                rp.parse(response['content'].decode('utf-8-sig', errors='replace').splitlines())
+            elif (status in (401, 403, 429) or 300 <= status < 400 or status >= 500
+                  or status == 0 or response.get('truncated')):
+                rp.disallow_all = True
+            else:
+                rp.allow_all = True
+            self._robots_sitemaps[origin] = rp.site_maps() or []
+            delay = rp.crawl_delay(self.user_agent)
+            if delay is not None:
+                self.rate_limiter.set_minimum_delay(origin, delay * self.crawl_delay_factor)
+            rate = rp.request_rate(self.user_agent)
+            if rate and rate.requests:
+                self.rate_limiter.set_minimum_delay(origin, rate.seconds / rate.requests)
+            self.robots_cache[robots_url] = (rp, time.monotonic() + self.robots_cache_ttl)
+            return rp
+
     async def check_robots_txt(self, url: str) -> bool:
-        """Enhanced robots.txt checking with caching and expiry."""
         if not self.respect_robots:
             return True
-        
-        parsed = urlparse(url)
-        robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
-        
-        # Check cache with expiry (1 hour)
-        if robots_url in self.robots_cache:
-            rp, expiry = self.robots_cache[robots_url]
-            if time.time() < expiry:
-                allowed = rp.can_fetch(self.user_agent, url)
-                if not allowed:
-                    self.stats.robots_blocked += 1
-                return allowed
-        
-        # Fetch and parse robots.txt
-        try:
-            async with self.session.get(robots_url, timeout=ClientTimeout(total=5)) as response:
-                if response.status == 200:
-                    content = await response.text()
-                    rp = RobotFileParser()
-                    rp.parse(content.splitlines())
-                    
-                    # Extract crawl delay if specified
-                    for line in content.splitlines():
-                        if line.lower().startswith('crawl-delay:'):
-                            try:
-                                delay = float(line.split(':')[1].strip())
-                                self.rate_limiter.delay = max(self.rate_limiter.delay, delay)
-                            except:
-                                pass
-                    
-                    # Cache with 1-hour expiry
-                    self.robots_cache[robots_url] = (rp, time.time() + 3600)
-                    
-                    allowed = rp.can_fetch(self.user_agent, url)
-                    if not allowed:
-                        self.stats.robots_blocked += 1
-                    return allowed
-        except:
-            pass
-        
-        return True  # Allow if robots.txt not found
-    
-    async def fetch_page(self, url: str, retry_count: int = 0) -> Optional[Dict[str, Any]]:
-        """Enhanced page fetching with retries and better error handling."""
-        normalized_url = self.normalize_url(url)
-        
-        # Check if already visited
-        if normalized_url in self.visited_urls:
+        rp = await self._get_robots(url)
+        allowed = rp.can_fetch(self.user_agent, url)
+        if not allowed:
+            self.stats.robots_blocked += 1
+        return allowed
+
+    async def fetch_page(self, url: str, retry_count: int = 0) -> Optional[FetchResult]:
+        base_url = self._base_url or url
+        if not self._valid_url(url, base_url):
+            result = self._failure(url, 'URL is invalid, excluded, or outside crawl scope',
+                                   outcome='skipped', skipped=True)
+            self.failed_urls[str(url)] = result['error']
+            return normalize_fetch_result(result, '$.fetch')
+        normalized = self.normalize_url(url)
+        if normalized in self.visited_urls:
             return None
-        
-        self.visited_urls.add(normalized_url)
-        
-        # Rate limiting
-        domain = urlparse(url).netloc
-        if self.adaptive_throttle:
-            await self.rate_limiter.wait(domain)
-        
-        # Check robots.txt
-        if not await self.check_robots_txt(url):
-            return {'url': url, 'error': 'Blocked by robots.txt', 'status_code': 0}
-        
+        self.visited_urls.add(normalized)
         try:
-            start_time = time.time()
-            
-            # Add some randomization to headers
-            headers = self.headers.copy()
-            headers['User-Agent'] = self._randomize_user_agent()
-            
-            async with self.session.get(
-                url,
-                allow_redirects=self.follow_redirects,
-                max_redirects=self.max_redirects,
-                headers=headers,
-                ssl=False  # Skip SSL verification for better compatibility
-            ) as response:
-                load_time = time.time() - start_time
-                
-                # Track redirects
-                if str(response.url) != url:
-                    self.stats.redirects_followed += 1
-                
-                # Check content type
-                content_type = response.headers.get('content-type', '').lower()
-                is_html = any(ct in content_type for ct in ['text/html', 'application/xhtml'])
-                
-                # Handle non-HTML content
-                if not is_html and 'application/xml' not in content_type and 'text/xml' not in content_type:
-                    return {
-                        'url': str(response.url),
-                        'status_code': response.status,
-                        'content_type': content_type,
-                        'error': f'Non-HTML content: {content_type}',
-                        'load_time': load_time
-                    }
-                
-                # Read content with size limit
-                content = b''
-                chunk_size = 10240  # 10KB chunks
-                async for chunk in response.content.iter_chunked(chunk_size):
-                    content += chunk
-                    self.stats.bytes_downloaded += len(chunk)
-                    if len(content) > self.max_content_length:
-                        content = content[:self.max_content_length]
-                        break
-                
-                # Detect encoding
-                encoding = response.get_encoding()
-                if not encoding:
-                    # Try to detect from content
-                    if b'charset=' in content[:1024]:
-                        match = re.search(b'charset=([^"\'\\s>;]+)', content[:1024])
-                        if match:
-                            encoding = match.group(1).decode('ascii', errors='ignore')
-                    else:
-                        encoding = 'utf-8'
-                
-                # Decode content
+            operation = self._request(url, base_url, retry_count=max(0, retry_count))
+            if self._deadline is None:
+                result = await asyncio.wait_for(operation, self.max_crawl_time)
+            else:
+                result = await operation
+        except asyncio.TimeoutError:
+            result = self._failure(url, 'Crawl time limit exceeded')
+            self.limit_reasons.add('max_crawl_time')
+        except asyncio.CancelledError:
+            raise
+        content = result.pop('content', b'')
+        content_type = result.get('content_type', '')
+        if not result.get('error'):
+            if not any(kind in content_type for kind in ('text/html', 'application/xhtml+xml')):
+                result.update(error=f'Non-HTML content: {content_type or "unspecified"}',
+                              outcome='skipped', skipped=True)
+            else:
+                charset = re.search(r'charset\s*=\s*["\']?([^;\s"\']+)', content_type, re.I)
+                encodings = [charset.group(1)] if charset else None
+                decoded = UnicodeDammit(content, encodings, is_html=True)
+                html = decoded.unicode_markup or ''
                 try:
-                    html = content.decode(encoding, errors='ignore')
-                except:
-                    html = content.decode('utf-8', errors='ignore')
-                
-                # Parse HTML with appropriate parser
-                if PARSER == 'lxml' and is_html:
-                    # Use lxml's HTML parser for better performance
-                    try:
-                        soup = BeautifulSoup(html, 'lxml')
-                    except:
-                        soup = BeautifulSoup(html, 'html.parser')
-                else:
                     soup = BeautifulSoup(html, PARSER)
-                
-                # Detect if JavaScript rendering needed
-                js_indicators = [
-                    'window.location',
-                    'document.write',
-                    'React',
-                    'Angular',
-                    'Vue',
-                    '__NEXT_DATA__',
-                    '_app.js'
-                ]
-                needs_js = any(indicator in html for indicator in js_indicators)
-                
-                # Build result
-                result = {
-                    'url': str(response.url),
-                    'status_code': response.status,
-                    'content_type': content_type,
-                    'load_time': load_time,
-                    'content_length': len(content),
-                    'headers': dict(response.headers),
-                    'soup': soup,
-                    'timestamp': time.time(),
-                    'redirected_from': url if str(response.url) != url else None,
-                    'encoding': encoding,
-                    'needs_javascript': needs_js
-                }
-                
-                # Optionally store HTML
+                except FeatureNotFound:
+                    soup = BeautifulSoup(html, 'html.parser')
+                result.update(soup=soup, encoding=decoded.original_encoding or 'utf-8',
+                              needs_javascript=any(indicator in html for indicator in
+                                                   ('window.location', 'document.write', 'React',
+                                                    'Angular', 'Vue', '__NEXT_DATA__', '_app.js')))
                 if self.store_html:
                     result['html'] = html
-                
-                # Record successful response
-                self.rate_limiter.record_response(domain, load_time)
-                
-                return result
-                
-        except asyncio.TimeoutError:
-            self.stats.errors_encountered += 1
-            if retry_count < self.retry_attempts:
-                await asyncio.sleep(self.retry_delay * (retry_count + 1))
-                return await self.fetch_page(url, retry_count + 1)
-            
-            self.failed_urls[normalized_url] = 'Timeout'
-            self.rate_limiter.record_response(domain, self.timeout, is_error=True)
-            return {'url': url, 'error': 'Timeout', 'status_code': 0}
-            
-        except ClientError as e:
-            self.stats.errors_encountered += 1
-            error_msg = str(e)
-            
-            # Handle rate limiting
-            if hasattr(e, 'status') and e.status == 429:
-                self.stats.rate_limit_hits += 1
-                if retry_count < self.retry_attempts:
-                    # Exponential backoff for rate limits
-                    wait_time = min(60, 2 ** retry_count * 5)
-                    await asyncio.sleep(wait_time)
-                    return await self.fetch_page(url, retry_count + 1)
-            
-            self.failed_urls[normalized_url] = error_msg
-            self.rate_limiter.record_response(domain, 0, is_error=True)
-            return {'url': url, 'error': error_msg, 'status_code': getattr(e, 'status', 0)}
-            
-        except Exception as e:
-            self.stats.errors_encountered += 1
-            self.failed_urls[normalized_url] = str(e)
-            return {'url': url, 'error': str(e), 'status_code': 0}
-    
+        if result.get('error'):
+            self.failed_urls[normalized] = result['error']
+        return normalize_fetch_result(result, '$.fetch')
+
     def _randomize_user_agent(self) -> str:
-        """Add slight randomization to user agent to appear more natural."""
-        agents = [
-            self.user_agent,
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        ]
-        return random.choice(agents) if random.random() < 0.1 else self.user_agent
-    
+        """Compatibility shim: request identity remains stable for robots rules."""
+        return self.user_agent
+
     def extract_links(self, soup: BeautifulSoup, base_url: str) -> List[Tuple[str, int]]:
-        """Enhanced link extraction with priority scoring."""
-        links_with_priority = []
-        
-        for tag in soup.find_all(['a', 'link']):
+        document_base = soup.find('base', href=True)
+        resolved_base = (resolve_url(document_base['href'], base_url)
+                         if document_base else None) or base_url
+        links = []
+        seen = set()
+        for tag in soup.find_all(['a', 'link'], href=True):
             href = tag.get('href')
-            if not href:
+            if not isinstance(href, str) or not href:
                 continue
-            
-            # Make absolute URL
-            absolute_url = urljoin(base_url, href)
-            
+            absolute_url = resolve_url(href, resolved_base)
             if not self.is_valid_url(absolute_url, base_url):
                 continue
-            
-            # Priority scoring (lower is higher priority)
-            priority = 5  # Default
-            
-            # Prioritize certain patterns
-            if any(pattern in href.lower() for pattern in ['index', 'home', 'main']):
+            normalized = self.normalize_url(absolute_url)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            lowered = href.lower()
+            priority = 5
+            if any(word in lowered for word in ('index', 'home', 'main')):
                 priority = 1
-            elif any(pattern in href.lower() for pattern in ['product', 'service', 'about']):
+            elif any(word in lowered for word in ('product', 'service', 'about')):
                 priority = 2
-            elif any(pattern in href.lower() for pattern in ['contact', 'blog', 'news']):
+            elif any(word in lowered for word in ('contact', 'blog', 'news')):
                 priority = 3
-            elif any(pattern in href.lower() for pattern in ['privacy', 'terms', 'legal']):
+            elif any(word in lowered for word in ('privacy', 'terms', 'legal')):
                 priority = 8
-            
-            # Deprioritize pagination
             if re.search(r'[?&]page=\d+', href):
                 priority = 9
-            
-            links_with_priority.append((absolute_url, priority))
-        
-        return links_with_priority
-    
-    async def crawl_site(self, start_url: str, max_pages: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Enhanced website crawling with intelligent queue management."""
-        max_pages = max_pages or self.max_pages
-        
-        # Initialize queue with start URL
-        self.url_queue.add(start_url, priority=0, depth=0)
-        
-        # Check for sitemap
-        if self.follow_sitemap:
-            sitemap_urls = await self._discover_sitemaps(start_url)
-            for url in sitemap_urls[:max_pages]:
-                self.url_queue.add(url, priority=1, depth=1)
-        
-        # Semaphore for concurrency control
-        semaphore = asyncio.Semaphore(self.max_concurrent)
-        
-        async def fetch_with_semaphore(url: str):
-            async with semaphore:
-                return await self.fetch_page(url)
-        
-        active_tasks = set()
-        
-        while (self.url_queue or active_tasks) and len(self.results) < max_pages:
-            # Start new tasks up to concurrency limit
-            while len(active_tasks) < self.max_concurrent and self.url_queue and len(self.results) < max_pages:
-                item = self.url_queue.get()
-                if item:
-                    priority, depth, url = item
-                    if depth <= self.max_depth:
-                        task = asyncio.create_task(fetch_with_semaphore(url))
-                        active_tasks.add((task, url, depth))
-            
-            if not active_tasks:
-                break
-            
-            # Wait for at least one task to complete
-            done, pending = await asyncio.wait(
-                [task for task, _, _ in active_tasks],
-                return_when=asyncio.FIRST_COMPLETED
-            )
-            
-            # Process completed tasks
-            for task in done:
-                # Find the associated URL and depth
-                for task_tuple in active_tasks:
-                    if task_tuple[0] == task:
-                        _, url, depth = task_tuple
-                        active_tasks.remove(task_tuple)
+            links.append((normalized, priority))
+        return links
+
+    @staticmethod
+    def _frontier_limit(max_pages):
+        return min(100000, max_pages * 10)
+
+    def _enqueue(self, url, priority=5, depth=0, parent_url=None):
+        normalized = self.normalize_url(url)
+        if normalized in self.visited_urls or self.url_queue.has_url(normalized):
+            return
+        if not self.url_queue.add(normalized, priority, depth):
+            self.limit_reasons.add('frontier')
+        elif parent_url is not None:
+            self._parents[normalized] = parent_url
+
+    async def _run_queue(self, max_pages, follow_links):
+        initial_count = len(self.results)
+        active = {}
+        try:
+            while self.url_queue or active:
+                while (self.url_queue and len(active) < self.max_concurrent and
+                       len(self.results) - initial_count + len(active) < max_pages):
+                    # Finish a breadth level before starting the next. Otherwise
+                    # a slow shallow route can arrive after a deeper duplicate.
+                    if active and self.url_queue.queue[0][0] > min(depth for _, depth in active.values()):
                         break
-                
-                try:
-                    result = await task
-                    if result and 'error' not in result:
-                        self.results.append(result)
-                        
-                        # Extract and queue new links
-                        if 'soup' in result and result.get('status_code') == 200:
-                            if depth < self.max_depth:
-                                links = self.extract_links(result['soup'], url)
-                                for link, priority in links:
-                                    self.url_queue.add(link, priority, depth + 1)
-                    elif result:
-                        self.results.append(result)
-                except Exception as e:
-                    logger.error(f"Error processing {url}: {e}")
-        
-        # Cancel any remaining tasks
-        for task, _, _ in active_tasks:
-            task.cancel()
-        
-        return self.results
-    
-    async def _discover_sitemaps(self, base_url: str) -> List[str]:
-        """Discover and parse sitemaps for a website."""
-        urls = []
-        parsed = urlparse(base_url)
-        base_domain = f"{parsed.scheme}://{parsed.netloc}"
-        
-        # Common sitemap locations
-        sitemap_urls = [
-            f"{base_domain}/sitemap.xml",
-            f"{base_domain}/sitemap_index.xml",
-            f"{base_domain}/sitemap-index.xml",
-            f"{base_domain}/sitemaps/sitemap.xml"
-        ]
-        
-        # Check robots.txt for sitemap
-        robots_url = f"{base_domain}/robots.txt"
-        try:
-            async with self.session.get(robots_url, timeout=ClientTimeout(total=5)) as response:
-                if response.status == 200:
-                    content = await response.text()
-                    for line in content.splitlines():
-                        if line.lower().startswith('sitemap:'):
-                            sitemap_url = line.split(':', 1)[1].strip()
-                            if sitemap_url not in sitemap_urls:
-                                sitemap_urls.append(sitemap_url)
-        except:
-            pass
-        
-        # Try to fetch sitemaps
-        for sitemap_url in sitemap_urls:
-            try:
-                urls.extend(await self._parse_sitemap(sitemap_url))
-                if urls:
-                    break  # Use first successful sitemap
-            except:
-                continue
-        
-        return urls
-    
-    async def _parse_sitemap(self, sitemap_url: str) -> List[str]:
-        """Parse a sitemap or sitemap index."""
-        urls = []
-        
-        try:
-            async with self.session.get(sitemap_url, timeout=ClientTimeout(total=10)) as response:
-                if response.status != 200:
-                    return urls
-                
-                content = await response.text()
-                
-                # Check if it's a sitemap index
-                if '<sitemapindex' in content:
-                    # Parse sitemap index
-                    if PARSER == 'lxml':
-                        try:
-                            root = etree.fromstring(content.encode('utf-8'))
-                            for sitemap in root.xpath('//ns:sitemap/ns:loc/text()', 
-                                                     namespaces={'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9'}):
-                                # Recursively parse child sitemaps
-                                child_urls = await self._parse_sitemap(sitemap)
-                                urls.extend(child_urls[:100])  # Limit per sitemap
-                        except:
-                            pass
-                    else:
-                        soup = BeautifulSoup(content, 'xml')
-                        for loc in soup.find_all('loc'):
-                            if loc.parent.name == 'sitemap':
-                                child_urls = await self._parse_sitemap(loc.text.strip())
-                                urls.extend(child_urls[:100])
-                else:
-                    # Parse regular sitemap
-                    if PARSER == 'lxml':
-                        try:
-                            root = etree.fromstring(content.encode('utf-8'))
-                            for url in root.xpath('//ns:url/ns:loc/text()', 
-                                                 namespaces={'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9'}):
-                                urls.append(url)
-                        except:
-                            pass
-                    else:
-                        soup = BeautifulSoup(content, 'xml')
-                        for loc in soup.find_all('loc'):
-                            if loc.parent.name == 'url':
-                                urls.append(loc.text.strip())
-        except Exception as e:
-            logger.debug(f"Error parsing sitemap {sitemap_url}: {e}")
-        
-        return urls
-    
-    async def crawl_urls(self, urls: List[str]) -> List[Dict[str, Any]]:
-        """Crawl a list of specific URLs with improved batching."""
-        # Semaphore for concurrency control
-        semaphore = asyncio.Semaphore(self.max_concurrent)
-        
-        async def fetch_with_semaphore(url: str):
-            async with semaphore:
-                return await self.fetch_page(url)
-        
-        # Process all URLs concurrently with proper error handling
-        tasks = []
-        for url in urls:
-            task = asyncio.create_task(fetch_with_semaphore(url))
-            tasks.append((task, url))
-        
-        # Gather results
-        for task, url in tasks:
-            try:
-                result = await task
-                if result:
+                    _, depth, url = self.url_queue.get()
+                    if depth > self.max_depth:
+                        continue
+                    task = asyncio.create_task(self.fetch_page(url))
+                    active[task] = (url, depth)
+                if not active:
+                    break
+                done, _ = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    url, depth = active.pop(task)
+                    try:
+                        result = task.result()
+                    except Exception as exc:
+                        result = self._failure(url, str(exc))
+                        self.failed_urls[url] = result['error']
+                    if result is None:
+                        continue
+                    result['depth'] = depth
+                    if url in self._parents:
+                        result['parent_url'] = self._parents[url]
+                    if (follow_links and not result.get('error') and
+                            result.get('status_code') == 200 and 'soup' in result):
+                        links = self.extract_links(result['soup'], result['url'])
+                        if depth < self.max_depth:
+                            for link, priority in links:
+                                self._enqueue(link, priority, depth + 1, parent_url=result['url'])
+                        elif any(link not in self.visited_urls and not self.url_queue.has_url(link)
+                                 for link, _ in links):
+                            self.limit_reasons.add('max_depth')
+                    # Consumers may release soup/html as soon as this is visible.
                     self.results.append(result)
-            except Exception as e:
-                self.failed_urls[url] = str(e)
-                self.results.append({'url': url, 'error': str(e), 'status_code': 0})
-        
+                if len(self.results) - initial_count >= max_pages:
+                    if self.url_queue:
+                        self.limit_reasons.add('max_pages')
+                    break
+        finally:
+            for task in active:
+                task.cancel()
+            if active:
+                await asyncio.gather(*active, return_exceptions=True)
+                if self._interrupted_fetches is not None:
+                    # wait_for can cancel before a separately sampled clock reaches
+                    # its deadline. The caller decides whether this was a timeout.
+                    self._interrupted_fetches.extend(
+                        (url, depth, self._parents.get(url)) for url, depth in active.values())
         return self.results
-    
-    async def crawl_sitemap(self, sitemap_url: str) -> List[Dict[str, Any]]:
-        """Crawl URLs from a sitemap with sitemap index support."""
-        urls = await self._parse_sitemap(sitemap_url)
-        
-        if not urls:
+
+    async def _run_with_deadline(self, operation, seed):
+        previous = self._deadline
+        previous_interrupted = self._interrupted_fetches
+        interrupted = []
+        self._interrupted_fetches = interrupted
+        self._deadline = time.monotonic() + self.max_crawl_time
+        initial_count = len(self.results)
+        try:
+            return await asyncio.wait_for(operation, self.max_crawl_time)
+        except asyncio.TimeoutError:
+            self.limit_reasons.add('max_crawl_time')
+            for url, depth, parent_url in interrupted:
+                result = self._failure(url, 'Crawl time limit exceeded', depth=depth)
+                if parent_url is not None:
+                    result['parent_url'] = parent_url
+                self.failed_urls[url] = result['error']
+                self.results.append(result)
+            if len(self.results) == initial_count:
+                result = self._failure(seed, 'Crawl time limit exceeded')
+                self.failed_urls[seed] = result['error']
+                self.results.append(result)
+            return self.results
+        finally:
+            self._deadline = previous
+            self._interrupted_fetches = previous_interrupted
+
+    async def crawl_site(self, start_url: str, max_pages: Optional[int] = None) -> List[Dict[str, Any]]:
+        limit = self.max_pages if max_pages is None else max_pages
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+            raise ValueError('max_pages must be a positive integer')
+        if not self._valid_url(start_url, start_url):
+            result = self._failure(start_url, 'URL is invalid, excluded, or outside crawl scope',
+                                   outcome='skipped', skipped=True)
+            self.failed_urls[str(start_url)] = result['error']
+            self.results.append(result)
+            return self.results
+        previous_base = self._base_url
+        self._base_url = start_url
+        self.url_queue = URLQueue(self._frontier_limit(limit))
+        self._parents = {}
+        self._enqueue(start_url, 0, 0)
+
+        async def crawl():
+            if self.follow_sitemap and self.discover_sitemaps and limit > 1 and self.max_depth > 0:
+                for url in await self.discover_sitemap_urls(start_url, limit - 1):
+                    self._enqueue(url, 1, 1)
+            return await self._run_queue(limit, follow_links=True)
+        try:
+            return await self._run_with_deadline(crawl(), start_url)
+        finally:
+            self._base_url = previous_base
+
+    def _discovery_error(self, url, error):
+        if len(self.discovery_errors) < 100:
+            self.discovery_errors.append({'url': url, 'error': str(error)})
+        logger.debug('Sitemap discovery failed for %s: %s', url, error)
+
+    async def _parse_sitemaps(self, candidates, base_url, max_urls, speculative_urls=()):
+        urls = []
+        found = set()
+        visited = set()
+        queued = set()
+        queue = deque()
+        sitemap_budget = max(16, min(1000, max_urls))
+        speculative = {self.normalize_url(url) for url in speculative_urls}
+
+        def enqueue(url, depth):
+            normalized = self.normalize_url(url)
+            if normalized in queued:
+                return
+            if depth > 10 or len(queued) >= sitemap_budget:
+                self.limit_reasons.add('sitemap_discovery')
+                return
+            if not self._valid_url(url, base_url, page=False):
+                self._discovery_error(url, 'Sitemap is invalid, excluded, or outside crawl scope')
+                return
+            queued.add(normalized)
+            queue.append((url, depth))
+
+        for url in candidates:
+            enqueue(url, 0)
+        while queue and len(urls) < max_urls:
+            url, depth = queue.popleft()
+            normalized = self.normalize_url(url)
+            if normalized in visited:
+                continue
+            visited.add(normalized)
+            result = await self._request(url, base_url, kind='sitemap')
+            if result.get('error') or result['status_code'] != 200:
+                # Missing guessed locations are ordinary absence, not failed
+                # declared sitemap coverage.
+                if normalized in speculative and result['status_code'] in (404, 410):
+                    continue
+                self._discovery_error(url, result.get('error', f'HTTP {result["status_code"]}'))
+                continue
+            try:
+                parser = ElementTree.XMLParser(target=_SitemapTreeBuilder())
+                root = ElementTree.fromstring(result['content'], parser=parser)
+            except (ElementTree.ParseError, ValueError) as exc:
+                self._discovery_error(url, exc)
+                continue
+            root_name = root.tag.rsplit('}', 1)[-1]
+            if root_name not in ('urlset', 'sitemapindex'):
+                self._discovery_error(url, 'Expected urlset or sitemapindex root')
+                continue
+            entry_name = 'sitemap' if root_name == 'sitemapindex' else 'url'
+            for entry in root:
+                if entry.tag.rsplit('}', 1)[-1] != entry_name:
+                    continue
+                loc = next((child.text for child in entry
+                            if child.tag.rsplit('}', 1)[-1] == 'loc'), None)
+                if not loc:
+                    continue
+                target = resolve_url(loc, result['url'])
+                if target is None:
+                    self._discovery_error(loc, 'Invalid sitemap location')
+                    continue
+                if entry_name == 'sitemap':
+                    speculative.discard(self.normalize_url(target))
+                    enqueue(target, depth + 1)
+                elif self._valid_url(target, base_url):
+                    identity = self.normalize_url(target)
+                    if identity not in found:
+                        if len(urls) >= max_urls:
+                            self.limit_reasons.add('max_pages')
+                            return urls
+                        found.add(identity)
+                        urls.append(identity)
+                else:
+                    self._discovery_error(target, 'Page is invalid, excluded, or outside crawl scope')
+        if queue and len(urls) >= max_urls:
+            self.limit_reasons.add('max_pages')
+        return urls
+
+    async def _bounded_discovery(self, operation, url):
+        remaining = (max(0, self._deadline - time.monotonic())
+                     if self._deadline is not None else self.max_crawl_time)
+        try:
+            return await asyncio.wait_for(operation, remaining)
+        except asyncio.TimeoutError:
+            self.limit_reasons.add('max_crawl_time')
+            self._discovery_error(url, 'Crawl time limit exceeded during sitemap discovery')
             return []
-        
-        # Crawl discovered URLs
-        return await self.crawl_urls(urls[:self.max_pages])
-    
+
+    async def discover_sitemap_urls(self, base_url: str, max_urls: Optional[int] = None) -> List[str]:
+        """Return eligible page URLs, sharing a bounded sitemap discovery budget."""
+        limit = self.max_pages if max_urls is None else max_urls
+        if limit <= 0 or not self.follow_sitemap or not self.discover_sitemaps:
+            return []
+        if not self._valid_url(base_url, base_url, page=False):
+            self._discovery_error(base_url, 'Invalid or out-of-scope base URL')
+            return []
+
+        async def discover():
+            origin = self._origin(base_url)
+            await self._get_robots(base_url)
+            candidates = list(self._robots_sitemaps.get(origin, []))
+            defaults = [origin + path for path in
+                        ('/sitemap.xml', '/sitemap_index.xml', '/sitemap-index.xml', '/sitemaps/sitemap.xml')]
+            speculative = [url for url in defaults if url not in candidates]
+            candidates.extend(defaults)
+            return await self._parse_sitemaps(candidates, base_url, limit, speculative)
+        return await self._bounded_discovery(discover(), base_url)
+
+    async def parse_sitemap(self, sitemap_url: str, max_urls: Optional[int] = None) -> List[str]:
+        """Parse a sitemap/index without optional XML dependencies or recursive requests."""
+        limit = self.max_pages if max_urls is None else max_urls
+        if limit <= 0:
+            return []
+        return await self._bounded_discovery(
+            self._parse_sitemaps([sitemap_url], self._base_url or sitemap_url, limit), sitemap_url)
+
+    async def _discover_sitemaps(self, base_url: str) -> List[str]:
+        return await self.discover_sitemap_urls(base_url)
+
+    async def _parse_sitemap(self, sitemap_url: str) -> List[str]:
+        return await self.parse_sitemap(sitemap_url)
+
+    async def crawl_urls(self, urls: List[str]) -> List[Dict[str, Any]]:
+        self.url_queue = URLQueue(self._frontier_limit(self.max_pages))
+        self._parents = {}
+        for url in urls:
+            # Keep malformed user seeds intact so fetch_page records their error.
+            identity = self.normalize_url(url) if self._valid_url(url, self._base_url or url) else url
+            if identity not in self.visited_urls:
+                self.url_queue.add(identity, depth=0)
+            if len(self.url_queue) >= self.max_pages:
+                break
+        return await self._run_with_deadline(self._run_queue(self.max_pages, follow_links=False),
+                                             urls[0] if urls else '')
+
+    async def crawl_sitemap(self, sitemap_url: str) -> List[Dict[str, Any]]:
+        previous_base = self._base_url
+        self._base_url = sitemap_url
+
+        async def crawl():
+            urls = await self.parse_sitemap(sitemap_url)
+            self.url_queue = URLQueue(self._frontier_limit(self.max_pages))
+            self._parents = {}
+            for url in urls:
+                self._enqueue(url, depth=0)
+            return await self._run_queue(self.max_pages, follow_links=False)
+        try:
+            return await self._run_with_deadline(crawl(), sitemap_url)
+        finally:
+            self._base_url = previous_base
+
     def get_statistics(self) -> Dict[str, Any]:
-        """Get comprehensive crawl statistics."""
-        successful = [r for r in self.results if r.get('status_code', 0) >= 200 and r.get('status_code', 0) < 400]
-        failed = [r for r in self.results if r.get('status_code', 0) >= 400 or 'error' in r]
-        redirects = [r for r in self.results if 300 <= r.get('status_code', 0) < 400]
-        
-        total_load_time = sum(r.get('load_time', 0) for r in successful)
-        avg_load_time = total_load_time / len(successful) if successful else 0
-        
-        # Status code distribution
-        status_distribution = defaultdict(int)
-        for r in self.results:
-            status_distribution[r.get('status_code', 0)] += 1
-        
+        successful = [r for r in self.results if 200 <= r.get('status_code', 0) < 400 and not r.get('error')]
+        failed = [r for r in self.results if r.get('error') or r.get('status_code', 0) >= 400]
+        load_time = sum(r.get('load_time', 0) for r in successful)
+        distribution = defaultdict(int)
+        for result in self.results:
+            distribution[result.get('status_code', 0)] += 1
+        stats = self.stats.get_summary()
         return {
-            'total_pages': len(self.results),
-            'successful_pages': len(successful),
+            'total_pages': len(self.results), 'successful_pages': len(successful),
             'failed_pages': len(failed),
-            'redirected_pages': len(redirects),
+            'redirected_pages': sum(bool(r.get('redirect_chain')) for r in self.results),
             'unique_urls': len(self.visited_urls),
-            'average_load_time': avg_load_time,
-            'total_load_time': total_load_time,
-            'pages_per_second': len(successful) / total_load_time if total_load_time > 0 else 0,
-            'status_distribution': dict(status_distribution),
-            'failed_urls': dict(list(self.failed_urls.items())[:10]),  # Top 10 failed
-            'stats': self.stats.get_summary(),
+            'average_load_time': load_time / len(successful) if successful else 0,
+            'total_load_time': load_time,
+            'pages_per_second': len(successful) / stats['elapsed_seconds'] if stats['elapsed_seconds'] else 0,
+            'status_distribution': dict(distribution),
+            'failed_urls': dict(list(self.failed_urls.items())[:10]), 'stats': stats,
             'queue_remaining': len(self.url_queue),
-            'javascript_pages': sum(1 for r in self.results if r.get('needs_javascript', False))
+            'javascript_pages': sum(bool(r.get('needs_javascript')) for r in self.results),
+            'limits_reached': sorted(self.limit_reasons),
+            'discovery_errors': self.discovery_errors,
         }
 
 
-# Backward compatibility - keep old class name as alias
 Crawler = EnhancedCrawler

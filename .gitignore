@@ -144,6 +144,8 @@ cython_debug/
 # Reports
 reports/
 *.html
+# Bundled report templates are source files, not generated reports.
+!tfq0seo/templates/*.html
 *.csv
 *.xlsx
 *.json

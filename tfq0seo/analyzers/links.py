@@ -1,4 +1,4 @@
-"""Advanced link analyzer with comprehensive link quality assessment and SEO optimization."""
+"""Static link evidence extraction and local accessibility checks."""
 
 import re
 import math
@@ -9,6 +9,61 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from bs4 import BeautifulSoup, Tag
+from .common import (classify_url, document_base_url, is_internal_url,
+                     make_issue, resolve_url)
+from ..rules import RuleDefinition, RuleCollector, register_rules, score_findings, recommendations_for
+from ..page_facts import PageFacts, ensure_page_facts
+
+
+_LINK_REFERENCE = 'https://developers.google.com/search/docs/crawling-indexing/links-crawlable'
+_SPAM_REFERENCE = 'https://developers.google.com/search/docs/essentials/spam-policies'
+LINK_RULES = (
+    RuleDefinition('links.missing_anchor', 'links', 'warning',
+        'Give the link an accessible name using meaningful text, a suitable image alternative, or an appropriate accessible label.',
+        'HTTP(S) links have no text, image alternative, aria-label, resolvable aria-labelledby, or title in the supplied HTML; CSS-generated and script-generated names are not assessed.',
+        ('https://www.w3.org/WAI/WCAG22/Understanding/link-purpose-in-context.html', _LINK_REFERENCE), '2026-09-14'),
+    RuleDefinition('links.invalid_url', 'links', 'warning',
+        'Replace the invalid href with a valid destination, or use a button for an action.',
+        'An anchor href cannot be resolved as a valid URL reference in this document.',
+        (_LINK_REFERENCE,), '2026-09-14'),
+    RuleDefinition('links.javascript_url', 'links', 'warning',
+        'Use a real href for navigation; use a button for an action that has no URL.',
+        'An anchor uses a javascript URL rather than a crawlable destination.',
+        (_LINK_REFERENCE, 'https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/a'), '2026-09-14'),
+    RuleDefinition('links.broken', 'links', 'critical',
+        'Verify the failed destination, update the link to a working URL, or remove it if it no longer serves a purpose.',
+        'The supplied destination checks identify failed linked URLs; unchecked destinations are unknown, and transient failures require verification.',
+        ('https://developers.google.com/crawling/docs/troubleshooting/http-status-codes',), '2026-09-14'),
+    RuleDefinition('links.repeated_anchor', 'links', 'notice',
+        'Review repeated anchor text in context; consistent navigation labels may be appropriate.',
+        'A multiword anchor exceeds 10% of the sample; this local threshold does not establish over-optimization.',
+        (_LINK_REFERENCE,), '2026-09-14', scored=False),
+    RuleDefinition('links.generic_anchor', 'links', 'notice',
+        'Check whether link purpose is clear from its accessible name and surrounding context.',
+        'A known English generic anchor exceeds a combined 20% of the sample; purpose can still be provided by context.',
+        (_LINK_REFERENCE,), '2026-09-14', scored=False),
+    RuleDefinition('links.short_anchor', 'links', 'notice',
+        'Review short anchor labels in their context; length does not establish keyword targeting or manipulation.',
+        'Anchors matching the legacy 2-4 character pattern exceed 30% of the sample; descriptive observation only.',
+        (_LINK_REFERENCE,), '2026-09-14', scored=False),
+    RuleDefinition('links.repeated_external_domain', 'links', 'notice',
+        'Review whether repeated references to this destination help readers; there is no universal maximum link count.',
+        'More than five references point to one external domain; repeated references do not establish a link scheme.',
+        (_LINK_REFERENCE,), '2026-09-14', scored=False),
+    RuleDefinition('links.reciprocal_wording', 'links', 'notice',
+        'Review the relationship and purpose of the link; wording alone does not establish an excessive link exchange.',
+        'External link wording contains exchange, partner, reciprocal, or link-to-us; a low-confidence text heuristic.',
+        (_SPAM_REFERENCE,), '2026-09-14', scored=False),
+    RuleDefinition('links.paid_wording', 'links', 'notice',
+        'If the link is paid or sponsored, qualify it with sponsored or nofollow. First verify the commercial relationship.',
+        'Link text or context contains a commercial keyword without sponsored/nofollow; the relationship is not verified.',
+        (_LINK_REFERENCE,), '2026-09-14', scored=False),
+    RuleDefinition('links.hidden', 'links', 'notice',
+        'Review the hidden link in context; navigation and interactive interfaces can legitimately hide links until needed.',
+        'Caller-supplied or inline HTML evidence marks a link hidden; this does not establish manipulative intent.',
+        (_SPAM_REFERENCE,), '2026-09-14', scored=False),
+)
+register_rules(LINK_RULES)
 
 
 class LinkType(Enum):
@@ -59,7 +114,7 @@ class LinkProfile:
     anchor_text: str
     context: str = ""
     type: LinkType = LinkType.CONTENT
-    quality: LinkQuality = LinkQuality.MEDIUM
+    quality: Optional[LinkQuality] = None
     attributes: Dict[str, Any] = field(default_factory=dict)
     position: str = "body"
     depth: int = 0
@@ -67,119 +122,24 @@ class LinkProfile:
     has_title: bool = False
     opens_new_tab: bool = False
     is_javascript: bool = False
-    domain_authority_estimate: int = 0
+    domain_authority_estimate: Optional[int] = None
 
 
-def create_issue(category: str, severity: str, message: str, details: Optional[Dict] = None) -> Dict[str, Any]:
-    """Create an enhanced issue dictionary with recommendations."""
-    issue = {
-        'category': category,
-        'severity': severity,  # critical, warning, notice
-        'message': message
-    }
-    if details:
-        issue['details'] = details
-    
-    # Add fix recommendations based on issue type
-    if 'broken' in message.lower():
-        issue['fix'] = "Fix or remove broken links. Use 301 redirects for moved content."
-    elif 'anchor text' in message.lower():
-        issue['fix'] = "Use descriptive, keyword-rich anchor text that tells users what to expect."
-    elif 'nofollow' in message.lower():
-        issue['fix'] = "Use nofollow for untrusted content, sponsored for paid links, ugc for user content."
-    elif 'external' in message.lower():
-        issue['fix'] = "Balance external links with internal links. Link to authoritative sources."
-    
-    return issue
+def create_issue(category: str, severity: str, message: str, details: Optional[Dict] = None,
+                 rule_id: Optional[str] = None, evidence: Any = None,
+                 confidence: str = 'high') -> Dict[str, Any]:
+    """Compatibility helper; registered rule identity supplies the guidance."""
+    return make_issue(category, severity, message, details, rule_id, evidence,
+                      confidence=confidence)
 
 
 def normalize_url(url: str, base_url: str) -> str:
-    """Advanced URL normalization for consistency."""
-    if not url:
-        return ""
-    
-    # Handle special protocols
-    if url.startswith(('mailto:', 'tel:', 'javascript:', 'data:', '#')):
-        return url
-    
-    # Make URL absolute
-    absolute = urljoin(base_url, url)
-    
-    # Parse URL
-    parsed = urlparse(absolute)
-    
-    # Normalize domain (remove www if present)
-    netloc = parsed.netloc.lower()
-    if netloc.startswith('www.'):
-        netloc_no_www = netloc[4:]
-    else:
-        netloc_no_www = netloc
-    
-    # Normalize path
-    path = parsed.path
-    if path:
-        # Remove duplicate slashes
-        path = re.sub(r'/+', '/', path)
-        # Remove trailing slash except for root
-        if len(path) > 1 and path.endswith('/'):
-            path = path[:-1]
-    else:
-        path = '/'
-    
-    # Remove common tracking parameters
-    if parsed.query:
-        params = parse_qs(parsed.query)
-        tracking_params = {
-            'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-            'fbclid', 'gclid', 'msclkid', 'ref', 'source', 'track'
-        }
-        cleaned_params = {k: v for k, v in params.items() if k.lower() not in tracking_params}
-        if cleaned_params:
-            from urllib.parse import urlencode
-            query = urlencode(cleaned_params, doseq=True)
-        else:
-            query = ''
-    else:
-        query = parsed.query
-    
-    # Reconstruct URL
-    normalized = f"{parsed.scheme}://{netloc}{path}"
-    if query:
-        normalized += f"?{query}"
-    
-    return normalized
+    """Resolve links while preserving paths, query order, and fragments."""
+    return resolve_url(url, base_url) or url
 
 
 def is_internal_link(url: str, base_url: str) -> bool:
-    """Check if a URL is internal with subdomain handling."""
-    if not url:
-        return True
-    
-    # Special URLs are not internal
-    if url.startswith(('mailto:', 'tel:', 'javascript:', 'data:')):
-        return False
-    
-    # Fragment-only links are internal
-    if url.startswith('#'):
-        return True
-    
-    # Parse both URLs
-    base_parsed = urlparse(base_url)
-    url_parsed = urlparse(urljoin(base_url, url))
-    
-    # Get base domains (without www)
-    base_domain = base_parsed.netloc.lower().replace('www.', '')
-    url_domain = url_parsed.netloc.lower().replace('www.', '')
-    
-    # Check if same domain or subdomain
-    if base_domain == url_domain:
-        return True
-    
-    # Check for subdomain relationship
-    if url_domain.endswith('.' + base_domain) or base_domain.endswith('.' + url_domain):
-        return True
-    
-    return False
+    return is_internal_url(url, base_url)
 
 
 def extract_link_context(link_element: Tag, chars_before: int = 50, chars_after: int = 50) -> str:
@@ -210,18 +170,21 @@ def extract_link_context(link_element: Tag, chars_before: int = 50, chars_after:
     return ""
 
 
-def detect_link_type(link_element: Tag, href: str) -> LinkType:
+def detect_link_type(link_element: Any, href: str) -> LinkType:
     """Detect the type/purpose of a link based on context."""
     # Check link location in page structure
-    parent_chain = []
-    current = link_element
-    for _ in range(5):  # Check up to 5 parents
-        if current.parent:
-            current = current.parent
-            parent_chain.append(current.name)
+    if isinstance(link_element, dict):
+        parent_chain = link_element['parent_tags'][:5]
+        parent_roles = link_element['parent_roles']
+        parent_classes = link_element['parent_classes']
+    else:
+        parents = list(link_element.parents)
+        parent_chain = [parent.name for parent in parents[:5]]
+        parent_roles = [parent.get('role') for parent in parents if hasattr(parent, 'get')]
+        parent_classes = [str(parent.get('class', [])) for parent in parents if hasattr(parent, 'get')]
     
     # Navigation links
-    if 'nav' in parent_chain or any(p.get('role') == 'navigation' for p in link_element.parents if hasattr(p, 'get')):
+    if 'nav' in parent_chain or 'navigation' in parent_roles:
         return LinkType.NAVIGATION
     
     # Footer links
@@ -229,11 +192,11 @@ def detect_link_type(link_element: Tag, href: str) -> LinkType:
         return LinkType.FOOTER
     
     # Sidebar links
-    if 'aside' in parent_chain or any('sidebar' in str(p.get('class', [])).lower() for p in link_element.parents if hasattr(p, 'get')):
+    if 'aside' in parent_chain or any('sidebar' in classes.lower() for classes in parent_classes):
         return LinkType.SIDEBAR
     
     # Breadcrumb links
-    if any('breadcrumb' in str(p.get('class', [])).lower() for p in link_element.parents if hasattr(p, 'get')):
+    if any('breadcrumb' in classes.lower() for classes in parent_classes):
         return LinkType.BREADCRUMB
     
     # Social media links
@@ -260,105 +223,14 @@ def detect_link_type(link_element: Tag, href: str) -> LinkType:
     return LinkType.CONTENT
 
 
-def assess_link_quality(link_profile: LinkProfile, is_internal: bool) -> LinkQuality:
-    """Assess the quality of a link based on various factors."""
-    score = 50  # Start with neutral score
-    
-    # Anchor text quality
-    anchor = link_profile.anchor_text.lower()
-    if not anchor or anchor in ['click here', 'here', 'link', 'this']:
-        score -= 20
-    elif len(anchor) > 60:
-        score -= 10
-    elif len(anchor.split()) >= 3:  # Good descriptive anchor
-        score += 10
-    
-    # Link type scoring
-    if link_profile.type == LinkType.NAVIGATION:
-        score += 5
-    elif link_profile.type == LinkType.AFFILIATE:
-        score -= 10
-    elif link_profile.type == LinkType.SOCIAL:
-        score += 0  # Neutral
-    
-    # Attributes scoring
-    if link_profile.opens_new_tab and not link_profile.attributes.get('rel', ''):
-        score -= 15  # Security issue
-    
-    if link_profile.is_javascript:
-        score -= 10  # Not crawlable
-    
-    if link_profile.has_title:
-        score += 5  # Good for accessibility
-    
-    # Position scoring
-    if link_profile.position == 'header':
-        score += 10
-    elif link_profile.position == 'footer':
-        score -= 5
-    
-    # External link specific scoring
-    if not is_internal:
-        if link_profile.domain_authority_estimate > 50:
-            score += 20
-        elif link_profile.domain_authority_estimate < 20:
-            score -= 15
-    
-    # Determine quality level
-    if score >= 70:
-        return LinkQuality.HIGH
-    elif score >= 40:
-        return LinkQuality.MEDIUM
-    elif score >= 20:
-        return LinkQuality.LOW
-    else:
-        return LinkQuality.TOXIC
+def assess_link_quality(link_profile: LinkProfile, is_internal: bool) -> Optional[LinkQuality]:
+    """Destination quality cannot be established from this page's markup."""
+    return None
 
 
-def estimate_domain_authority(domain: str) -> int:
-    """Estimate domain authority based on domain characteristics."""
-    # This is a simplified estimation. In production, use APIs like Moz or Ahrefs
-    score = 30  # Default score
-    
-    # Well-known high-authority domains
-    high_authority = {
-        'google.com': 100, 'youtube.com': 100, 'facebook.com': 100,
-        'wikipedia.org': 100, 'amazon.com': 96, 'twitter.com': 94,
-        'linkedin.com': 98, 'github.com': 96, 'microsoft.com': 95,
-        'apple.com': 95, 'stackoverflow.com': 93, 'medium.com': 92,
-        'reddit.com': 91, 'bbc.com': 94, 'cnn.com': 93, 'nytimes.com': 94,
-        'forbes.com': 95, 'harvard.edu': 95, 'mit.edu': 94, 'stanford.edu': 95,
-        '.gov': 90, '.edu': 70, '.org': 50
-    }
-    
-    # Check exact matches
-    domain_lower = domain.lower()
-    for auth_domain, auth_score in high_authority.items():
-        if auth_domain in domain_lower:
-            return auth_score
-    
-    # TLD scoring
-    if domain.endswith('.gov'):
-        score = 90
-    elif domain.endswith('.edu'):
-        score = 70
-    elif domain.endswith('.org'):
-        score = 50
-    elif domain.endswith(('.io', '.ai', '.app')):
-        score = 40
-    
-    # Domain length (shorter is often better)
-    domain_name = domain.split('.')[0]
-    if len(domain_name) <= 10:
-        score += 10
-    elif len(domain_name) > 20:
-        score -= 10
-    
-    # Hyphens in domain (often lower quality)
-    if '-' in domain:
-        score -= 10 * domain.count('-')
-    
-    return max(0, min(100, score))
+def estimate_domain_authority(domain: str) -> Optional[int]:
+    """No authority dataset is available; domain spelling is not a measure."""
+    return None
 
 
 def calculate_pagerank_flow(internal_links: List[Dict], max_iterations: int = 10) -> Dict[str, float]:
@@ -434,6 +306,8 @@ def analyze_anchor_text_distribution(anchor_texts: List[str]) -> Dict[str, Any]:
     for text, percentage in distribution.items():
         if percentage > 10 and len(text.split()) > 1:  # Multi-word anchor
             issues.append({
+                **create_issue('Links', 'notice', 'A repeated anchor label is common in the sample',
+                               rule_id='links.repeated_anchor', evidence={'anchor': text, 'percentage': percentage, 'threshold': 10}, confidence='low'),
                 'type': 'over_optimization',
                 'anchor': text,
                 'percentage': percentage
@@ -444,6 +318,8 @@ def analyze_anchor_text_distribution(anchor_texts: List[str]) -> Dict[str, Any]:
     generic_percentage = sum(distribution.get(anchor, 0) for anchor in generic_anchors)
     if generic_percentage > 20:
         issues.append({
+            **create_issue('Links', 'notice', 'Generic English labels are common in the anchor sample',
+                           rule_id='links.generic_anchor', evidence={'percentage': generic_percentage, 'threshold': 20, 'labels': generic_anchors}, confidence='low'),
             'type': 'generic_overuse',
             'percentage': generic_percentage
         })
@@ -454,6 +330,8 @@ def analyze_anchor_text_distribution(anchor_texts: List[str]) -> Dict[str, Any]:
     exact_match_percentage = sum(distribution[text] for text in exact_matches)
     if exact_match_percentage > 30:
         issues.append({
+            **create_issue('Links', 'notice', 'Short labels are common in the anchor sample',
+                           rule_id='links.short_anchor', evidence={'percentage': exact_match_percentage, 'threshold': 30, 'labels': exact_matches}, confidence='low'),
             'type': 'exact_match_overuse',
             'percentage': exact_match_percentage
         })
@@ -463,7 +341,7 @@ def analyze_anchor_text_distribution(anchor_texts: List[str]) -> Dict[str, Any]:
         'distribution': distribution,
         'issues': issues,
         'unique_anchors': len(counter),
-        'most_common': counter.most_common(10)
+        'most_common': [list(item) for item in counter.most_common(10)]
     }
 
 
@@ -484,6 +362,8 @@ def detect_link_schemes(links: List[Dict]) -> List[Dict[str, Any]]:
         for domain, count in domain_counts.items():
             if count > 5:  # More than 5 links to same external domain
                 schemes.append({
+                    **create_issue('Links', 'notice', 'Multiple links reference the same external domain',
+                                   rule_id='links.repeated_external_domain', evidence={'domain': domain, 'count': count, 'threshold': 5}, confidence='low'),
                     'type': 'excessive_linking',
                     'domain': domain,
                     'count': count
@@ -496,6 +376,9 @@ def detect_link_schemes(links: List[Dict]) -> List[Dict[str, Any]]:
         anchor = link.get('anchor_text', '').lower()
         if any(indicator in url or indicator in anchor for indicator in reciprocal_indicators):
             schemes.append({
+                **create_issue('Links', 'notice', 'Link wording suggests reviewing the relationship with the destination',
+                               rule_id='links.reciprocal_wording', evidence={'url': link.get('url', ''), 'anchor': anchor,
+                                   'matched_terms': [term for term in reciprocal_indicators if term in url or term in anchor]}, confidence='low'),
                 'type': 'potential_reciprocal',
                 'url': link.get('url', '')
             })
@@ -510,6 +393,9 @@ def detect_link_schemes(links: List[Dict]) -> List[Dict[str, Any]]:
         if any(indicator in anchor or indicator in context for indicator in paid_indicators):
             if 'sponsored' not in rel and 'nofollow' not in rel:
                 schemes.append({
+                    **create_issue('Links', 'notice', 'Commercial wording appears without a sponsored or nofollow qualifier',
+                                   rule_id='links.paid_wording', evidence={'url': link.get('url', ''), 'anchor': anchor, 'context': context,
+                                       'rel': rel, 'matched_terms': [term for term in paid_indicators if term in anchor or term in context]}, confidence='low'),
                     'type': 'untagged_paid_link',
                     'url': link.get('url', '')
                 })
@@ -518,6 +404,8 @@ def detect_link_schemes(links: List[Dict]) -> List[Dict[str, Any]]:
     for link in links:
         if link.get('is_hidden', False):
             schemes.append({
+                **create_issue('Links', 'notice', 'A link is marked hidden; review its interface context',
+                               rule_id='links.hidden', evidence={'url': link.get('url', ''), 'is_hidden': True}, confidence='low'),
                 'type': 'hidden_link',
                 'url': link.get('url', '')
             })
@@ -526,447 +414,123 @@ def detect_link_schemes(links: List[Dict]) -> List[Dict[str, Any]]:
 
 
 def analyze_link_velocity(links: List[Dict], timeframe_days: int = 30) -> Dict[str, Any]:
-    """Analyze link growth patterns and velocity."""
-    # This is simplified - in production, you'd track link changes over time
-    total_links = len(links)
-    
-    # Calculate estimated velocity
-    links_per_day = total_links / max(1, timeframe_days)
-    
-    # Determine if velocity is suspicious
-    velocity_assessment = 'normal'
-    if links_per_day > 100:
-        velocity_assessment = 'very_high'
-    elif links_per_day > 50:
-        velocity_assessment = 'high'
-    elif links_per_day < 1:
-        velocity_assessment = 'low'
-    
+    """A single page snapshot provides no evidence of link growth."""
     return {
-        'total_links': total_links,
-        'timeframe_days': timeframe_days,
-        'links_per_day': round(links_per_day, 2),
-        'assessment': velocity_assessment
+        'total_links': len(links), 'timeframe_days': None, 'links_per_day': None,
+        'assessment': 'unknown', 'status': 'not_measured', 'source': 'requires_history',
     }
 
 
 def analyze_internal_link_structure(internal_links: List[Dict], soup: BeautifulSoup) -> Dict[str, Any]:
-    """Analyze internal linking structure and optimization."""
-    structure = {
-        'total_internal': len(internal_links),
-        'orphan_pages': [],
-        'link_depth_distribution': defaultdict(int),
-        'hub_pages': [],
-        'cornerstone_candidates': [],
-        'siloing_score': 0
-    }
-    
-    if not internal_links:
-        return structure
-    
-    # Count links per page
-    page_link_counts = defaultdict(int)
-    for link in internal_links:
-        to_url = link.get('url', '')
-        page_link_counts[to_url] += 1
-    
-    # Identify hub pages (pages with many incoming links)
-    avg_links = sum(page_link_counts.values()) / max(1, len(page_link_counts))
-    for page, count in page_link_counts.items():
-        if count > avg_links * 2:
-            structure['hub_pages'].append({
-                'url': page,
-                'incoming_links': count
-            })
-    
-    # Identify potential cornerstone content
-    # (Pages with both many incoming and outgoing links)
-    outgoing_counts = defaultdict(int)
-    for link in internal_links:
-        from_url = link.get('from_url', '')
-        outgoing_counts[from_url] += 1
-    
-    for page in set(page_link_counts.keys()) & set(outgoing_counts.keys()):
-        if page_link_counts[page] > avg_links and outgoing_counts[page] > avg_links:
-            structure['cornerstone_candidates'].append({
-                'url': page,
-                'incoming': page_link_counts[page],
-                'outgoing': outgoing_counts[page]
-            })
-    
-    # Analyze link depth (simplified)
-    for link in internal_links:
-        depth = link.get('depth', 0)
-        structure['link_depth_distribution'][depth] += 1
-    
-    # Calculate siloing score (how well topics are grouped)
-    # This is simplified - proper siloing analysis would require content analysis
-    category_patterns = ['/blog/', '/products/', '/services/', '/resources/']
-    category_links = defaultdict(int)
-    
-    for link in internal_links:
-        url = link.get('url', '')
-        for pattern in category_patterns:
-            if pattern in url:
-                category_links[pattern] += 1
-                break
-    
-    if category_links:
-        # Higher score if links are well-distributed across categories
-        total_categorized = sum(category_links.values())
-        entropy = 0
-        for count in category_links.values():
-            if count > 0:
-                prob = count / total_categorized
-                entropy -= prob * math.log2(prob)
-        
-        max_entropy = math.log2(len(category_links))
-        structure['siloing_score'] = round((entropy / max_entropy * 100) if max_entropy > 0 else 0, 2)
-    
-    return structure
-
-
-def analyze_links(soup: BeautifulSoup, url: str, broken_links: Optional[Set[str]] = None) -> Dict[str, Any]:
-    """Advanced link analysis with comprehensive quality assessment."""
-    issues = []
-    data = {}
-    
-    # Extract word count for link density calculation
-    text_content = soup.get_text(strip=True)
-    word_count = len(text_content.split())
-    
-    # Find all links with detailed extraction
-    all_links = soup.find_all('a')
-    link_profiles = []
-    
-    internal_links = []
-    external_links = []
-    anchor_texts = []
-    
-    # Analyze each link in detail
-    for link_element in all_links:
-        href = link_element.get('href', '')
-        if not href:
-            continue
-        
-        # Extract comprehensive link information
-        anchor_text = link_element.get_text(strip=True)
-        title = link_element.get('title', '')
-        rel = link_element.get('rel', [])
-        target = link_element.get('target', '')
-        link_class = link_element.get('class', [])
-        
-        # Normalize URL
-        try:
-            normalized_url = normalize_url(href, url)
-        except:
-            normalized_url = href
-        
-        # Determine if internal
-        is_internal = is_internal_link(href, url)
-        
-        # Extract context
-        context = extract_link_context(link_element)
-        
-        # Detect link type
-        link_type = detect_link_type(link_element, href)
-        
-        # Determine position
-        position = 'body'
-        for parent in link_element.parents:
-            if parent.name == 'header':
-                position = 'header'
-                break
-            elif parent.name == 'footer':
-                position = 'footer'
-                break
-            elif parent.name == 'nav':
-                position = 'navigation'
-                break
-        
-        # Check for hidden link
-        is_hidden = False
-        style = link_element.get('style', '')
-        if 'display:none' in style.replace(' ', '') or 'visibility:hidden' in style:
-            is_hidden = True
-        
-        # Check if image link
-        is_image_link = bool(link_element.find('img'))
-        
-        # Create link profile
-        profile = LinkProfile(
-            url=normalized_url,
-            anchor_text=anchor_text,
-            context=context,
-            type=link_type,
-            attributes={
-                'rel': rel,
-                'target': target,
-                'title': title,
-                'class': link_class,
-                'is_hidden': is_hidden
-            },
-            position=position,
-            is_image_link=is_image_link,
-            has_title=bool(title),
-            opens_new_tab=(target == '_blank'),
-            is_javascript=href.startswith('javascript:')
-        )
-        
-        # Estimate domain authority for external links
-        if not is_internal:
-            domain = urlparse(normalized_url).netloc
-            profile.domain_authority_estimate = estimate_domain_authority(domain)
-        
-        # Assess link quality
-        profile.quality = assess_link_quality(profile, is_internal)
-        
-        # Store profile
-        link_profiles.append(profile)
-        
-        # Categorize for basic analysis
-        link_data = {
-            'url': normalized_url,
-            'anchor_text': anchor_text,
-            'text': anchor_text,
-            'rel': rel,
-            'target': target,
-            'context': context,
-            'type': link_type.value,
-            'quality': profile.quality.value,
-            'position': position,
-            'is_internal': is_internal,
-            'is_hidden': is_hidden,
-            'from_url': url
-        }
-        
-        if is_internal:
-            internal_links.append(link_data)
-        else:
-            external_links.append(link_data)
-        
-        if anchor_text:
-            anchor_texts.append(anchor_text)
-    
-    # Calculate metrics
-    metrics = LinkMetrics(
-        total_links=len(link_profiles),
-        internal_links=len(internal_links),
-        external_links=len(external_links)
-    )
-    
-    # Analyze rel attributes
-    for profile in link_profiles:
-        rel_values = profile.attributes.get('rel', [])
-        if isinstance(rel_values, list):
-            rel_str = ' '.join(rel_values)
-        else:
-            rel_str = str(rel_values)
-        
-        rel_lower = rel_str.lower()
-        if 'nofollow' in rel_lower:
-            metrics.nofollow_links += 1
-        else:
-            metrics.dofollow_links += 1
-        
-        if 'sponsored' in rel_lower:
-            metrics.sponsored_links += 1
-        if 'ugc' in rel_lower:
-            metrics.ugc_links += 1
-    
-    # Calculate ratios and density
-    if metrics.total_links > 0:
-        metrics.internal_external_ratio = metrics.internal_links / max(1, metrics.external_links)
-        metrics.link_density = (metrics.total_links / max(1, word_count)) * 100
-    
-    if anchor_texts:
-        metrics.avg_anchor_length = sum(len(a.split()) for a in anchor_texts) / len(anchor_texts)
-    
-    # Count unique external domains
-    external_domains = set()
-    for link in external_links:
-        domain = urlparse(link['url']).netloc
-        if domain:
-            external_domains.add(domain)
-    metrics.unique_domains = len(external_domains)
-    
-    # Store metrics
-    data['metrics'] = {
-        'total_links': metrics.total_links,
-        'internal_links': metrics.internal_links,
-        'external_links': metrics.external_links,
-        'dofollow_links': metrics.dofollow_links,
-        'nofollow_links': metrics.nofollow_links,
-        'sponsored_links': metrics.sponsored_links,
-        'ugc_links': metrics.ugc_links,
-        'link_density': round(metrics.link_density, 2),
-        'internal_external_ratio': round(metrics.internal_external_ratio, 2),
-        'avg_anchor_length': round(metrics.avg_anchor_length, 2),
-        'unique_domains': metrics.unique_domains
-    }
-    
-    # Check for broken links
-    if broken_links:
-        found_broken = []
-        for link in internal_links + external_links:
-            if link['url'] in broken_links:
-                found_broken.append(link['url'])
-                metrics.broken_links += 1
-        
-        if found_broken:
-            issues.append(create_issue('Links', 'critical',
-                f'{len(found_broken)} broken links found',
-                {'broken_links': found_broken[:10]}))
-            data['broken_links'] = found_broken
-    
-    # Analyze anchor text distribution
-    anchor_analysis = analyze_anchor_text_distribution(anchor_texts)
-    data['anchor_analysis'] = anchor_analysis
-    
-    if anchor_analysis['diversity_score'] < 50:
-        issues.append(create_issue('Links', 'warning',
-            f'Low anchor text diversity (score: {anchor_analysis["diversity_score"]}%)'))
-    
-    for issue in anchor_analysis['issues']:
-        if issue['type'] == 'over_optimization':
-            issues.append(create_issue('Links', 'warning',
-                f'Anchor text "{issue["anchor"]}" is over-optimized ({issue["percentage"]:.1f}%)'))
-        elif issue['type'] == 'generic_overuse':
-            issues.append(create_issue('Links', 'warning',
-                f'Too many generic anchor texts ({issue["percentage"]:.1f}%)'))
-    
-    # Analyze internal link structure
-    internal_structure = analyze_internal_link_structure(internal_links, soup)
-    data['internal_structure'] = internal_structure
-    
-    # Detect link schemes
-    all_link_data = internal_links + external_links
-    link_schemes = detect_link_schemes(all_link_data)
-    if link_schemes:
-        data['potential_schemes'] = link_schemes
-        for scheme in link_schemes[:3]:  # Report top 3
-            if scheme['type'] == 'excessive_linking':
-                issues.append(create_issue('Links', 'warning',
-                    f'Excessive links to {scheme["domain"]} ({scheme["count"]} links)'))
-            elif scheme['type'] == 'untagged_paid_link':
-                issues.append(create_issue('Links', 'critical',
-                    f'Potential paid link without proper rel attributes'))
-    
-    # Analyze link velocity
-    velocity_analysis = analyze_link_velocity(all_link_data)
-    data['link_velocity'] = velocity_analysis
-    
-    if velocity_analysis['assessment'] == 'very_high':
-        issues.append(create_issue('Links', 'warning',
-            'Unusually high link velocity detected'))
-    
-    # Quality distribution
-    quality_distribution = Counter(p.quality.value for p in link_profiles)
-    data['quality_distribution'] = dict(quality_distribution)
-    
-    toxic_links = quality_distribution.get('toxic', 0)
-    if toxic_links > 0:
-        issues.append(create_issue('Links', 'critical',
-            f'{toxic_links} potentially toxic links detected'))
-    
-    # Link type distribution
-    type_distribution = Counter(p.type.value for p in link_profiles)
-    data['type_distribution'] = dict(type_distribution)
-    
-    # Position distribution
-    position_distribution = Counter(p.position for p in link_profiles)
-    data['position_distribution'] = dict(position_distribution)
-    
-    # Navigation analysis
-    nav_links = [p for p in link_profiles if p.type == LinkType.NAVIGATION]
-    if len(nav_links) == 0:
-        issues.append(create_issue('Links', 'warning',
-            'No navigation links detected'))
-    elif len(nav_links) > 50:
-        issues.append(create_issue('Links', 'notice',
-            f'Too many navigation links ({len(nav_links)}), consider simplifying'))
-    
-    # Footer link analysis
-    footer_links = [p for p in link_profiles if p.position == 'footer']
-    if len(footer_links) > 100:
-        issues.append(create_issue('Links', 'notice',
-            f'Excessive footer links ({len(footer_links)})'))
-    
-    # External link quality check
-    low_quality_external = [p for p in link_profiles 
-                           if not is_internal_link(p.url, url) and p.quality == LinkQuality.LOW]
-    if len(low_quality_external) > 5:
-        issues.append(create_issue('Links', 'warning',
-            f'{len(low_quality_external)} low-quality external links detected'))
-    
-    # Check for nofollow on all external links
-    external_dofollow = [l for l in external_links 
-                        if 'nofollow' not in str(l.get('rel', '')).lower()]
-    if len(external_dofollow) > 10:
-        issues.append(create_issue('Links', 'notice',
-            f'{len(external_dofollow)} external dofollow links - consider using nofollow for untrusted content'))
-    
-    # Check for security issues
-    security_issues = [p for p in link_profiles 
-                      if p.opens_new_tab and 'noopener' not in str(p.attributes.get('rel', '')).lower()]
-    if security_issues:
-        issues.append(create_issue('Links', 'warning',
-            f'{len(security_issues)} links with target="_blank" missing rel="noopener"'))
-    
-    # JavaScript links
-    js_links = [p for p in link_profiles if p.is_javascript]
-    if js_links:
-        issues.append(create_issue('Links', 'warning',
-            f'{len(js_links)} JavaScript links are not crawlable by search engines'))
-    
-    # Calculate overall score
-    score = 100
-    
-    # Score based on metrics
-    if metrics.total_links == 0:
-        score -= 30
-    elif metrics.link_density > 10:
-        score -= 15
-    elif metrics.link_density > 5:
-        score -= 5
-    
-    # Score based on balance
-    if metrics.internal_external_ratio < 0.5:
-        score -= 10
-    elif metrics.internal_external_ratio > 10:
-        score -= 5
-    
-    # Score based on quality
-    high_quality_percentage = (quality_distribution.get('high', 0) / max(1, metrics.total_links)) * 100
-    if high_quality_percentage < 20:
-        score -= 10
-    
-    # Score based on issues
-    for issue in issues:
-        if issue['severity'] == 'critical':
-            score -= 15
-        elif issue['severity'] == 'warning':
-            score -= 7
-        elif issue['severity'] == 'notice':
-            score -= 3
-    
-    # Add recommendations
-    data['recommendations'] = []
-    
-    if metrics.internal_external_ratio < 1:
-        data['recommendations'].append('Add more internal links to improve site navigation and SEO')
-    
-    if anchor_analysis['diversity_score'] < 70:
-        data['recommendations'].append('Increase anchor text diversity for better SEO')
-    
-    if toxic_links > 0:
-        data['recommendations'].append('Review and remove potentially toxic links')
-    
-    if len(internal_structure['hub_pages']) < 3:
-        data['recommendations'].append('Create hub pages with comprehensive internal linking')
-    
+    """Full graph conclusions are deferred to the post-crawl aggregation."""
     return {
-        'score': max(0, min(100, score)),
-        'issues': issues,
-        'data': data
+        'total_internal': len(internal_links), 'orphan_pages': None,
+        'link_depth_distribution': None, 'hub_pages': None,
+        'cornerstone_candidates': None, 'siloing_score': None,
+        'status': 'not_assessed', 'source': 'page_links_only',
     }
+
+
+def analyze_links(soup: BeautifulSoup, url: str, broken_links: Optional[Set[str]] = None, *,
+                  facts: Optional[PageFacts] = None) -> Dict[str, Any]:
+    """Extract complete link evidence; defer destination health to the crawler."""
+    facts = ensure_page_facts(soup, url, facts=facts)
+    collector = RuleCollector('links')
+    internal_links, external_links, non_http_links = [], [], []
+    anchor_texts, missing_anchors = [], []
+    for record in facts.anchors:
+        element = record['attrs']
+        href = element.get('href', '')
+        kind, resolved = record['url_kind'], record['url']
+        anchor = record['labelled_text'] or record['text']
+        if not anchor:
+            anchor = str(element.get('aria-label', '')).strip()
+        if not anchor:
+            anchor = record['image_alt_text']
+        if not anchor:
+            anchor = str(element.get('title', '')).strip()
+        rel = element.get('rel', [])
+        rel = rel if isinstance(rel, list) else str(rel).split()
+        rel = [str(value).lower() for value in rel]
+        position = record['position']
+        style = re.sub(r'\s+', '', element.get('style', '').lower())
+        link_data = {
+            'url': resolved, 'href': href, 'anchor_text': anchor, 'text': anchor,
+            'rel': rel, 'target': element.get('target', ''),
+            'context': record['context'],
+            'type': detect_link_type(record, href).value, 'type_status': 'heuristic',
+            'quality': None, 'quality_status': 'not_assessed',
+            'position': position, 'is_internal': kind == 'internal',
+            'is_hidden': 'hidden' in element or 'display:none' in style or 'visibility:hidden' in style,
+            'from_url': url, 'url_kind': kind,
+        }
+        if kind == 'internal':
+            internal_links.append(link_data)
+        elif kind == 'external':
+            external_links.append(link_data)
+        else:
+            non_http_links.append(link_data)
+        if kind in ('internal', 'external'):
+            if anchor:
+                anchor_texts.append(anchor)
+            else:
+                missing_anchors.append(link_data)
+    links = internal_links + external_links
+    words = facts.text.split()
+    domains = sorted({urlparse(link['url']).netloc for link in external_links})
+    nofollow = sum('nofollow' in link['rel'] for link in links)
+    metrics = {
+        'total_links': len(links), 'internal_links': len(internal_links),
+        'external_links': len(external_links), 'non_http_links': len(non_http_links),
+        'dofollow_links': len(links) - nofollow, 'nofollow_links': nofollow,
+        'sponsored_links': sum('sponsored' in link['rel'] for link in links),
+        'ugc_links': sum('ugc' in link['rel'] for link in links),
+        'link_density': round(len(links) / len(words) * 100, 2) if words else None,
+        'internal_external_ratio': round(len(internal_links) / len(external_links), 2) if external_links else None,
+        'avg_anchor_length': round(sum(len(anchor.split()) for anchor in anchor_texts) / len(anchor_texts), 2) if anchor_texts else None,
+        'unique_domains': len(domains),
+    }
+    collector.check('links.missing_anchor', bool(missing_anchors),
+        evidence={'links': missing_anchors, 'http_link_count': len(links)}, category='Links',
+        applicable=bool(links), reason='Requires HTTP(S) links.',
+        message=f'{len(missing_anchors)} web links have no accessible name in the supplied HTML')
+    invalid = [link for link in non_http_links if link['url_kind'] == 'invalid']
+    collector.check('links.invalid_url', bool(invalid), evidence={'links': invalid}, category='Links',
+        applicable=bool(links or non_http_links), reason='Requires anchor elements with href.',
+        message=f'{len(invalid)} links have empty or invalid URL references')
+    javascript = [link for link in non_http_links if link['url_kind'] == 'javascript']
+    collector.check('links.javascript_url', bool(javascript), evidence={'links': javascript}, category='Links',
+        applicable=bool(links or non_http_links), reason='Requires anchor elements with href.',
+        message=f'{len(javascript)} JavaScript links have no crawlable URL destination')
+    found_broken = [link['url'] for link in links if broken_links is not None and link['url'] in broken_links]
+    broken_result = collector.check('links.broken', True if found_broken else None,
+        evidence={'urls': found_broken, 'http_link_count': len(links), 'known_failures_supplied': broken_links is not None,
+                  'unchecked_urls': sorted({link['url'] for link in links} - set(found_broken))},
+        applicable=bool(links), category='Links', source='supplied_destination_checks',
+        reason='No HTTP(S) links to check.' if not links else 'Only known failed URLs are available; other destination health is unknown.',
+        message=f'{len(found_broken)} broken links found' if found_broken else 'Destination health has not been established')
+    if found_broken:
+        broken_result['details'] = {'broken_links': found_broken}
+    anchor_analysis = analyze_anchor_text_distribution(anchor_texts)
+    # Distribution describes the sample; it does not establish over-optimization.
+    anchor_analysis['issues'] = []
+    anchor_analysis['status'] = 'descriptive_statistics'
+    data = {
+        'score_scope': 'static_link_checks', 'metrics': metrics,
+        'internal_links': internal_links, 'external_links': external_links,
+        'non_http_links': non_http_links, 'external_domains': domains,
+        'anchor_analysis': anchor_analysis,
+        'internal_structure': analyze_internal_link_structure(internal_links, soup),
+        'link_velocity': analyze_link_velocity(links),
+        'authority_status': 'not_measured', 'quality_distribution': {'unknown': len(links)},
+        'type_distribution': dict(Counter(link['type'] for link in links)),
+        'position_distribution': dict(Counter(link['position'] for link in links)),
+        'broken_links': found_broken if broken_links is not None else None,
+        'link_health_status': 'partial' if broken_links is not None else 'not_checked',
+    }
+    issues = collector.issues
+    score = score_findings(issues)
+    recommendations = recommendations_for(issues)
+    data['recommendations'] = recommendations
+    return {'score': score, 'issues': issues, 'data': data, 'recommendations': recommendations,
+            'rule_results': collector.results, 'rule_coverage': collector.coverage}

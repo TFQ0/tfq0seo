@@ -1,3 +1,4 @@
+{% from "rule_metadata.html" import finding as rule_finding, overview as rule_overview, styles as rule_styles %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -442,15 +443,20 @@
             }
         }
     </style>
+    {{ rule_styles() }}
 </head>
 <body>
+    {% if report_status == "partial" %}<div role="status">Analysis is partial. Review the reported errors and page status.</div>{% endif %}
+    {% if score_source in ("static_html", "static_rule_heuristics") %}<p>Scores summarize completed static HTML checks.</p>{% endif %}
+    {% if error %}<div role="alert">Analysis failed: {{ error }}</div>{% endif %}
+    {% for analyzer_error in analysis_errors %}<div role="status">{{ analyzer_error.analyzer|title }}: {{ analyzer_error.error }}</div>{% endfor %}
     <div class="container">
         <header>
             <div class="header-top">
                 <div>
                     <h1>🚀 TFQ0SEO Enhanced Analysis Report</h1>
                     <div class="url-info">
-                        <a href="{{ url }}" target="_blank">{{ url }}</a>
+                        {% if url|safe_url %}<a href="{{ url|safe_url }}" target="_blank" rel="noopener noreferrer">{{ url }}</a>{% else %}<span>{{ url }}</span>{% endif %}
                     </div>
                 </div>
                 <button class="dark-mode-toggle" onclick="toggleDarkMode()">🌙 Dark Mode</button>
@@ -470,6 +476,7 @@
         
         <!-- Overview Tab -->
         <div class="tab-panel active" id="overview">
+            {{ rule_overview(scoring_policies, scoring_versions, rule_coverage) }}
             <div class="score-grid">
                 <div class="score-card">
                     <div class="score-card-header">
@@ -478,8 +485,8 @@
                             <span class="tooltiptext">Weighted average of all category scores</span>
                         </span>
                     </div>
-                    <div class="score-card-value" style="color: {% if overall_score >= 80 %}var(--color-pass){% elif overall_score >= 50 %}var(--color-average){% else %}var(--color-fail){% endif %}">
-                        {{ overall_score|round|int }}/100
+                    <div class="score-card-value" style="color: {{ overall_score|score_color }}">
+                        {{ overall_score|number(0, '/100') }}
                     </div>
                     <div class="score-card-chart">
                         <canvas id="overallChart"></canvas>
@@ -491,10 +498,10 @@
                     <div class="score-card-header">
                         <h3 class="score-card-title">{{ category|title }}</h3>
                     </div>
-                    <div class="score-card-value" style="color: {% if score >= 80 %}var(--color-pass){% elif score >= 50 %}var(--color-average){% else %}var(--color-fail){% endif %}">
-                        {{ score|round|int }}/100
+                    <div class="score-card-value" style="color: {{ score|score_color }}">
+                        {{ score|number(0, '/100') }}
                     </div>
-                    <progress value="{{ score }}" max="100" style="width: 100%; height: 8px;"></progress>
+                    {% if score is number %}<progress value="{{ score }}" max="100" style="width: 100%; height: 8px;"></progress>{% endif %}
                 </div>
                 {% endfor %}
             </div>
@@ -549,22 +556,22 @@
             <div class="metrics-grid">
                 <div class="metric-card">
                     <div class="metric-icon">📖</div>
-                    <div class="metric-value">{% if content_data %}{{ content_data.word_count }}{% else %}0{% endif %}</div>
+                    <div class="metric-value">{{ content_data.word_count|number }}</div>
                     <div class="metric-label">Word Count</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-icon">📚</div>
-                    <div class="metric-value">{% if content_data %}{{ content_data.flesch_reading_ease|round|int }}{% else %}N/A{% endif %}</div>
+                    <div class="metric-value">{% if content_data %}{{ content_data.flesch_reading_ease|number }}{% else %}N/A{% endif %}</div>
                     <div class="metric-label">Readability</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-icon">🎯</div>
-                    <div class="metric-value">{% if content_data %}{{ content_data.average_grade_level|round|int }}{% else %}N/A{% endif %}</div>
+                    <div class="metric-value">{% if content_data %}{{ content_data.average_grade_level|number }}{% else %}N/A{% endif %}</div>
                     <div class="metric-label">Grade Level</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-icon">🖼️</div>
-                    <div class="metric-value">{% if content_data %}{{ content_data.image_count }}{% else %}0{% endif %}</div>
+                    <div class="metric-value">{{ content_data.image_count|number }}</div>
                     <div class="metric-label">Images</div>
                 </div>
             </div>
@@ -578,21 +585,21 @@
                     <div class="timeline-marker"></div>
                     <div class="timeline-content">
                         <h4>HTTPS Status</h4>
-                        <p>{% if technical_data.https %}✅ Secure{% else %}❌ Not Secure{% endif %}</p>
+                        <p>{% if technical_data.https is sameas true %}HTTPS{% elif technical_data.https is sameas false %}HTTP{% else %}Not measured{% endif %}</p>
                     </div>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-marker"></div>
                     <div class="timeline-content">
-                        <h4>Mobile Friendly</h4>
-                        <p>{% if technical_data.has_viewport %}✅ Yes{% else %}❌ No{% endif %}</p>
+                        <h4>Viewport configured</h4>
+                        <p>{% if technical_data.has_viewport is sameas true %}Yes{% elif technical_data.has_viewport is sameas false %}No{% else %}Not measured{% endif %}</p>
                     </div>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-marker"></div>
                     <div class="timeline-content">
                         <h4>Compression</h4>
-                        <p>{{ technical_data.compression|default('Not detected') }}</p>
+                        <p>{{ technical_data.compression or 'Not measured' }}</p>
                     </div>
                 </div>
                 {% endif %}
@@ -605,23 +612,23 @@
                 {% if performance_data %}
                 <div class="metric-card">
                     <div class="metric-icon">⏱️</div>
-                    <div class="metric-value">{{ performance_data.load_time|round(2) }}s</div>
-                    <div class="metric-label">Load Time</div>
+                    <div class="metric-value">{{ performance_data.html_fetch_time|number(2, 's') }}</div>
+                    <div class="metric-label">HTML fetch time</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-icon">📦</div>
-                    <div class="metric-value">{{ performance_data.content_size_mb|round(2) }}MB</div>
-                    <div class="metric-label">Page Size</div>
+                    <div class="metric-value">{{ performance_data.content_size_mb|number(2, 'MB') }}</div>
+                    <div class="metric-label">HTML size</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-icon">🎨</div>
-                    <div class="metric-value">{{ performance_data.lcp_estimate|round(2) }}s</div>
-                    <div class="metric-label">LCP Estimate</div>
+                    <div class="metric-value">{{ performance_data.lcp|number(2, 's') }}</div>
+                    <div class="metric-label">Largest Contentful Paint</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-icon">👆</div>
-                    <div class="metric-value">{{ performance_data.fid_estimate }}ms</div>
-                    <div class="metric-label">FID Estimate</div>
+                    <div class="metric-value">{{ performance_data.inp|number(0, 'ms') }}</div>
+                    <div class="metric-label">Interaction to Next Paint</div>
                 </div>
                 {% endif %}
             </div>
@@ -646,6 +653,7 @@
                         {% for issue in issues_list %}
                         <div class="issue-card {{ severity }}">
                             <strong>{{ issue.category }}</strong>: {{ issue.message }}
+                            {{ rule_finding(issue) }}
                         </div>
                         {% endfor %}
                     </div>
@@ -666,6 +674,22 @@
         </div>
     </div>
     
+
+        {% if pages_summary|length > 1 or summary %}
+        <section class="pages-section">
+            <h2>Pages ({{ pages_summary|length }})</h2>
+            <table class="pages-table">
+                <thead><tr><th>URL</th><th>Score</th><th>Status</th><th>Load time</th><th>Issues</th><th>Analysis status</th></tr></thead>
+                <tbody>{% for page in pages_summary %}
+                <tr><td>{{ page.url }}</td><td>{{ page.score|number }}</td>
+                <td>{{ page.status_code if page.status_code is not none else 'Unavailable' }}</td>
+                <td>{{ page.load_time|number(2, 's') }}</td><td>{{ page.issue_count }}</td>
+                <td>{{ page.error or page.status or '' }}</td></tr>
+                {% endfor %}</tbody>
+            </table>
+        </section>
+        {% endif %}
+
     <script>
         // Dark mode toggle
         function toggleDarkMode() {
@@ -714,7 +738,7 @@
         
         // Issue distribution chart
         const issueCtx = document.getElementById('issueChart');
-        if (issueCtx) {
+        if (issueCtx && typeof Chart !== "undefined") {
             new Chart(issueCtx, {
                 type: 'doughnut',
                 data: {
@@ -741,7 +765,7 @@
         
         // Category scores chart
         const categoryCtx = document.getElementById('categoryChart');
-        if (categoryCtx) {
+        if (categoryCtx && typeof Chart !== "undefined") {
             new Chart(categoryCtx, {
                 type: 'radar',
                 data: {
@@ -768,8 +792,8 @@
         
         // Overall score gauge
         const overallCtx = document.getElementById('overallChart');
-        if (overallCtx) {
-            const score = {{ overall_score|round|int }};
+        if (overallCtx && typeof Chart !== "undefined" && {{ (overall_score is not none)|tojson }}) {
+            const score = {{ overall_score|tojson }};
             const color = score >= 80 ? chartColors.pass : score >= 50 ? chartColors.average : chartColors.fail;
             
             new Chart(overallCtx, {

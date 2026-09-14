@@ -2,13 +2,107 @@
 
 import re
 import ipaddress
-from typing import Dict, List, Any, Optional, Tuple, Set
-from urllib.parse import urlparse, parse_qs, unquote
-from collections import defaultdict, Counter
+import math
+from typing import Dict, List, Any, Optional
+from urllib.parse import urlparse, parse_qs
 from dataclasses import dataclass, field
 from enum import Enum
-from datetime import datetime, timedelta
-from bs4 import BeautifulSoup, Comment
+from bs4 import BeautifulSoup, Doctype
+from .common import (document_base_url, header_values, make_issue, normalized_headers,
+                     parse_robots, resolve_url)
+from ..rules import RuleDefinition, RuleCollector, register_rules, score_findings, recommendations_for
+from ..page_facts import PageFacts, ensure_page_facts
+
+
+_REVIEWED = '2026-09-14'
+_HSTS = 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Strict-Transport-Security'
+_CSP = 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy'
+_SCRIPT_CSP = _CSP + '/script-src'
+_XFO = 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/X-Frame-Options'
+_HTTP_STATUS = 'https://developers.google.com/crawling/docs/troubleshooting/http-status-codes'
+_DOCTYPE = 'https://html.spec.whatwg.org/multipage/syntax.html#the-doctype'
+
+
+# Optional deployment policies and source-code hints are observations, not defects.
+TECHNICAL_RULES = register_rules([
+    RuleDefinition('technical.http_server_error', 'technical', 'critical',
+                   'Investigate the server failure and restore the intended response.',
+                   'An observed HTTP response status in the 500-599 range.', (_HTTP_STATUS,), _REVIEWED),
+    RuleDefinition('technical.http_client_error', 'technical', 'critical',
+                   'Confirm the requested resource should exist or be accessible, then correct its response or incoming links.',
+                   'An observed HTTP response status in the 400-499 range.', (_HTTP_STATUS,), _REVIEWED),
+    RuleDefinition('technical.http_redirect', 'technical', 'notice',
+                   'Confirm the redirect destination and choose permanent or temporary semantics to match the intended change.',
+                   'An observed redirect response; permanence and publisher intent are not inferred.',
+                   ('https://developers.google.com/search/docs/crawling-indexing/301-redirects',), _REVIEWED, scored=False),
+    RuleDefinition('security.hsts_missing', 'technical', 'notice',
+                   'Review whether this HTTPS domain should deploy HSTS; check subdomain readiness and existing browser or preload policy first.',
+                   'Observed response headers on an HTTPS domain; cached HSTS and preload membership are not checked.',
+                   (_HSTS,), _REVIEWED, scored=False),
+    RuleDefinition('security.hsts_invalid', 'technical', 'warning',
+                   'Provide one valid HSTS policy with a single nonnegative integer max-age and no repeated directives.',
+                   'An HSTS header declared by an HTTPS domain.',
+                   (_HSTS, 'https://www.rfc-editor.org/rfc/rfc6797.html'), _REVIEWED),
+    RuleDefinition('security.hsts_preload_incomplete', 'technical', 'notice',
+                   'If preloading is intended, verify all preload requirements, including max-age of at least one year and includeSubDomains.',
+                   'An HTTPS domain whose HSTS header explicitly includes preload; submission and subdomain behavior are unobserved.',
+                   (_HSTS,), _REVIEWED, scored=False),
+    RuleDefinition('security.csp_missing', 'technical', 'notice',
+                   'Evaluate a Content Security Policy appropriate to the application and test it before enforcement.',
+                   'Observed headers and HTML without an enforcing CSP declaration; a universal policy is not assumed.',
+                   (_CSP,), _REVIEWED, scored=False),
+    RuleDefinition('security.frame_policy_missing', 'technical', 'notice',
+                   'Decide which sites may embed this document and configure frame-ancestors or X-Frame-Options if restrictions are needed.',
+                   'Observed document response headers; whether embedding should be restricted is unknown.',
+                   (_XFO, _CSP), _REVIEWED, scored=False),
+    RuleDefinition('security.csp_unsafe_inline', 'technical', 'notice',
+                   'Review the observed inline-script source expression in the context of all enforced CSP policies; consider nonces or hashes where suitable.',
+                   'A script source directive contains unsafe-inline without a nonce or hash in that directive; execution and combined policy effects are not tested.',
+                   (_SCRIPT_CSP, _CSP), _REVIEWED, scored=False),
+    RuleDefinition('security.csp_unsafe_eval', 'technical', 'notice',
+                   'Check whether evaluated script strings are needed and remove unsafe-eval from the applicable policy where possible.',
+                   'An observed script source directive contains unsafe-eval; exploitability is not inferred.',
+                   (_SCRIPT_CSP, _CSP), _REVIEWED, scored=False),
+    RuleDefinition('security.csp_wildcard_default', 'technical', 'notice',
+                   'Review the wildcard default source against the resources the application needs and its more specific directives.',
+                   'An observed CSP default-src directive contains a wildcard; effective resource permissions are not tested.',
+                   (_CSP,), _REVIEWED, scored=False),
+    RuleDefinition('security.xfo_invalid', 'technical', 'warning',
+                   'Use a supported X-Frame-Options value, DENY or SAMEORIGIN, or replace it with an appropriate frame-ancestors policy.',
+                   'An observed X-Frame-Options declaration.', (_XFO,), _REVIEWED),
+    RuleDefinition('security.cors_wildcard_credentials', 'technical', 'warning',
+                   'For intended credentialed cross-origin access, allow a validated explicit origin; otherwise remove the credential permission.',
+                   'A response declares both a wildcard Access-Control-Allow-Origin and Access-Control-Allow-Credentials: true.',
+                   ('https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS/Errors/CORSNotSupportingCredentials',), _REVIEWED),
+    RuleDefinition('technical.http_compression', 'technical', 'notice',
+                   'Measure response size and transfer savings before enabling a suitable content encoding for compressible responses.',
+                   'A body-bearing HTML response has observed headers without a non-identity Content-Encoding; negotiation and savings are unmeasured.',
+                   ('https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Encoding',), _REVIEWED, scored=False),
+    RuleDefinition('technical.url_session_parameter', 'technical', 'notice',
+                   'Verify whether these parameter names carry session state. If they do, consider cookies and stable crawlable URLs without merging distinct content.',
+                   'URL query parameter names match common session identifiers; their meaning is not established.',
+                   ('https://developers.google.com/search/docs/crawling-indexing/url-structure',), _REVIEWED, scored=False),
+    RuleDefinition('technical.javascript_redirect_reference', 'technical', 'notice',
+                   'Verify whether this code executes a redirect. If a server redirect matches the intended behavior, prefer it for predictable discovery.',
+                   'Inline script text references a location assignment or redirect method; execution and intent are unknown.',
+                   ('https://developers.google.com/search/docs/crawling-indexing/301-redirects',), _REVIEWED, scored=False),
+    RuleDefinition('technical.http_resource_reference', 'technical', 'notice',
+                   'Update applicable resource references to HTTPS and verify the rendered network requests, including browser upgrades and blocks.',
+                   'An HTTPS document declares an HTTP subresource URL; an actual insecure network request is not established.',
+                   ('https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/Mixed_content',), _REVIEWED, scored=False),
+    RuleDefinition('technical.deprecated_elements', 'technical', 'notice',
+                   'Replace obsolete elements with supported semantic HTML and CSS after checking their intended presentation and behavior.',
+                   'Observed obsolete HTML elements; rendered breakage is not inferred.',
+                   ('https://html.spec.whatwg.org/multipage/obsolete.html',), _REVIEWED, scored=False),
+    RuleDefinition('html.doctype_missing', 'technical', 'warning',
+                   'Start HTML documents with <!DOCTYPE html> to request standards mode.',
+                   'Documents parsed as HTML syntax; XML/XHTML syntax does not require the HTML doctype.',
+                   (_DOCTYPE,), _REVIEWED),
+    RuleDefinition('html.doctype_legacy', 'technical', 'notice',
+                   'Consider the modern HTML doctype when updating the document, and verify rendering before changing a legacy declaration.',
+                   'An observed legacy HTML doctype; quirks mode is not inferred from its age alone.',
+                   (_DOCTYPE,), _REVIEWED, scored=False),
+])
 
 
 class SecurityLevel(Enum):
@@ -26,6 +120,7 @@ class CrawlabilityStatus(Enum):
     PARTIALLY_BLOCKED = "partially_blocked"
     BLOCKED = "blocked"
     CONDITIONAL = "conditional"
+    UNKNOWN = "unknown"
 
 
 class MobileReadiness(Enum):
@@ -71,7 +166,7 @@ class SecurityProfile:
 @dataclass
 class CrawlabilityProfile:
     """Crawlability and indexability analysis."""
-    status: CrawlabilityStatus = CrawlabilityStatus.FULLY_CRAWLABLE
+    status: CrawlabilityStatus = CrawlabilityStatus.UNKNOWN
     robots_meta: Optional[str] = None
     x_robots_tag: Optional[str] = None
     canonical_url: Optional[str] = None
@@ -84,8 +179,9 @@ class CrawlabilityProfile:
     unavailable_after: Optional[str] = None
     crawl_delay: Optional[float] = None
     blocked_resources: List[str] = field(default_factory=list)
-    javascript_required: bool = False
+    javascript_required: Optional[bool] = None
     ajax_crawlable: bool = False
+    robots_analysis: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -96,9 +192,9 @@ class MobileProfile:
     mobile_readiness: MobileReadiness = MobileReadiness.DESKTOP_ONLY
     responsive_images: int = 0
     total_images: int = 0
-    touch_elements_size: bool = True
-    text_readability: bool = True
-    horizontal_scrolling: bool = False
+    touch_elements_size: Optional[bool] = None
+    text_readability: Optional[bool] = None
+    horizontal_scrolling: Optional[bool] = None
     uses_plugins: bool = False
     amp_version: Optional[str] = None
     pwa_ready: bool = False
@@ -111,16 +207,16 @@ class PerformanceProfile:
     protocol_version: ProtocolVersion = ProtocolVersion.UNKNOWN
     compression_enabled: bool = False
     compression_type: Optional[str] = None
-    compression_ratio: float = 0.0
+    compression_ratio: Optional[float] = None
     cache_control: Optional[str] = None
-    cache_ttl: int = 0
+    cache_ttl: Optional[int] = None
     etag_present: bool = False
     last_modified: Optional[str] = None
     cdn_detected: bool = False
     cdn_provider: Optional[str] = None
-    server_push_enabled: bool = False
-    early_hints: bool = False
-    connection_reuse: bool = False
+    server_push_enabled: Optional[bool] = None
+    early_hints: Optional[bool] = None
+    connection_reuse: Optional[bool] = None
     keep_alive_timeout: int = 0
 
 
@@ -154,63 +250,118 @@ class InternationalProfile:
     rtl_support: bool = False
 
 
-def create_issue(category: str, severity: str, message: str, details: Optional[Dict] = None) -> Dict[str, Any]:
-    """Create an enhanced technical issue with detailed recommendations."""
-    issue = {
-        'category': category,
-        'severity': severity,
-        'message': message
-    }
-    if details:
-        issue['details'] = details
-    
-    # Add specific technical recommendations
-    if 'security' in message.lower() or 'https' in message.lower():
-        issue['fix'] = "Implement security headers: HSTS, CSP, X-Frame-Options. Use HTTPS everywhere with modern TLS."
-        issue['impact'] = "Critical - Security issues affect trust, rankings, and user safety"
-    elif 'cache' in message.lower():
-        issue['fix'] = "Configure Cache-Control headers, use CDN, implement browser and edge caching strategies"
-        issue['impact'] = "High - Caching improves performance and reduces server load"
-    elif 'mobile' in message.lower() or 'viewport' in message.lower():
-        issue['fix'] = "Add viewport meta tag, use responsive design, optimize for touch interfaces"
-        issue['impact'] = "Critical - Mobile-first indexing requires mobile optimization"
-    elif 'compression' in message.lower():
-        issue['fix'] = "Enable Gzip or Brotli compression for text resources"
-        issue['impact'] = "High - Compression reduces bandwidth by 70-90%"
-    elif 'protocol' in message.lower() or 'http/2' in message.lower():
-        issue['fix'] = "Upgrade to HTTP/2 or HTTP/3 for multiplexing and better performance"
-        issue['impact'] = "Medium - Modern protocols improve loading speed"
-    elif 'url' in message.lower():
-        issue['fix'] = "Use clean, descriptive URLs without parameters. Implement URL rewriting."
-        issue['impact'] = "Medium - Clean URLs improve UX and SEO"
-    else:
-        issue['fix'] = "Review technical SEO best practices for this issue"
-        issue['impact'] = "Varies based on implementation"
-    
-    return issue
+def create_issue(category: str, severity: str, message: str, details: Optional[Dict] = None,
+                 rule_id: Optional[str] = None, evidence: Any = None,
+                 confidence: str = 'high') -> Dict[str, Any]:
+    """Compatibility adapter; rule metadata and advice come only from the registry."""
+    return make_issue(category, severity, message, details, rule_id, evidence,
+                      confidence=confidence)
+
+
+def _viewport_values(content: str) -> Dict[str, str]:
+    """Read authored viewport key/value pairs without inferring a rendered layout."""
+    values = {}
+    for part in re.split(r'[,;]', content):
+        name, separator, value = part.partition('=')
+        if separator:
+            values[name.strip().lower()] = value.strip().lower()
+    return values
+
+
+def _viewport_restricts_zoom(values: Dict[str, str]) -> bool:
+    if values.get('user-scalable') in ('no', '0'):
+        return True
+    try:
+        maximum = float(values.get('maximum-scale', ''))
+    except ValueError:
+        return False
+    return math.isfinite(maximum) and 0 <= maximum < 2
+
+
+def _has_nonce_or_hash(tokens: List[str]) -> bool:
+    return any(re.fullmatch(r"'(?:nonce|sha256|sha384|sha512)-[A-Za-z0-9+/_-]+={0,2}'", token)
+               for token in tokens)
+
+
+def _csp_policies(headers: Any, soup: Optional[BeautifulSoup] = None, *,
+                  facts: Optional[PageFacts] = None) -> List[Dict[str, Any]]:
+    """Preserve separate policies; duplicate directives use the first occurrence."""
+    declarations = [('response_header', value) for value in header_values(headers, 'Content-Security-Policy')]
+    if soup is not None or facts is not None:
+        metas = [record['attrs'] for record in facts.meta] if facts is not None else soup.find_all('meta')
+        declarations.extend(('meta', str(meta.get('content', ''))) for meta in metas
+                            if str(meta.get('http-equiv', '')).strip().lower() == 'content-security-policy')
+    policies = []
+    for source, declaration in declarations:
+        # A combined header may contain several serialized policies. A meta value is one policy.
+        for value in declaration.split(',') if source == 'response_header' else [declaration]:
+            directives = {}
+            for part in value.split(';'):
+                words = part.strip().split()
+                if words:
+                    directives.setdefault(words[0].lower(), words[1:])
+            policies.append({'source': source, 'directives': directives})
+    return policies
+
+
+def _hsts_policy(headers: Any) -> Dict[str, Any]:
+    values = header_values(headers, 'Strict-Transport-Security')
+    directives = {}
+    if values:
+        # RFC 6797: browsers process only the first STS header field.
+        parts, current, quoted, escaped = [], [], False, False
+        for character in values[0]:
+            if character == ';' and not quoted:
+                parts.append(''.join(current))
+                current = []
+                continue
+            current.append(character)
+            if escaped:
+                escaped = False
+            elif quoted and character == '\\':
+                escaped = True
+            elif character == '"':
+                quoted = not quoted
+        parts.append(''.join(current))
+        for part in parts:
+            name, separator, value = part.strip().partition('=')
+            if name:
+                directives.setdefault(name.strip().lower(), []).append(value.strip() if separator else None)
+    ages = directives.get('max-age', [])
+    age_text = ages[0] if len(ages) == 1 and ages[0] is not None else ''
+    if len(age_text) >= 2 and age_text.startswith('"') and age_text.endswith('"'):
+        age_text = re.sub(r'\\(.)', r'\1', age_text[1:-1])
+    valid_age = bool(re.fullmatch(r'[0-9]+', age_text))
+    duplicate_directives = [name for name, items in directives.items() if len(items) > 1]
+    invalid_include = any(value is not None for value in directives.get('includesubdomains', []))
+    max_age = None
+    if valid_age:
+        digits = age_text.lstrip('0') or '0'
+        # Retain field text in evidence without reporting a clamped value as a measurement.
+        max_age = int(digits) if len(digits) < 19 else None
+    meets_preload_duration = valid_age and (len(digits) > 8 or
+                                           len(digits) == 8 and digits >= '31536000')
+    return {'values': values, 'selected_header': 0 if values else None,
+            'max_age': max_age, 'includesubdomains': 'includesubdomains' in directives,
+            'meets_preload_duration': meets_preload_duration,
+            'preload': 'preload' in directives, 'duplicate_directives': duplicate_directives,
+            'validation_scope': 'max-age and includeSubDomains values; duplicate directive names',
+            'valid': bool(values) and valid_age and not duplicate_directives and not invalid_include}
 
 
 def analyze_security_headers(headers: Dict[str, str]) -> SecurityProfile:
-    """Comprehensive security header analysis."""
+    """Describe header configuration; the legacy level is a coverage heuristic."""
     profile = SecurityProfile()
-    headers_lower = {k.lower(): v for k, v in headers.items()} if headers else {}
+    headers_lower = normalized_headers(headers)
     
     # HSTS Analysis
-    hsts = headers_lower.get('strict-transport-security', '')
-    if hsts:
+    hsts = _hsts_policy(headers)
+    if hsts['values']:
         profile.hsts_enabled = True
+        profile.hsts_max_age = hsts['max_age'] or 0
+        profile.hsts_includesubdomains = hsts['includesubdomains']
+        profile.hsts_preload = hsts['preload']
         
-        # Parse max-age
-        max_age_match = re.search(r'max-age=(\d+)', hsts)
-        if max_age_match:
-            profile.hsts_max_age = int(max_age_match.group(1))
-        
-        profile.hsts_includesubdomains = 'includesubdomains' in hsts.lower()
-        profile.hsts_preload = 'preload' in hsts.lower()
-        
-        # Check for recommended values
-        if profile.hsts_max_age < 31536000:  # Less than 1 year
-            profile.vulnerabilities.append("HSTS max-age less than recommended 1 year")
     
     # CSP Analysis
     csp = headers_lower.get('content-security-policy', '')
@@ -219,12 +370,15 @@ def analyze_security_headers(headers: Dict[str, str]) -> SecurityProfile:
         profile.csp_policy = csp
         
         # Check for unsafe directives
-        if 'unsafe-inline' in csp:
-            profile.vulnerabilities.append("CSP allows unsafe-inline scripts")
-        if 'unsafe-eval' in csp:
-            profile.vulnerabilities.append("CSP allows unsafe-eval")
-        if '*' in csp and 'default-src' in csp:
-            profile.vulnerabilities.append("CSP default-src allows all origins")
+        for policy in _csp_policies(headers):
+            policies = policy['directives']
+            script_policy = policies.get('script-src', policies.get('default-src', []))
+            if "'unsafe-inline'" in script_policy and not _has_nonce_or_hash(script_policy):
+                profile.vulnerabilities.append("CSP script directive includes unsafe-inline without a nonce or hash")
+            if "'unsafe-eval'" in script_policy:
+                profile.vulnerabilities.append("CSP script directive includes unsafe-eval")
+            if '*' in policies.get('default-src', []):
+                profile.vulnerabilities.append("CSP default-src includes a wildcard")
     
     # X-Frame-Options
     xfo = headers_lower.get('x-frame-options', '')
@@ -232,11 +386,11 @@ def analyze_security_headers(headers: Dict[str, str]) -> SecurityProfile:
         profile.xfo_enabled = True
         profile.xfo_policy = xfo.upper()
         
-        if xfo.upper() not in ['DENY', 'SAMEORIGIN']:
+        if xfo.strip().upper() not in ['DENY', 'SAMEORIGIN']:
             profile.vulnerabilities.append(f"Invalid X-Frame-Options value: {xfo}")
     
     # Other security headers
-    profile.x_content_type_options = 'x-content-type-options' in headers_lower
+    profile.x_content_type_options = headers_lower.get('x-content-type-options', '').lower() == 'nosniff'
     profile.x_xss_protection = 'x-xss-protection' in headers_lower
     profile.referrer_policy = headers_lower.get('referrer-policy')
     profile.permissions_policy = headers_lower.get('permissions-policy') or headers_lower.get('feature-policy')
@@ -249,8 +403,9 @@ def analyze_security_headers(headers: Dict[str, str]) -> SecurityProfile:
             profile.cors_headers[header] = headers_lower[header]
     
     # Check for wildcard CORS
-    if profile.cors_headers.get('access-control-allow-origin') == '*':
-        profile.vulnerabilities.append("CORS allows all origins (wildcard)")
+    if (profile.cors_headers.get('access-control-allow-origin') == '*' and
+            profile.cors_headers.get('access-control-allow-credentials', '').lower() == 'true'):
+        profile.vulnerabilities.append("Wildcard CORS origin cannot authorize credentialed browser requests")
     
     # Calculate security level
     security_score = 0
@@ -285,107 +440,53 @@ def analyze_security_headers(headers: Dict[str, str]) -> SecurityProfile:
     return profile
 
 
-def analyze_crawlability(soup: BeautifulSoup, headers: Dict[str, str] = None) -> CrawlabilityProfile:
+def analyze_crawlability(soup: BeautifulSoup, headers: Dict[str, str] = None,
+                        user_agent: str = 'googlebot', *, facts: Optional[PageFacts] = None) -> CrawlabilityProfile:
     """Analyze crawlability and indexability factors."""
     profile = CrawlabilityProfile()
-    headers_lower = {k.lower(): v for k, v in headers.items()} if headers else {}
-    
-    # Check robots meta tag
-    robots_meta = soup.find('meta', attrs={'name': 'robots'})
-    if robots_meta:
-        profile.robots_meta = robots_meta.get('content', '').lower()
-        
-        # Parse directives
-        if 'noindex' in profile.robots_meta:
-            profile.noindex = True
-            profile.status = CrawlabilityStatus.BLOCKED
-        if 'nofollow' in profile.robots_meta:
-            profile.nofollow = True
-        if 'noarchive' in profile.robots_meta:
-            profile.noarchive = True
-        if 'nosnippet' in profile.robots_meta:
-            profile.nosnippet = True
-        
-        # Parse max-snippet
-        max_snippet_match = re.search(r'max-snippet:(-?\d+)', profile.robots_meta)
-        if max_snippet_match:
-            profile.max_snippet = int(max_snippet_match.group(1))
-        
-        # Parse max-image-preview
-        max_image_match = re.search(r'max-image-preview:(\w+)', profile.robots_meta)
-        if max_image_match:
-            profile.max_image_preview = max_image_match.group(1)
-        
-        # Parse unavailable_after
-        unavailable_match = re.search(r'unavailable_after:\s*([^,]+)', profile.robots_meta)
-        if unavailable_match:
-            profile.unavailable_after = unavailable_match.group(1)
-    
-    # Check X-Robots-Tag header
-    x_robots = headers_lower.get('x-robots-tag')
-    if x_robots:
-        profile.x_robots_tag = x_robots.lower()
-        
-        if 'noindex' in profile.x_robots_tag:
-            profile.noindex = True
-            profile.status = CrawlabilityStatus.BLOCKED
-        if 'nofollow' in profile.x_robots_tag:
-            profile.nofollow = True
+    robots = facts.robots if facts is not None else parse_robots(soup, headers, user_agent)
+    profile.robots_analysis = robots
+    for attribute in ('noindex', 'nofollow', 'nosnippet', 'noarchive', 'max_snippet'):
+        setattr(profile, attribute, robots[attribute])
+    profile.robots_meta = ', '.join(item['value'] for item in robots['evidence'] if item['source'] == 'meta') or None
+    profile.x_robots_tag = ', '.join(item['value'] for item in robots['evidence'] if item['source'] == 'header') or None
     
     # Check canonical URL
-    canonical = soup.find('link', attrs={'rel': 'canonical'})
+    canonical = (next((record['attrs'] for record in facts.link_tags
+                       if 'canonical' in record['attrs'].get('rel', [])), None)
+                 if facts is not None else soup.find('link', attrs={'rel': 'canonical'}))
     if canonical:
         profile.canonical_url = canonical.get('href')
     
-    # Check for JavaScript dependency
-    noscript = soup.find('noscript')
-    if noscript:
-        # Check if critical content is in noscript
-        noscript_text = noscript.get_text(strip=True)
-        if len(noscript_text) > 100:  # Substantial content in noscript
-            profile.javascript_required = True
-            profile.status = CrawlabilityStatus.CONDITIONAL
-    
     # Check for AJAX crawlability (deprecated but still check)
-    ajax_meta = soup.find('meta', attrs={'name': 'fragment'})
+    ajax_meta = (next((record['attrs'] for record in facts.meta if record['attrs'].get('name') == 'fragment'), None)
+                 if facts is not None else soup.find('meta', attrs={'name': 'fragment'}))
     if ajax_meta and ajax_meta.get('content') == '!':
         profile.ajax_crawlable = True
     
-    # Check for blocked resources
-    # Look for robots.txt references in comments
-    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
-        if 'disallow' in comment.lower() or 'robots.txt' in comment.lower():
-            profile.blocked_resources.append(comment[:100])
-    
-    # Determine final status
-    if profile.noindex:
-        profile.status = CrawlabilityStatus.BLOCKED
-    elif profile.javascript_required or profile.ajax_crawlable:
-        profile.status = CrawlabilityStatus.CONDITIONAL
-    elif profile.blocked_resources:
-        profile.status = CrawlabilityStatus.PARTIALLY_BLOCKED
-    else:
-        profile.status = CrawlabilityStatus.FULLY_CRAWLABLE
+    # Robots meta/header directives describe indexing, not robots.txt access.
+    # Static markup cannot establish whether a rendering engine needs JavaScript.
     
     return profile
 
 
-def analyze_mobile_optimization(soup: BeautifulSoup) -> MobileProfile:
-    """Comprehensive mobile optimization analysis."""
+def analyze_mobile_optimization(soup: BeautifulSoup, *, facts: Optional[PageFacts] = None) -> MobileProfile:
+    """Describe markup hints; mobile_readiness is a legacy markup heuristic."""
     profile = MobileProfile()
     
     # Check viewport
-    viewport = soup.find('meta', attrs={'name': 'viewport'})
+    metas = [record['attrs'] for record in facts.meta] if facts is not None else soup.find_all('meta')
+    links = [record['attrs'] for record in facts.link_tags] if facts is not None else soup.find_all('link')
+    viewport = next((meta for meta in metas if re.fullmatch('viewport', str(meta.get('name', '')), re.I)), None)
     if viewport:
-        profile.viewport_configured = True
-        profile.viewport_content = viewport.get('content', '')
+        profile.viewport_content = str(viewport.get('content', '')).strip()
+        profile.viewport_configured = bool(profile.viewport_content)
         
         # Analyze viewport settings
-        viewport_lower = profile.viewport_content.lower()
-        
-        has_device_width = 'width=device-width' in viewport_lower
-        has_initial_scale = 'initial-scale=1' in viewport_lower
-        prevents_zoom = 'user-scalable=no' in viewport_lower or 'maximum-scale=1' in viewport_lower
+        viewport_values = _viewport_values(profile.viewport_content)
+        has_device_width = viewport_values.get('width') == 'device-width'
+        has_initial_scale = viewport_values.get('initial-scale') == '1'
+        prevents_zoom = _viewport_restricts_zoom(viewport_values)
         
         if has_device_width and has_initial_scale and not prevents_zoom:
             profile.mobile_readiness = MobileReadiness.OPTIMIZED
@@ -395,7 +496,7 @@ def analyze_mobile_optimization(soup: BeautifulSoup) -> MobileProfile:
             profile.mobile_readiness = MobileReadiness.ADAPTIVE
     
     # Check responsive images
-    images = soup.find_all('img')
+    images = [record['attrs'] for record in facts.images] if facts is not None else soup.find_all('img')
     profile.total_images = len(images)
     
     for img in images:
@@ -409,63 +510,51 @@ def analyze_mobile_optimization(soup: BeautifulSoup) -> MobileProfile:
         ]):
             profile.responsive_images += 1
     
-    # Check for plugins
+    # Object/embed may be ordinary images or media, not a plugin dependency.
     plugins = soup.find_all(['embed', 'object', 'applet'])
-    profile.uses_plugins = len(plugins) > 0
-    
-    # Check for Flash
-    for plugin in plugins:
-        if 'flash' in str(plugin).lower() or '.swf' in str(plugin):
-            profile.uses_plugins = True
-            profile.mobile_readiness = MobileReadiness.BROKEN
+    profile.uses_plugins = any(plugin.name == 'applet' or
+                              str(plugin.get('type', '')).lower() == 'application/x-shockwave-flash'
+                              for plugin in plugins)
     
     # Check for AMP
     amp_html = soup.find('html', attrs={'amp': True}) or soup.find('html', attrs={'⚡': True})
     if amp_html:
         profile.amp_version = 'AMP'
     
-    amp_link = soup.find('link', attrs={'rel': 'amphtml'})
+    amp_link = next((link for link in links if 'amphtml' in link.get('rel', [])), None)
     if amp_link:
         profile.amp_version = 'AMP Available'
     
     # Check for PWA indicators
-    manifest = soup.find('link', attrs={'rel': 'manifest'})
-    service_worker = soup.find('script', string=re.compile(r'serviceWorker'))
+    manifest = next((link for link in links if 'manifest' in link.get('rel', [])), None)
+    service_worker = (any(re.search(r'serviceWorker', record['text']) for record in facts.scripts)
+                      if facts is not None else soup.find('script', string=re.compile(r'serviceWorker')))
     
     if manifest and service_worker:
         profile.pwa_ready = True
     
     # Check for app links
     # iOS
-    ios_app = soup.find('meta', attrs={'name': 'apple-itunes-app'})
+    ios_app = next((meta for meta in metas if meta.get('name') == 'apple-itunes-app'), None)
     if ios_app:
         profile.app_links['ios'] = ios_app.get('content', '')
     
     # Android
-    android_app = soup.find('link', attrs={'rel': 'alternate', 'href': re.compile(r'android-app://')})
+    android_app = next((link for link in links if 'alternate' in link.get('rel', [])
+                        and re.search(r'android-app://', str(link.get('href', '')))), None)
     if android_app:
         profile.app_links['android'] = android_app.get('href', '')
     
     # Check touch icon
-    touch_icon = soup.find('link', attrs={'rel': re.compile(r'apple-touch-icon')})
+    touch_icon = next((link for link in links if any(re.search(r'apple-touch-icon', rel)
+                       for rel in link.get('rel', []))), None)
     if touch_icon:
         profile.app_links['touch_icon'] = touch_icon.get('href', '')
     
-    # Check for horizontal scrolling indicators
-    tables_without_scroll = soup.find_all('table', attrs={'width': re.compile(r'\d{4,}')})
-    if tables_without_scroll:
-        profile.horizontal_scrolling = True
-    
-    # Check text size
-    small_fonts = soup.find_all(style=re.compile(r'font-size:\s*(\d+)(px|pt)'))
-    for element in small_fonts:
-        style = element.get('style', '')
-        size_match = re.search(r'font-size:\s*(\d+)', style)
-        if size_match:
-            size = int(size_match.group(1))
-            if size < 12:  # Less than 12px is too small for mobile
-                profile.text_readability = False
-                break
+    # Layout, touch targets, and text readability require rendered measurements.
+    profile.horizontal_scrolling = None
+    profile.text_readability = None
+    profile.touch_elements_size = None
     
     return profile
 
@@ -473,47 +562,27 @@ def analyze_mobile_optimization(soup: BeautifulSoup) -> MobileProfile:
 def analyze_performance_indicators(headers: Dict[str, str] = None, soup: BeautifulSoup = None) -> PerformanceProfile:
     """Analyze technical performance indicators."""
     profile = PerformanceProfile()
-    headers_lower = {k.lower(): v for k, v in headers.items()} if headers else {}
+    headers_lower = normalized_headers(headers)
     
-    # Detect protocol version
-    if headers:
-        # Check for HTTP/2 indicators
-        if ':status' in headers_lower or 'http2-settings' in headers_lower:
-            profile.protocol_version = ProtocolVersion.HTTP_2
-        # Check for HTTP/3 indicators
-        elif 'alt-svc' in headers_lower and 'h3' in headers_lower['alt-svc']:
-            profile.protocol_version = ProtocolVersion.HTTP_3
-        else:
-            # Default to HTTP/1.1 for most cases
-            profile.protocol_version = ProtocolVersion.HTTP_1_1
-    
+    # Alt-Svc advertises capabilities; headers do not prove negotiated protocol.
     # Check compression
     content_encoding = headers_lower.get('content-encoding', '')
-    if content_encoding:
+    if content_encoding and content_encoding.strip().lower() != 'identity':
         profile.compression_enabled = True
         profile.compression_type = content_encoding
         
-        # Estimate compression ratio based on encoding type
-        if 'br' in content_encoding:
-            profile.compression_ratio = 0.8  # Brotli typically 20-30% better than gzip
-        elif 'gzip' in content_encoding:
-            profile.compression_ratio = 0.7  # Gzip typically 70% compression
-        elif 'deflate' in content_encoding:
-            profile.compression_ratio = 0.65
-    
     # Cache analysis
     cache_control = headers_lower.get('cache-control', '')
     if cache_control:
         profile.cache_control = cache_control
         
         # Parse max-age
-        max_age_match = re.search(r'max-age=(\d+)', cache_control)
+        max_age_match = re.search(r'max-age\s*=\s*(\d+)', cache_control, re.I)
         if max_age_match:
             profile.cache_ttl = int(max_age_match.group(1))
         
-        # Check for no-cache/no-store
-        if 'no-store' in cache_control or 'no-cache' in cache_control:
-            profile.cache_ttl = 0
+        if 'no-store' in cache_control.lower():
+            profile.cache_ttl = None
     
     # Check for ETag
     profile.etag_present = 'etag' in headers_lower
@@ -538,20 +607,9 @@ def analyze_performance_indicators(headers: Dict[str, str] = None, soup: Beautif
             profile.cdn_provider = cdn_name
             break
     
-    # Check for server push (HTTP/2)
-    if 'link' in headers_lower and 'rel=preload' in headers_lower['link']:
-        if 'nopush' not in headers_lower['link']:
-            profile.server_push_enabled = True
-    
-    # Check for early hints (103 status)
-    if headers_lower.get('status') == '103':
-        profile.early_hints = True
-    
     # Connection settings
     connection = headers_lower.get('connection', '')
     if 'keep-alive' in connection.lower():
-        profile.connection_reuse = True
-        
         # Parse Keep-Alive timeout
         keep_alive = headers_lower.get('keep-alive', '')
         timeout_match = re.search(r'timeout=(\d+)', keep_alive)
@@ -577,7 +635,7 @@ def analyze_url_structure(url: str) -> URLProfile:
     
     # Count parameters
     if parsed.query:
-        params = parse_qs(parsed.query)
+        params = parse_qs(parsed.query, keep_blank_values=True)
         profile.parameters_count = len(params)
         
         # Check for tracking parameters
@@ -639,19 +697,23 @@ def analyze_url_structure(url: str) -> URLProfile:
     return profile
 
 
-def analyze_international_setup(soup: BeautifulSoup, headers: Dict[str, str] = None) -> InternationalProfile:
+def analyze_international_setup(soup: BeautifulSoup, headers: Dict[str, str] = None, *,
+                                facts: Optional[PageFacts] = None) -> InternationalProfile:
     """Analyze international and localization configuration."""
     profile = InternationalProfile()
-    headers_lower = {k.lower(): v for k, v in headers.items()} if headers else {}
+    headers_lower = normalized_headers(headers)
     
     # Check language declaration
     html_tag = soup.find('html')
-    if html_tag and html_tag.get('lang'):
+    language = facts.language if facts is not None else html_tag.get('lang') if html_tag else None
+    if language is not None and str(language).strip():
         profile.language_declared = True
-        profile.language_code = html_tag.get('lang')
+        profile.language_code = str(language).strip()
     
     # Check for hreflang tags
-    hreflang_links = soup.find_all('link', attrs={'rel': 'alternate', 'hreflang': True})
+    hreflang_links = ([record['attrs'] for record in facts.link_tags
+                       if 'alternate' in record['attrs'].get('rel', []) and 'hreflang' in record['attrs']]
+                      if facts is not None else soup.find_all('link', attrs={'rel': 'alternate', 'hreflang': True}))
     if hreflang_links:
         profile.hreflang_configured = True
         for link in hreflang_links:
@@ -661,21 +723,26 @@ def analyze_international_setup(soup: BeautifulSoup, headers: Dict[str, str] = N
                 profile.hreflang_tags[lang] = href
     
     # Check charset
-    charset_meta = soup.find('meta', charset=True)
+    metas = [record['attrs'] for record in facts.meta] if facts is not None else soup.find_all('meta')
+    charset_meta = next((meta for meta in metas if 'charset' in (meta if isinstance(meta, dict) else meta.attrs)), None)
     if charset_meta:
         profile.charset = charset_meta.get('charset')
     else:
-        content_type = soup.find('meta', attrs={'http-equiv': 'Content-Type'})
+        content_type = next((meta for meta in metas if re.fullmatch('content-type', str(meta.get('http-equiv', '')), re.I)), None)
         if content_type:
             content = content_type.get('content', '')
-            charset_match = re.search(r'charset=([^;]+)', content)
+            charset_match = re.search(r'charset\s*=\s*[\"\']?([^;\s\"\']+)', content, re.I)
             if charset_match:
                 profile.charset = charset_match.group(1).strip()
+    header_charset = re.search(r'charset\s*=\s*[\"\']?([^;\s\"\']+)',
+                               headers_lower.get('content-type', ''), re.I)
+    if header_charset:
+        profile.charset = header_charset.group(1)
     
     # Check for geo-targeting meta tags
     geo_tags = ['geo.region', 'geo.placename', 'geo.position', 'ICBM']
     for tag_name in geo_tags:
-        geo_tag = soup.find('meta', attrs={'name': tag_name})
+        geo_tag = next((meta for meta in metas if meta.get('name') == tag_name), None)
         if geo_tag:
             profile.geo_targeting = f"{tag_name}: {geo_tag.get('content', '')}"
             break
@@ -695,13 +762,14 @@ def analyze_international_setup(soup: BeautifulSoup, headers: Dict[str, str] = N
     return profile
 
 
-def detect_javascript_seo_issues(soup: BeautifulSoup) -> Dict[str, Any]:
+def detect_javascript_seo_issues(soup: BeautifulSoup, *, facts: Optional[PageFacts] = None) -> Dict[str, Any]:
     """Detect JavaScript SEO issues and recommendations."""
     issues = {
-        'client_side_rendering': False,
-        'spa_detected': False,
+        'client_side_rendering': None,
+        'spa_detected': None,
+        'framework_container_detected': False,
         'lazy_loaded_content': False,
-        'infinite_scroll': False,
+        'infinite_scroll': None,
         'ajax_navigation': False,
         'javascript_redirects': False,
         'dynamic_meta_tags': False,
@@ -718,8 +786,7 @@ def detect_javascript_seo_issues(soup: BeautifulSoup) -> Dict[str, Any]:
     
     for tag, attrs in spa_indicators:
         if soup.find(tag, attrs):
-            issues['spa_detected'] = True
-            issues['client_side_rendering'] = True
+            issues['framework_container_detected'] = True
             break
     
     # Check for lazy loading indicators
@@ -731,15 +798,20 @@ def detect_javascript_seo_issues(soup: BeautifulSoup) -> Dict[str, Any]:
     ]
     
     for tag, attrs in lazy_indicators:
-        elements = soup.find_all(tag, attrs) if tag else soup.find_all(attrs=attrs)
+        if tag == 'img' and facts is not None:
+            elements = [record for record in facts.images
+                        if all(record['attrs'].get(name) == value for name, value in attrs.items())]
+        else:
+            elements = soup.find_all(tag, attrs) if tag else soup.find_all(attrs=attrs)
         if elements:
             issues['lazy_loaded_content'] = True
             break
     
     # Check for infinite scroll
-    infinite_scroll_scripts = soup.find_all('script', string=re.compile(r'(IntersectionObserver|infinite.?scroll|waypoint)', re.I))
-    if infinite_scroll_scripts:
-        issues['infinite_scroll'] = True
+    script_texts = ([record['text'] for record in facts.scripts] if facts is not None
+                    else [script.string or '' for script in soup.find_all('script')])
+    infinite_scroll_scripts = [text for text in script_texts if re.search(r'(IntersectionObserver|infinite.?scroll|waypoint)', text, re.I)]
+    issues['intersection_or_scroll_code_reference'] = bool(infinite_scroll_scripts)
     
     # Check for AJAX navigation
     ajax_nav_patterns = [
@@ -749,356 +821,350 @@ def detect_javascript_seo_issues(soup: BeautifulSoup) -> Dict[str, Any]:
         r'pjax'
     ]
     
-    for script in soup.find_all('script'):
-        if script.string:
+    for text in script_texts:
+        if text:
             for pattern in ajax_nav_patterns:
-                if re.search(pattern, script.string, re.I):
+                if re.search(pattern, text, re.I):
                     issues['ajax_navigation'] = True
                     break
     
     # Check for JavaScript redirects
     js_redirect_patterns = [
-        r'window\.location',
-        r'location\.href',
-        r'location\.replace',
-        r'meta.*refresh'
+        r'(?:window\.)?location(?:\.href)?\s*=(?!=)',
+        r'(?:window\.)?location\.(?:replace|assign)\s*\('
     ]
     
-    for script in soup.find_all('script'):
-        if script.string:
+    for text in script_texts:
+        if text:
             for pattern in js_redirect_patterns:
-                if re.search(pattern, script.string):
+                if re.search(pattern, text):
                     issues['javascript_redirects'] = True
                     break
     
-    # Generate recommendations
-    if issues['spa_detected']:
-        issues['recommendations'].append("Use server-side rendering (SSR) or pre-rendering for better SEO")
-    
-    if issues['infinite_scroll']:
-        issues['recommendations'].append("Provide paginated alternatives for infinite scroll content")
-    
-    if issues['ajax_navigation']:
-        issues['recommendations'].append("Ensure all navigation states have unique URLs and are crawlable")
-    
-    if issues['javascript_redirects']:
-        issues['recommendations'].append("Replace JavaScript redirects with server-side 301/302 redirects")
-    
+    # Advice is produced only by explicit registry evaluations in analyze_technical.
     return issues
 
 
-def analyze_technical(soup: BeautifulSoup, url: str, headers: Dict[str, str] = None, status_code: int = 200) -> Dict[str, Any]:
-    """Advanced technical SEO analysis with comprehensive checks."""
-    issues = []
-    data = {}
-    
-    # Parse URL
+def _check_security_rules(collector: RuleCollector, soup: BeautifulSoup, url: str,
+                          headers: Any, html_document: bool, *, facts: Optional[PageFacts] = None) -> None:
+    """Evaluate declared header configuration without assuming deployment intent."""
+    parsed = urlparse(url)
+    host = parsed.hostname or ''
+    try:
+        ipaddress.ip_address(host)
+        domain = False
+    except ValueError:
+        domain = bool(host)
+    hsts_applicable = parsed.scheme.lower() == 'https' and domain
+    hsts = _hsts_policy(headers)
+    hsts_evidence = {**hsts, 'headers_checked': headers is not None,
+                     'browser_hsts_state_checked': False, 'host': host}
+    hsts_reason = ('HSTS is a domain policy received over HTTPS; this URL is outside that scope.'
+                   if not hsts_applicable else 'Response headers were not supplied.')
+    collector.check('security.hsts_missing', not bool(hsts['values']) if headers is not None else None,
+                    hsts_evidence, applicable=hsts_applicable, reason=hsts_reason,
+                    source='response_headers', category='Security',
+                    message='No HSTS header observed on this HTTPS response')
+    declared_hsts = hsts_applicable and (bool(hsts['values']) if headers is not None else None)
+    collector.check('security.hsts_invalid', not hsts['valid'] if headers is not None else None,
+                    hsts_evidence, applicable=declared_hsts,
+                    reason=hsts_reason if not hsts_applicable or headers is None else 'No HSTS policy was declared.',
+                    source='response_headers', category='Security',
+                    message='Declared HSTS policy has an invalid max-age or repeated/invalid directives')
+    collector.check('security.hsts_preload_incomplete',
+                    not hsts['meets_preload_duration'] or not hsts['includesubdomains'],
+                    hsts_evidence,
+                    applicable=hsts_applicable and (hsts['preload'] if headers is not None else None),
+                    reason=hsts_reason if not hsts_applicable or headers is None else 'The policy does not request preloading.',
+                    source='response_headers', category='Security',
+                    message='Declared HSTS preload policy lacks a required duration or includeSubDomains')
+
+    policies = _csp_policies(headers, soup, facts=facts)
+    policy_evidence = {'policies': policies, 'headers_checked': headers is not None,
+                       'effective_browser_policy_checked': False}
+    declared_csp = any(policy['directives'] for policy in policies)
+    collector.check('security.csp_missing',
+                    not declared_csp if declared_csp or headers is not None else None,
+                    policy_evidence, applicable=html_document,
+                    reason='Response headers were not supplied.' if headers is None else 'This is not an HTML document.',
+                    source='html_and_headers', category='Security',
+                    message='No enforcing CSP declaration observed')
+    csp_applicable = html_document and (declared_csp if headers is not None or declared_csp else None)
+    for rule_id, token, message in (
+        ('security.csp_unsafe_inline', "'unsafe-inline'", 'CSP script source expression includes unsafe-inline without a nonce or hash'),
+        ('security.csp_unsafe_eval', "'unsafe-eval'", 'CSP script source expression includes unsafe-eval'),
+        ('security.csp_wildcard_default', '*', 'CSP default source expression includes a wildcard'),
+    ):
+        matches = []
+        for index, policy in enumerate(policies):
+            directives = policy['directives']
+            directive = 'default-src' if token == '*' or 'script-src' not in directives else 'script-src'
+            values = directives.get(directive, [])
+            if token in [value.lower() for value in values] and not (
+                    token == "'unsafe-inline'" and _has_nonce_or_hash(values)):
+                matches.append({'policy_index': index, 'source': policy['source'],
+                                'directive': directive, 'expression': token})
+        collector.check(rule_id, bool(matches), {**policy_evidence, 'matches': matches},
+                        applicable=csp_applicable,
+                        reason='No enforcing CSP declaration observed, or response headers are unavailable.',
+                        source='html_and_headers', category='Security', message=message)
+
+    xfo_values = header_values(headers, 'X-Frame-Options')
+    frame_ancestors = [policy['directives']['frame-ancestors'] for policy in policies
+                       if policy['source'] == 'response_header' and 'frame-ancestors' in policy['directives']]
+    frame_evidence = {'x_frame_options': xfo_values, 'frame_ancestors': frame_ancestors,
+                      'headers_checked': headers is not None, 'embedding_intent': None}
+    collector.check('security.frame_policy_missing',
+                    not bool(xfo_values or frame_ancestors) if headers is not None else None,
+                    frame_evidence, applicable=html_document,
+                    reason='Response headers were not supplied.' if headers is None else 'This is not an HTML document.',
+                    source='response_headers', category='Security',
+                    message='No response header declaring a frame embedding restriction observed')
+    xfo_tokens = [token.strip().upper() for value in xfo_values for token in value.split(',')]
+    invalid_xfo = bool(xfo_tokens) and (
+        any(token not in ('DENY', 'SAMEORIGIN') for token in xfo_tokens) or len(set(xfo_tokens)) > 1)
+    collector.check('security.xfo_invalid', invalid_xfo, frame_evidence,
+                    applicable=html_document and (bool(xfo_values) if headers is not None else None),
+                    reason='No X-Frame-Options header observed, or response headers are unavailable.',
+                    source='response_headers', category='Security',
+                    message='X-Frame-Options has an unsupported or conflicting value')
+    origins = [value.strip() for value in header_values(headers, 'Access-Control-Allow-Origin')]
+    credentials = [value.strip() for value in header_values(headers, 'Access-Control-Allow-Credentials')]
+    collector.check('security.cors_wildcard_credentials',
+                    '*' in origins and 'true' in credentials if headers is not None else None,
+                    {'allow_origin': origins, 'allow_credentials': credentials,
+                     'credentialed_request_tested': False, 'headers_checked': headers is not None},
+                    reason='Response headers were not supplied.', source='response_headers', category='Security',
+                    message='Wildcard CORS origin cannot authorize credentialed browser requests')
+
+
+def _http_resource_references(soup: BeautifulSoup, url: str, *,
+                              facts: Optional[PageFacts] = None) -> List[Dict[str, str]]:
+    references = []
+    base = facts.base_url if facts is not None else document_base_url(soup, url)
+    shared = ({'img': facts.images, 'script': facts.scripts, 'link': facts.link_tags}
+              if facts is not None else {})
+    for tag_name, attr_name in (
+        ('img', 'src'), ('script', 'src'), ('link', 'href'), ('iframe', 'src'),
+        ('source', 'src'), ('video', 'src'), ('video', 'poster'), ('audio', 'src'),
+        ('embed', 'src'), ('object', 'data'),
+    ):
+        elements = [record['attrs'] for record in shared[tag_name]] if tag_name in shared else soup.find_all(tag_name)
+        for element in elements:
+            if tag_name == 'link' and not any(str(rel).lower() in ('stylesheet', 'preload', 'icon')
+                                             for rel in element.get('rel', [])):
+                continue
+            raw = str(element.get(attr_name, '')).strip()
+            if not raw:
+                continue
+            resolved = resolve_url(raw, base)
+            if resolved and urlparse(resolved).scheme == 'http':
+                references.append({'type': tag_name, 'attribute': attr_name, 'url': resolved})
+    return references
+
+
+def analyze_technical(soup: BeautifulSoup, url: str, headers: Dict[str, str] = None,
+                      status_code: int = 200, user_agent: Optional[str] = None, *,
+                      facts: Optional[PageFacts] = None) -> Dict[str, Any]:
+    """Evaluate observed technical facts; retain unmeasured runtime properties as unknown."""
+    facts = ensure_page_facts(soup, url, headers=headers, user_agent=user_agent, facts=facts)
+    headers, user_agent = facts.headers, facts.user_agent
+    collector = RuleCollector('technical')
     parsed_url = urlparse(url)
-    
-    # HTTPS check
-    data['https'] = parsed_url.scheme == 'https'
-    if not data['https']:
-        issues.append(create_issue('Security', 'critical', 'Site not using HTTPS'))
-    
-    # Status code analysis
-    data['status_code'] = status_code
-    if status_code >= 500:
-        issues.append(create_issue('Availability', 'critical', f'Server error status code {status_code}'))
-    elif status_code >= 400:
-        issues.append(create_issue('Availability', 'critical', f'Client error status code {status_code}'))
-    elif status_code >= 300:
-        if status_code == 301:
-            issues.append(create_issue('Redirects', 'notice', 'Permanent redirect (301)'))
-        elif status_code == 302:
-            issues.append(create_issue('Redirects', 'warning', 'Temporary redirect (302) - consider using 301 for SEO'))
-        else:
-            issues.append(create_issue('Redirects', 'warning', f'Redirect status {status_code}'))
-    
-    # Security analysis
+    scheme = parsed_url.scheme.lower()
+    host = parsed_url.hostname or ''
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = host.lower().rstrip('.') == 'localhost' or host.lower().rstrip('.').endswith('.localhost')
+    content_types = header_values(headers, 'Content-Type')
+    media_type = content_types[0].split(';', 1)[0].strip().lower() if content_types else None
+    html_document = (media_type in ('text/html', 'application/xhtml+xml') if media_type else
+                     not facts.is_xml or bool(facts.tag_counts.get('html')))
+    html_syntax = html_document and not facts.is_xml and media_type != 'application/xhtml+xml'
+    data = {'https': scheme == 'https', 'status_code': status_code}
+    collector.check('security.https_missing', scheme == 'http',
+                    {'scheme': scheme, 'host': host, 'loopback': loopback},
+                    applicable=scheme in ('http', 'https') and not loopback,
+                    reason='The URL is outside the public HTTP/HTTPS document scope or uses local loopback.',
+                    source='url', category='Security', message='Document URL uses HTTP')
+    measured_status = type(status_code) is int and 100 <= status_code <= 599
+    status_evidence = {'status_code': status_code, 'status_observed': measured_status}
+    for rule_id, failed, message in (
+        ('technical.http_server_error', 500 <= status_code <= 599 if measured_status else None, 'HTTP server error response'),
+        ('technical.http_client_error', 400 <= status_code <= 499 if measured_status else None, 'HTTP client error response'),
+        ('technical.http_redirect', status_code in (300, 301, 302, 303, 305, 307, 308) if measured_status else None,
+         'HTTP redirect response; verify destination and intended permanence'),
+    ):
+        collector.check(rule_id, failed, status_evidence, reason='No valid HTTP response status was supplied.',
+                        source='response_status', category='Availability', message=message)
+
     security_profile = analyze_security_headers(headers)
+    hsts = _hsts_policy(headers)
     data['security'] = {
-        'level': security_profile.security_level.value,
-        'https': data['https'],
-        'hsts': security_profile.hsts_enabled,
-        'hsts_max_age': security_profile.hsts_max_age,
-        'csp': security_profile.csp_enabled,
-        'xfo': security_profile.xfo_enabled,
-        'x_content_type_options': security_profile.x_content_type_options,
-        'vulnerabilities': security_profile.vulnerabilities[:5]  # Limit to top 5
+        'level': None, 'level_status': 'not_assessed', 'https': data['https'],
+        'header_configuration_level': security_profile.security_level.value if headers is not None else None,
+        'header_configuration_level_method': 'legacy_header_presence_heuristic',
+        'hsts': bool(hsts['values']) if headers is not None else None,
+        'hsts_max_age': hsts['max_age'],
+        'csp': security_profile.csp_enabled if headers is not None else None,
+        'xfo': security_profile.xfo_enabled if headers is not None else None,
+        'x_content_type_options': security_profile.x_content_type_options if headers is not None else None,
+        'vulnerabilities': [], 'vulnerabilities_status': 'not_tested',
+        'source': 'response_headers' if headers is not None else 'not_measured',
+        'scope': 'header_configuration',
     }
-    
-    # Report security issues
-    if not security_profile.hsts_enabled and data['https']:
-        issues.append(create_issue('Security', 'warning', 'Missing HSTS header for HTTPS site'))
-    
-    if security_profile.hsts_enabled and security_profile.hsts_max_age < 31536000:
-        issues.append(create_issue('Security', 'notice', 
-            f'HSTS max-age too short ({security_profile.hsts_max_age}s), recommend 31536000'))
-    
-    if not security_profile.csp_enabled:
-        issues.append(create_issue('Security', 'warning', 'Missing Content Security Policy'))
-    
-    if not security_profile.xfo_enabled:
-        issues.append(create_issue('Security', 'notice', 'Missing X-Frame-Options header'))
-    
-    for vulnerability in security_profile.vulnerabilities[:3]:
-        issues.append(create_issue('Security', 'warning', vulnerability))
-    
-    if security_profile.security_level == SecurityLevel.CRITICAL:
-        issues.append(create_issue('Security', 'critical', 'Critical security issues detected'))
-    
-    # Crawlability analysis
-    crawl_profile = analyze_crawlability(soup, headers)
+    _check_security_rules(collector, soup, url, headers, html_document, facts=facts)
+
+    crawl_profile = analyze_crawlability(soup, headers, user_agent, facts=facts)
+    robots = crawl_profile.robots_analysis
     data['crawlability'] = {
-        'status': crawl_profile.status.value,
-        'noindex': crawl_profile.noindex,
+        'status': crawl_profile.status.value, 'noindex': crawl_profile.noindex,
         'nofollow': crawl_profile.nofollow,
-        'canonical': crawl_profile.canonical_url,
-        'javascript_required': crawl_profile.javascript_required
+        'canonical': resolve_url(crawl_profile.canonical_url, facts.base_url) if crawl_profile.canonical_url else None,
+        'javascript_required': None, 'indexability': robots['indexability'],
+        'robots_analysis': robots, 'crawl_access': 'unknown',
     }
-    
-    if crawl_profile.noindex:
-        issues.append(create_issue('Crawlability', 'critical', 'Page is set to noindex'))
-    
-    if crawl_profile.nofollow:
-        issues.append(create_issue('Crawlability', 'warning', 'Page is set to nofollow'))
-    
-    if crawl_profile.javascript_required:
-        issues.append(create_issue('Crawlability', 'warning', 'Content requires JavaScript for crawling'))
-    
-    # Mobile optimization analysis
-    mobile_profile = analyze_mobile_optimization(soup)
+    for directive in ('noindex', 'nofollow', 'nosnippet'):
+        observed = robots[directive]
+        collector.check('robots.' + directive, observed if observed or headers is not None else None,
+                        {'directives': robots['directives'], 'declarations': robots['evidence'],
+                         'headers_checked': headers is not None, 'user_agent': user_agent,
+                         'publisher_intent': None},
+                        reason='No restriction was observed in markup; response headers were not supplied.',
+                        source='html_and_headers', category='Crawlability',
+                        message='An applicable ' + directive + ' directive is declared')
+
+    mobile_profile = analyze_mobile_optimization(soup, facts=facts)
+    viewports = [str(meta.get('content', '')).strip() for record in facts.meta for meta in [record['attrs']]
+                 if str(meta.get('name', '')).strip().lower() == 'viewport']
+    nonempty_viewports = [content for content in viewports if content]
+    viewport_settings = [_viewport_values(content) for content in nonempty_viewports]
+    viewport_evidence = {'declarations': viewports, 'settings': viewport_settings, 'rendered_layout_checked': False}
+    collector.check('mobile.viewport_missing', not bool(nonempty_viewports), viewport_evidence,
+                    applicable=html_document, reason='This is not an HTML document.',
+                    category='Mobile', message='No nonempty viewport meta declaration observed')
+    collector.check('mobile.viewport_zoom_disabled', any(_viewport_restricts_zoom(settings) for settings in viewport_settings),
+                    viewport_evidence, applicable=html_document and bool(nonempty_viewports),
+                    reason='No viewport declaration applies to this document.', category='Mobile',
+                    message='An authored viewport setting restricts user zoom')
     data['mobile'] = {
-        'readiness': mobile_profile.mobile_readiness.value,
-        'viewport_configured': mobile_profile.viewport_configured,
+        'readiness': None, 'layout_status': 'not_measured', 'source': 'html_attributes',
+        'viewport_configured': bool(nonempty_viewports),
         'responsive_images': f"{mobile_profile.responsive_images}/{mobile_profile.total_images}",
-        'amp': mobile_profile.amp_version,
-        'pwa_ready': mobile_profile.pwa_ready
+        'responsive_images_method': 'markup_hints',
+        'amp': mobile_profile.amp_version, 'amp_status': 'markup_hint',
+        'pwa_ready': None, 'pwa_status': 'not_tested',
+        'pwa_markup_indicators': mobile_profile.pwa_ready,
     }
-    
-    if not mobile_profile.viewport_configured:
-        issues.append(create_issue('Mobile', 'critical', 'Missing viewport meta tag'))
-    elif mobile_profile.viewport_content and 'user-scalable=no' in mobile_profile.viewport_content:
-        issues.append(create_issue('Mobile', 'warning', 'Viewport prevents user zooming (accessibility issue)'))
-    
-    if mobile_profile.uses_plugins:
-        issues.append(create_issue('Mobile', 'critical', 'Uses plugins not supported on mobile'))
-    
-    if mobile_profile.mobile_readiness == MobileReadiness.DESKTOP_ONLY:
-        issues.append(create_issue('Mobile', 'critical', 'Site not optimized for mobile'))
-    
-    if mobile_profile.horizontal_scrolling:
-        issues.append(create_issue('Mobile', 'warning', 'Content causes horizontal scrolling on mobile'))
-    
-    # Performance indicators
+
     perf_profile = analyze_performance_indicators(headers, soup)
     data['performance'] = {
         'protocol': perf_profile.protocol_version.value,
         'compression': perf_profile.compression_type,
-        'cache_ttl': perf_profile.cache_ttl,
-        'cdn': perf_profile.cdn_provider or 'None detected',
-        'etag': perf_profile.etag_present,
-        'server_push': perf_profile.server_push_enabled
+        'cache_ttl': perf_profile.cache_ttl, 'cdn': perf_profile.cdn_provider or 'None detected',
+        'cdn_status': 'header_hint' if perf_profile.cdn_provider else 'not_established',
+        'etag': perf_profile.etag_present if headers is not None else None,
+        'server_push': None, 'source': 'response_headers' if headers is not None else 'not_measured',
+        'protocol_status': 'unknown', 'transfer_savings': None,
     }
-    
-    if not perf_profile.compression_enabled:
-        issues.append(create_issue('Performance', 'warning', 'Content not compressed'))
-    
-    if perf_profile.cache_ttl == 0:
-        issues.append(create_issue('Performance', 'warning', 'No caching configured'))
-    elif perf_profile.cache_ttl < 3600:  # Less than 1 hour
-        issues.append(create_issue('Performance', 'notice', f'Short cache TTL ({perf_profile.cache_ttl}s)'))
-    
-    if not perf_profile.cdn_detected:
-        issues.append(create_issue('Performance', 'notice', 'No CDN detected'))
-    
-    if perf_profile.protocol_version in [ProtocolVersion.HTTP_1_0, ProtocolVersion.HTTP_1_1]:
-        issues.append(create_issue('Performance', 'notice', 'Not using HTTP/2 or HTTP/3'))
-    
-    # URL structure analysis
+    has_body = measured_status and status_code >= 200 and status_code not in (204, 205, 304)
+    collector.check('technical.http_compression',
+                    not perf_profile.compression_enabled if headers is not None else None,
+                    {'content_encoding': header_values(headers, 'Content-Encoding'),
+                     'headers_checked': headers is not None, 'negotiation_checked': False, 'transfer_savings': None},
+                    applicable=html_document and (has_body if measured_status else None),
+                    reason='Response headers or a body-bearing HTML response were not observed.',
+                    source='response_headers', category='Performance',
+                    message='No non-identity Content-Encoding observed for this response')
+
     url_profile = analyze_url_structure(url)
     data['url'] = {
-        'length': url_profile.length,
-        'depth': url_profile.depth,
-        'parameters': url_profile.parameters_count,
-        'is_clean': url_profile.is_clean,
-        'is_seo_friendly': url_profile.is_seo_friendly
+        'length': url_profile.length, 'depth': url_profile.depth, 'parameters': url_profile.parameters_count,
+        'is_clean': url_profile.is_clean, 'is_clean_method': 'legacy_url_shape_heuristic',
+        'is_seo_friendly': None, 'quality_status': 'not_assessed',
     }
-    
-    if url_profile.length > 100:
-        issues.append(create_issue('URL Structure', 'warning', f'URL too long ({url_profile.length} chars)'))
-    
-    if url_profile.depth > 4:
-        issues.append(create_issue('URL Structure', 'notice', f'Deep URL structure (depth: {url_profile.depth})'))
-    
-    if url_profile.has_session_id:
-        issues.append(create_issue('URL Structure', 'critical', 'Session ID in URL'))
-    
-    if url_profile.uses_underscores:
-        issues.append(create_issue('URL Structure', 'notice', 'URL uses underscores instead of hyphens'))
-    
-    if url_profile.uses_uppercase:
-        issues.append(create_issue('URL Structure', 'warning', 'URL contains uppercase characters'))
-    
-    if not url_profile.is_seo_friendly:
-        issues.append(create_issue('URL Structure', 'warning', 'URL is not SEO-friendly'))
-    
-    # International setup
-    intl_profile = analyze_international_setup(soup, headers)
+    session_names = sorted(name for name in parse_qs(parsed_url.query, keep_blank_values=True)
+                           if name.lower() in ('sessionid', 'session', 'sid', 'phpsessid', 'jsessionid'))
+    collector.check('technical.url_session_parameter', bool(session_names),
+                    {'parameter_names': session_names, 'parameter_meanings_checked': False},
+                    source='url', category='URL Structure', message='Query uses a session-like parameter name')
+
+    intl_profile = analyze_international_setup(soup, headers, facts=facts)
     data['international'] = {
-        'language': intl_profile.language_code,
-        'charset': intl_profile.charset,
-        'hreflang_count': len(intl_profile.hreflang_tags),
-        'geo_targeting': intl_profile.geo_targeting
+        'language': intl_profile.language_code, 'charset': intl_profile.charset,
+        'hreflang_count': len(intl_profile.hreflang_tags), 'geo_targeting': intl_profile.geo_targeting,
     }
-    
-    if not intl_profile.language_declared:
-        issues.append(create_issue('International', 'warning', 'Missing language declaration'))
-    
-    if intl_profile.charset and intl_profile.charset.lower() != 'utf-8':
-        issues.append(create_issue('International', 'warning', f'Non-UTF-8 charset: {intl_profile.charset}'))
-    
-    # JavaScript SEO issues
-    js_issues = detect_javascript_seo_issues(soup)
+    human_text = bool(facts.text)
+    collector.check('language.missing', not intl_profile.language_declared,
+                    {'language': intl_profile.language_code, 'human_readable_text_observed': human_text},
+                    applicable=html_document and human_text,
+                    reason='No human-readable HTML document content was observed.',
+                    category='International', message='Primary document language is not declared')
+    charset = str(intl_profile.charset).strip() if intl_profile.charset else None
+    collector.check('seo.charset_non_utf8', charset.lower() not in ('utf-8', 'utf8') if charset else None,
+                    {'declared_charset': charset, 'headers_checked': headers is not None,
+                     'original_bytes_checked': False}, applicable=html_document,
+                    reason='No encoding declaration was observed; original bytes and byte-order marks were not checked.',
+                    source='html_and_headers', category='International',
+                    message='A non-UTF-8 character encoding is declared')
+
+    js_issues = detect_javascript_seo_issues(soup, facts=facts)
+    js_issues['recommendations'] = []
+    references = []
+    for index, script in enumerate(facts.scripts):
+        if script['text']:
+            match = re.search(r'(?:window\.)?location(?:\.href)?\s*=(?!=)|(?:window\.)?location\.(?:replace|assign)\s*\(',
+                              script['text'])
+            if match:
+                references.append({'script_index': index, 'expression': match.group(0)})
+    collector.check('technical.javascript_redirect_reference', bool(references),
+                    {'references': references, 'executed': None}, applicable=html_document,
+                    reason='This is not an HTML document.', confidence='low', category='JavaScript SEO',
+                    message='Inline script text references a location change; execution is unverified')
     data['javascript_seo'] = js_issues
-    
-    if js_issues['spa_detected']:
-        issues.append(create_issue('JavaScript SEO', 'warning', 'Single Page Application detected'))
-    
-    if js_issues['infinite_scroll']:
-        issues.append(create_issue('JavaScript SEO', 'notice', 'Infinite scroll detected'))
-    
-    if js_issues['javascript_redirects']:
-        issues.append(create_issue('JavaScript SEO', 'warning', 'JavaScript redirects detected'))
-    
-    # Mixed content check (for HTTPS sites)
-    if data['https']:
-        mixed_content = []
-        
-        # Check various resource types
-        resource_tags = [
-            ('img', 'src'),
-            ('script', 'src'),
-            ('link', 'href'),
-            ('iframe', 'src'),
-            ('source', 'src'),
-            ('video', 'src'),
-            ('audio', 'src'),
-            ('embed', 'src'),
-            ('object', 'data')
-        ]
-        
-        for tag_name, attr_name in resource_tags:
-            for element in soup.find_all(tag_name):
-                resource_url = element.get(attr_name, '')
-                if resource_url.startswith('http://'):
-                    mixed_content.append({
-                        'type': tag_name,
-                        'url': resource_url[:100]  # Truncate long URLs
-                    })
-        
-        if mixed_content:
-            issues.append(create_issue('Security', 'critical', 
-                f'Mixed content: {len(mixed_content)} insecure resources on HTTPS page'))
-            data['mixed_content'] = mixed_content[:10]  # Limit to first 10
-    
-    # Check for deprecated technologies
-    deprecated_found = []
-    
-    # Flash
-    if soup.find_all(['embed', 'object'], attrs={'type': 'application/x-shockwave-flash'}):
-        deprecated_found.append('Flash')
-    
-    # Frameset
-    if soup.find('frameset'):
-        deprecated_found.append('Frameset')
-    
-    # Font tag
-    if soup.find('font'):
-        deprecated_found.append('Font tags')
-    
-    # Center tag
-    if soup.find('center'):
-        deprecated_found.append('Center tags')
-    
-    if deprecated_found:
-        issues.append(create_issue('Compatibility', 'warning', 
-            f'Deprecated technologies: {", ".join(deprecated_found)}'))
-    
-    # Check DOCTYPE
-    doctype = None
-    for item in soup.contents:
-        if str(item).startswith('<!DOCTYPE'):
-            doctype = str(item)
-            break
-    
-    if not doctype:
-        issues.append(create_issue('HTML Standards', 'warning', 'Missing DOCTYPE declaration'))
-    elif 'html5' not in doctype.lower() and '<!doctype html>' not in doctype.lower():
-        issues.append(create_issue('HTML Standards', 'notice', 'Non-HTML5 DOCTYPE'))
-    
-    # Check for structured data
-    json_ld = soup.find_all('script', type='application/ld+json')
-    microdata = soup.find_all(attrs={'itemscope': True})
-    rdfa = soup.find_all(attrs={'typeof': True})
-    
+
+    http_references = _http_resource_references(soup, url, facts=facts) if data['https'] else []
+    collector.check('technical.http_resource_reference', bool(http_references),
+                    {'count': len(http_references), 'references': http_references[:20],
+                     'references_truncated': len(http_references) > 20,
+                     'effective_requests_checked': False},
+                    applicable=html_document and data['https'],
+                    reason='Mixed-content checks apply to HTTPS HTML documents.', category='Security',
+                    message='HTML declares HTTP subresource URLs on an HTTPS document')
+    data['mixed_content'] = http_references[:10]
+    data['mixed_content_status'] = 'source_references_only'
+
+    tag_counts = facts.tag_counts
+    obsolete_counts = {tag: tag_counts.get(tag, 0) for tag in ('applet', 'frameset', 'frame', 'font', 'center')}
+    obsolete_counts = {tag: count for tag, count in obsolete_counts.items() if count}
+    flash = soup.find_all(['embed', 'object'], attrs={'type': re.compile(r'^application/x-shockwave-flash$', re.I)})
+    if flash:
+        obsolete_counts['flash_mime_declaration'] = len(flash)
+    collector.check('technical.deprecated_elements', bool(obsolete_counts),
+                    {'elements': obsolete_counts, 'rendered_behavior_checked': False},
+                    applicable=html_document, reason='This is not an HTML document.', category='Compatibility',
+                    message='Obsolete HTML elements or legacy plugin markup observed')
+    doctype = facts.doctype[0] if facts.doctype else None
+    doctype_evidence = {'doctype': doctype, 'media_type': media_type,
+                        'parser_is_xml': facts.is_xml, 'rendering_mode_checked': False}
+    collector.check('html.doctype_missing', not bool(doctype), doctype_evidence, applicable=html_syntax,
+                    reason='An HTML doctype is not required for XML/XHTML syntax.', category='HTML Standards',
+                    message='Missing HTML DOCTYPE declaration')
+    collector.check('html.doctype_legacy', bool(doctype and doctype.strip().lower() != 'html'),
+                    doctype_evidence, applicable=html_syntax and bool(doctype),
+                    reason='No doctype in an HTML-syntax document was observed.', category='HTML Standards',
+                    message='Legacy HTML doctype declaration observed')
     data['structured_data_types'] = {
-        'json_ld': len(json_ld),
-        'microdata': len(microdata),
-        'rdfa': len(rdfa)
+        'json_ld': sum(record['attrs'].get('type') == 'application/ld+json' for record in facts.scripts),
+        'microdata': len(soup.find_all(attrs={'itemscope': True})),
+        'rdfa': len(soup.find_all(attrs={'typeof': True})),
     }
-    
-    # Calculate technical score
-    score = 100
-    
-    for issue in issues:
-        if issue['severity'] == 'critical':
-            score -= 15
-        elif issue['severity'] == 'warning':
-            score -= 7
-        elif issue['severity'] == 'notice':
-            score -= 3
-    
-    # Additional scoring based on profiles
-    if security_profile.security_level in [SecurityLevel.POOR, SecurityLevel.CRITICAL]:
-        score -= 10
-    
-    if crawl_profile.status == CrawlabilityStatus.BLOCKED:
-        score -= 20
-    
-    if mobile_profile.mobile_readiness in [MobileReadiness.DESKTOP_ONLY, MobileReadiness.BROKEN]:
-        score -= 15
-    
-    if not url_profile.is_seo_friendly:
-        score -= 5
-    
-    score = max(0, min(100, score))
-    
-    # Generate recommendations
-    recommendations = []
-    
-    if not data['https']:
-        recommendations.append("Priority: Migrate to HTTPS immediately for security and SEO")
-    
-    if security_profile.security_level in [SecurityLevel.POOR, SecurityLevel.CRITICAL]:
-        recommendations.append("Priority: Implement security headers (HSTS, CSP, X-Frame-Options)")
-    
-    if mobile_profile.mobile_readiness == MobileReadiness.DESKTOP_ONLY:
-        recommendations.append("Priority: Implement responsive design for mobile-first indexing")
-    
-    if perf_profile.protocol_version == ProtocolVersion.HTTP_1_1:
-        recommendations.append("Upgrade to HTTP/2 or HTTP/3 for better performance")
-    
-    if not perf_profile.cdn_detected:
-        recommendations.append("Consider using a CDN for global performance")
-    
-    if js_issues['spa_detected']:
-        recommendations.append("Implement server-side rendering for SPA SEO")
-    
+    issues = collector.issues
+    recommendations = recommendations_for(issues)
     data['recommendations'] = recommendations
-    
-    return {
-        'score': score,
-        'issues': issues,
-        'data': data
-    }
+    data['javascript_seo']['recommendations'] = recommendations_for(
+        [issue for issue in issues if issue['rule_id'] == 'technical.javascript_redirect_reference'])
+    return {'score': score_findings(issues, owner='technical'), 'issues': issues, 'data': data,
+            'recommendations': recommendations, 'rule_results': collector.results,
+            'rule_coverage': collector.coverage, 'coverage': collector.coverage}
