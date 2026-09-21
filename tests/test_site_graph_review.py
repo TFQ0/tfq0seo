@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 
 from tfq0seo.core.app import SEOAnalyzer
 from tfq0seo.core.config import Config
+from tfq0seo.core.crawler import Crawler
 from tfq0seo.page_facts import extract_page_facts
 from tfq0seo.site_analysis import analyze_site
 
@@ -47,12 +48,7 @@ def test_conflicting_target_responses_are_unknown_independent_of_record_order():
 
 
 def test_fresh_batch_report_does_not_inherit_previous_crawl_context(monkeypatch):
-    class CrawlerStub:
-        def __init__(self, settings):
-            self.results = []
-            self.limit_reasons = []
-            self.discovery_errors = []
-
+    class CrawlerStub(Crawler):
         async def __aenter__(self):
             return self
 

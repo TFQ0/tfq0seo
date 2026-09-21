@@ -340,7 +340,6 @@ class SEOAnalyzer:
             if 'rule_results' in value:
                 if not isinstance(value['rule_results'], list):
                     raise ValueError('Analyzer rule_results must be a list')
-                merge_rule_results(value['rule_results'])
                 value['rule_coverage'] = rule_coverage(value['rule_results'])
             value['status'] = ('partial' if value.get('status') == 'partial' or
                                value.get('rule_coverage', {}).get('has_errors') else 'complete')
@@ -375,10 +374,10 @@ class SEOAnalyzer:
         evaluations = []
         for name in available:
             for original in result[name]['rule_results']:
-                evaluation = copy.deepcopy(original)
+                evaluation = dict(original)
                 evaluation['reported_by'] = sorted(set(evaluation.get('reported_by', [])) | {name})
                 evaluations.append(evaluation)
-        merged = merge_rule_results(evaluations)
+        merged = merge_rule_results(evaluations, copy_evidence=False)
         penalties = {name: 0 for name in available}
         ledger = []
         for evaluation in merged:
@@ -423,7 +422,7 @@ class SEOAnalyzer:
 
     def _aggregate_page_issues(self, results):
         if 'rule_results' in results:
-            return sorted([copy.deepcopy(item) for item in results['rule_results']
+            return sorted([dict(item) for item in results['rule_results']
                            if item['status'] in ('fail', 'informational')],
                           key=lambda item: {'critical': 0, 'warning': 1, 'notice': 2}[item['severity']])
         issues, seen = [], set()
@@ -570,6 +569,8 @@ class SEOAnalyzer:
         try:
             async with Crawler(self.config.crawler.as_dict()) as crawler:
                 self.crawler = crawler
+                crawler.set_result_buffer_limit(
+                    self.config.crawler.effective_concurrency + self.config.analysis.max_analysis_threads)
                 producer = asyncio.create_task(crawler.crawl_site(start_url, self.config.crawler.max_pages))
                 processed = 0
                 async def analyze(raw):
@@ -581,6 +582,7 @@ class SEOAnalyzer:
                     finally:
                         raw.pop('soup', None)
                         raw.pop('html', None)
+                        crawler.release_result(raw)
                 try:
                     while not producer.done() or processed < len(crawler.results) or tasks:
                         if producer.done():
@@ -607,6 +609,10 @@ class SEOAnalyzer:
                         if not task.done():
                             task.cancel()
                     await asyncio.gather(producer, *tasks, return_exceptions=True)
+                    for raw in crawler.results:
+                        raw.pop('soup', None)
+                        raw.pop('html', None)
+                        crawler.release_result(raw)
             await self._complete_run()
         finally:
             self._calculate_final_stats()
@@ -777,9 +783,11 @@ class SEOAnalyzer:
             categories[name] = round(sum(scores) / len(scores), 2) if scores else None
         scores = [page['overall_score'] for page in usable if self._is_score(page.get('overall_score'))]
         overall = round(sum(scores) / len(scores), 2) if scores else None
-        issues = [{**copy.deepcopy(issue), 'url': page['url']} for page in usable for issue in page.get('issues', [])]
+        # Pages are independent snapshots above. Share their owned evidence
+        # through the report instead of copying it again for each derived view.
+        issues = [{**issue, 'url': page['url']} for page in usable for issue in page.get('issues', [])]
         issues.extend(site_analysis['findings'])
-        aggregated, stats = aggregate_issues(issues)
+        aggregated, stats = aggregate_issues(issues, copy_evidence=False)
         counts = self._count_issues(issues)
         duplicates = defaultdict(set)
         redirect_targets = defaultdict(set)
@@ -836,6 +844,8 @@ class SEOAnalyzer:
                                  'link_checks': copy.deepcopy(link_checks)},
             'performance_metrics': generate_performance_metrics(pages),
             'crawl_stats': {'pages_per_second': self.progress.speed_pages_per_sec if current_run else 0,
+                            'result_buffer_capacity': getattr(self.crawler, 'result_buffer_capacity', None) if current_run else None,
+                            'result_buffer_peak': getattr(self.crawler, 'result_buffer_peak', 0) if current_run else 0,
                             'avg_analysis_time': self.stats.avg_analysis_time if current_run else 0,
                             'memory_peak_mb': self.stats.memory_peak_mb if current_run else 0,
                             'cache_hits': sum(bool(page.get('cached')) for page in pages),

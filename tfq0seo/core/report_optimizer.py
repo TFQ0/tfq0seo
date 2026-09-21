@@ -8,20 +8,27 @@ from typing import Any, Dict, List, Tuple
 from ..rules import RULESET_VERSION, get_rule
 
 
-def aggregate_issues(issues: List[Dict[str, Any]]) -> Tuple[List[Dict], Dict]:
+def aggregate_issues(issues: List[Dict[str, Any]], *, copy_evidence=True) -> Tuple[List[Dict], Dict]:
+    # Default callers receive independent evidence. A report builder may share
+    # its own snapshot across page and aggregated views without another copy.
+    memo = {}
+    snapshot = (lambda value: copy.deepcopy(value, memo)) if copy_evidence else (lambda value: value)
     grouped = OrderedDict()
+    page_sets = {}
     for issue in issues:
         key = ('rule', issue['rule_id'], issue.get('rule_version')) if issue.get('rule_id') else (
             'legacy', issue.get('message'), issue.get('category'), issue.get('severity'))
         if key not in grouped:
-            grouped[key] = {**copy.deepcopy(issue), 'count': 0, 'pages': [], 'evidence_by_page': []}
+            grouped[key] = {**snapshot(issue), 'count': 0, 'pages': [], 'evidence_by_page': []}
             grouped[key].pop('url', None)
+            page_sets[key] = set()
         item = grouped[key]
         item['count'] += 1
-        if issue.get('url') and issue['url'] not in item['pages']:
+        if issue.get('url') and issue['url'] not in page_sets[key]:
             item['pages'].append(issue['url'])
+            page_sets[key].add(issue['url'])
         if issue.get('url') and 'evidence' in issue:
-            item['evidence_by_page'].append({field: copy.deepcopy(issue.get(field)) for field in
+            item['evidence_by_page'].append({field: snapshot(issue.get(field)) for field in
                                              ('url', 'evidence', 'observations', 'status', 'applicability', 'score_owner')})
     aggregated = list(grouped.values())
     for item in aggregated:

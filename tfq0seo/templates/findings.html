@@ -1,0 +1,108 @@
+{# Complete findings are separate from the short summary above. #}
+<style>
+    #all-findings { margin-top: 2rem; scroll-margin-top: 6rem; }
+    #all-findings h4 { margin-bottom: .75rem; }
+    #all-findings > p { margin: .75rem 0; }
+    .findings-filters { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0; }
+    .findings-filters > div { max-width: 100%; }
+    .findings-filters label { display: block; margin-bottom: .35rem; }
+    .findings-filters input, .findings-filters select { font: inherit; padding: .6rem; border: 1px solid #bbb; border-radius: .3rem; }
+    #findings-search { width: 22rem; max-width: 100%; box-sizing: border-box; }
+    #findings-table td { overflow-wrap: anywhere; }
+</style>
+<section aria-labelledby="findings-heading" id="all-findings">
+    <h4 id="findings-heading">All findings</h4>
+    <p>Search by message, rule, category, or affected URL. Open Details for the complete recorded evidence.</p>
+    <div class="findings-filters">
+    <div><label for="findings-search">Search findings</label>
+    <input id="findings-search" type="search" placeholder="Message, rule, category, or URL"></div>
+    <div><label for="findings-severity">Severity</label>
+    <select id="findings-severity">
+        <option value="">All severities</option><option value="critical">Critical</option>
+        <option value="warning">Warning</option><option value="notice">Notice</option>
+    </select></div>
+    </div>
+    <p id="findings-status" role="status" aria-live="polite"></p>
+    <div style="overflow-x: auto">
+        <table class="pages-table" id="findings-table">
+            <thead><tr><th scope="col">Severity</th><th scope="col">Rule / category</th>
+                <th scope="col">Finding</th><th scope="col">Occurrences</th><th scope="col">Evidence</th></tr></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+    <div class="pagination" aria-label="Findings pagination">
+        <button class="page-btn" id="findings-previous" type="button">Previous findings</button>
+        <span id="findings-page"></span>
+        <button class="page-btn" id="findings-next" type="button">Next findings</button>
+    </div>
+    <noscript>The complete searchable findings view requires JavaScript. All records are also available in the JSON export.</noscript>
+</section>
+<script type="application/json" id="findings-data">{% for chunk in issues|json_chunks %}{{ chunk }}{% endfor %}</script>
+<script>
+(() => {
+    const findings = JSON.parse(document.getElementById('findings-data').textContent);
+    const search = document.getElementById('findings-search');
+    const severity = document.getElementById('findings-severity');
+    const body = document.querySelector('#findings-table tbody');
+    const previous = document.getElementById('findings-previous');
+    const next = document.getElementById('findings-next');
+    const pageSize = 20;
+    let currentPage = 1;
+    let filtered = findings;
+
+    function render() {
+        const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+        currentPage = Math.min(currentPage, pageCount);
+        body.replaceChildren();
+        const start = (currentPage - 1) * pageSize;
+        filtered.slice(start, start + pageSize).forEach(issue => {
+            const row = document.createElement('tr');
+            [issue.severity || 'Unspecified', issue.rule_id || issue.category || '',
+             issue.message || '', issue.count ?? 1].forEach(value => {
+                const cell = document.createElement('td');
+                cell.textContent = String(value);
+                row.appendChild(cell);
+            });
+            const cell = document.createElement('td');
+            const details = document.createElement('details');
+            const summary = document.createElement('summary');
+            summary.textContent = 'Details';
+            details.appendChild(summary);
+            details.addEventListener('toggle', () => {
+                if (details.open && !details.querySelector('pre')) {
+                    const evidence = document.createElement('pre');
+                    evidence.textContent = JSON.stringify(issue, null, 2);
+                    evidence.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto;max-width:45rem';
+                    details.appendChild(evidence);
+                }
+            });
+            cell.appendChild(details);
+            row.appendChild(cell);
+            body.appendChild(row);
+        });
+        document.getElementById('findings-status').textContent = filtered.length
+            ? `Showing ${start + 1}–${Math.min(start + pageSize, filtered.length)} of ${filtered.length} matching findings (${findings.length} total)`
+            : `No matching findings (${findings.length} total)`;
+        document.getElementById('findings-page').textContent = `Page ${currentPage} of ${pageCount}`;
+        previous.disabled = currentPage === 1;
+        next.disabled = currentPage === pageCount;
+    }
+
+    function filter() {
+        const query = search.value.trim().toLowerCase();
+        filtered = findings.filter(issue => {
+            if (severity.value && issue.severity !== severity.value) return false;
+            if (!query) return true;
+            const fields = [issue.message, issue.rule_id, issue.category, issue.url, ...(issue.pages || [])];
+            return fields.some(value => String(value ?? '').toLowerCase().includes(query));
+        });
+        currentPage = 1;
+        render();
+    }
+    search.addEventListener('input', filter);
+    severity.addEventListener('change', filter);
+    previous.addEventListener('click', () => { if (currentPage > 1) { currentPage--; render(); } });
+    next.addEventListener('click', () => { if (currentPage * pageSize < filtered.length) { currentPage++; render(); } });
+    render();
+})();
+</script>

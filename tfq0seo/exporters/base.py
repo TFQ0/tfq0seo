@@ -3,7 +3,10 @@
 import csv
 import json
 import math
+import os
 import re
+import tempfile
+from contextlib import contextmanager
 from string import Formatter
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit
 
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound, select_autoescape
+from markupsafe import Markup
 from ..core.report_contracts import validate_report
 
 try:
@@ -36,7 +40,8 @@ class ExportManager:
             autoescape=select_autoescape(['html', 'xml'], default_for_string=True),
         )
         self.jinja_env.filters.update(number=self._display_number, score_color=self._score_color,
-                                     safe_url=self._safe_url, json_text=self._json_text)
+                                     safe_url=self._safe_url, json_text=self._json_text,
+                                     json_chunks=self._json_chunks)
         self.jinja_env.policies['json.dumps_kwargs'] = {'default': str, 'sort_keys': False}
 
     @staticmethod
@@ -79,6 +84,13 @@ class ExportManager:
     def _json_text(value):
         """Return plain JSON text for autoescaped HTML evidence, never trusted markup."""
         return json.dumps(value, indent=2, ensure_ascii=False, default=str)
+
+    @staticmethod
+    def _json_chunks(value):
+        """Stream script-safe JSON without materializing the full findings text."""
+        for chunk in json.JSONEncoder(ensure_ascii=False, allow_nan=False).iterencode(value):
+            yield Markup(chunk.replace('&', '\\u0026').replace('<', '\\u003c')
+                         .replace('>', '\\u003e').replace("'", '\\u0027'))
 
     @staticmethod
     def _cell(value):
@@ -130,7 +142,7 @@ class ExportManager:
 
     @classmethod
     def _issues(cls, data):
-        issues = data.get('issues', [])
+        issues = data.get('issues', data.get('aggregated_issues', []))
         if isinstance(issues, dict):
             issues = issues.get('aggregated', issues.get('top_issues', []))
         issues = cls._records(issues)
@@ -180,17 +192,30 @@ class ExportManager:
 
     def export_json(self, data: Dict[str, Any], output_file: Path) -> str:
         validate_report(data)
-        serialized = json.dumps(data, indent=2, default=str, ensure_ascii=False, allow_nan=False)
-        with open(output_file, 'w', encoding='utf-8') as stream:
-            stream.write(serialized)
+        with self._atomic_output(output_file, encoding='utf-8') as stream:
+            json.dump(data, stream, indent=2, default=str, ensure_ascii=False, allow_nan=False)
         return str(output_file)
+
+    @staticmethod
+    @contextmanager
+    def _atomic_output(output_file, mode='w', **options):
+        """Replace a report only after its sibling temporary file closes cleanly."""
+        output_file = Path(output_file)
+        descriptor, temporary = tempfile.mkstemp(
+            prefix='.tfq0seo-', suffix='.tmp', dir=output_file.parent)
+        try:
+            with os.fdopen(descriptor, mode, **options) as stream:
+                yield stream
+            os.replace(temporary, output_file)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
 
     def export_csv(self, data: Dict[str, Any], output_file: Path) -> str:
         validate_report(data)
-        rows = [self._flatten_page_data(page) for page in self._page_records(data)]
-        rows = rows or [{'error': 'No data to export'}]
-        fieldnames = sorted({key for row in rows for key in row})
-        with open(output_file, 'w', newline='', encoding='utf-8') as stream:
+        pages = self._page_records(data)
+        fieldnames = sorted({key for page in pages for key in self._flatten_page_data(page)}) or ['error']
+        rows = (self._flatten_page_data(page) for page in pages) if pages else [{'error': 'No data to export'}]
+        with self._atomic_output(output_file, newline='', encoding='utf-8') as stream:
             writer = csv.DictWriter(stream, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows({key: self._cell(value) for key, value in row.items()} for row in rows)
@@ -235,7 +260,11 @@ class ExportManager:
         self._write_issues_sheet(workbook.create_sheet('Issues'), data)
         self._write_pages_sheet(workbook.create_sheet('Pages'), self._page_records(data))
         self._write_recommendations_sheet(workbook.create_sheet('Recommendations'), self._recommendations(data))
-        workbook.save(output_file)
+        try:
+            with self._atomic_output(output_file, mode='wb') as stream:
+                workbook.save(stream)
+        finally:
+            workbook.close()
         return str(output_file)
 
     def _append_row(self, sheet, values):
@@ -308,9 +337,8 @@ class ExportManager:
                 template = self.jinja_env.get_template('report.html')
             except TemplateNotFound:
                 template = self.jinja_env.from_string(self._get_basic_html_template())
-        html = template.render(**self._prepare_html_data(data))
-        with open(output_file, 'w', encoding='utf-8') as stream:
-            stream.write(html)
+        with self._atomic_output(output_file, encoding='utf-8') as stream:
+            stream.writelines(template.generate(**self._prepare_html_data(data)))
         return str(output_file)
 
     def _prepare_html_data(self, data: Dict[str, Any]) -> Dict[str, Any]:

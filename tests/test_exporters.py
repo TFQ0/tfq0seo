@@ -16,6 +16,90 @@ from tfq0seo.core.app import SEOAnalyzer
 from tfq0seo.exporters.base import ExportManager
 
 
+@pytest.mark.parametrize('format', ['json', 'csv', 'html', 'xlsx'])
+@pytest.mark.parametrize('existing', [False, True])
+def test_failed_atomic_replace_preserves_destination_and_removes_temporary_files(
+        tmp_path, monkeypatch, format, existing):
+    exporter = ExportManager({'output_directory': str(tmp_path)})
+    destination = tmp_path / ('report.' + format)
+    if existing:
+        destination.write_bytes(b'previous report')
+
+    def fail_replace(source, target):
+        assert Path(source).parent == destination.parent
+        assert Path(source).stat().st_size > 0
+        assert Path(target) == destination
+        raise OSError('replacement denied')
+
+    monkeypatch.setattr('tfq0seo.exporters.base.os.replace', fail_replace)
+    with pytest.raises(OSError, match='replacement denied'):
+        exporter.export({'url': 'https://example.test'}, format, str(destination))
+    assert destination.read_bytes() == b'previous report' if existing else not destination.exists()
+    assert list(tmp_path.iterdir()) == ([destination] if existing else [])
+
+
+@pytest.mark.parametrize('format', ['json', 'csv', 'html', 'xlsx'])
+def test_partial_writer_failure_preserves_previous_report(tmp_path, monkeypatch, format):
+    exporter = ExportManager({'output_directory': str(tmp_path)})
+    destination = tmp_path / ('report.' + format)
+    destination.write_bytes(b'previous report')
+    if format == 'json':
+        def fail_json(data, stream, **kwargs):
+            stream.write('{"partial":')
+            raise OSError('writer failed')
+        monkeypatch.setattr('tfq0seo.exporters.base.json.dump', fail_json)
+    elif format == 'csv':
+        def fail_rows(writer, rows):
+            writer.writerow(next(iter(rows)))
+            raise OSError('writer failed')
+        monkeypatch.setattr(csv.DictWriter, 'writerows', fail_rows)
+    elif format == 'html':
+        def fail_html(*args, **kwargs):
+            yield '<html>partial'
+            raise OSError('writer failed')
+        template = exporter.jinja_env.get_template('report.html')
+        monkeypatch.setattr(template, 'generate', fail_html)
+    else:
+        def fail_workbook(workbook, stream):
+            stream.write(b'partial zip')
+            raise OSError('writer failed')
+        monkeypatch.setattr('tfq0seo.exporters.base.Workbook.save', fail_workbook)
+    with pytest.raises(OSError, match='writer failed'):
+        getattr(exporter, 'export_' + format)({'url': 'https://example.test'}, destination)
+    assert destination.read_bytes() == b'previous report'
+    assert list(tmp_path.iterdir()) == [destination]
+
+
+def test_atomic_csv_fallback_preserves_existing_xlsx(tmp_path, monkeypatch):
+    exporter = ExportManager({'output_directory': str(tmp_path)})
+    destination = tmp_path / 'report.xlsx'
+    destination.write_bytes(b'previous workbook')
+    monkeypatch.setattr('tfq0seo.exporters.base.OPENPYXL_AVAILABLE', False)
+    result = exporter.export({'url': 'https://example.test'}, 'xlsx', str(destination))
+    assert result == str(destination.with_suffix('.csv'))
+    assert destination.read_bytes() == b'previous workbook'
+    assert 'https://example.test' in Path(result).read_text(encoding='utf-8')
+
+
+@pytest.mark.parametrize('count', [0, 1, 20, 21, 45])
+def test_complete_findings_data_survives_pagination_and_escapes_untrusted_text(tmp_path, count):
+    payload = '</script><img src=x onerror=alert(1)>&'
+    issues = [{'severity': 'warning', 'category': 'SEO', 'message': f'Finding {i}: {payload}',
+               'count': 1, 'pages_affected': 1, 'pages': [f'https://example.test/{i}'],
+               'evidence': {'all_items': list(range(25))}, 'url': f'https://example.test/{i}'}
+              for i in range(count)]
+    data = {'pages': [], 'issues': {'aggregated': issues}}
+    exporter = ExportManager({'output_directory': str(tmp_path)})
+    output = Path(exporter.export(data, 'html')).read_text(encoding='utf-8')
+    soup = BeautifulSoup(output, 'html.parser')
+    assert json.loads(soup.select_one('#findings-data').string) == issues
+    assert soup.select_one('#findings-search')['type'] == 'search'
+    assert soup.select_one('#findings-severity')
+    assert soup.select_one('#findings-next')
+    assert not soup.select('[onerror]')
+    assert not soup.find('img')
+
+
 @pytest.fixture
 def page():
     html = '''<html lang="en"><head><title>A useful title for the local export fixture</title>
