@@ -1,3 +1,4 @@
+{% from "rule_metadata.html" import finding as rule_finding, overview as rule_overview, styles as rule_styles %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -504,8 +505,13 @@
             }
         }
     </style>
+    {{ rule_styles() }}
 </head>
 <body>
+    {% if report_status == "partial" %}<div role="status">Analysis is partial. Review the reported errors and page status.</div>{% endif %}
+    {% if score_source in ("static_html", "static_rule_heuristics") %}<p>Scores summarize completed static HTML checks.</p>{% endif %}
+    {% if error %}<div role="alert">Analysis failed: {{ error }}</div>{% endif %}
+    {% for analyzer_error in analysis_errors %}<div role="status">{{ analyzer_error.analyzer|title }}: {{ analyzer_error.error }}</div>{% endfor %}
     <div class="container">
         <header>
             <div class="header-content">
@@ -515,24 +521,26 @@
                         <h1>TFQ0SEO Analysis Report</h1>
                     </div>
                     <div class="url-info">
-                        <a href="{{ url }}" target="_blank">{{ url }}</a>
+                        {% if url|safe_url %}<a href="{{ url|safe_url }}" target="_blank" rel="noopener noreferrer">{{ url }}</a>{% else %}<span>{{ url }}</span>{% endif %}
                     </div>
                 </div>
                 <div class="timestamp">Generated: {{ timestamp }}</div>
             </div>
         </header>
+        {{ rule_overview(scoring_policies, scoring_versions, rule_coverage) }}
+        {% include "site_analysis.html" %}
         
         <section class="score-section">
             <div class="main-score">
                 <svg width="200" height="200" class="gauge-svg">
                     <circle cx="100" cy="100" r="90" class="gauge-bg"></circle>
                     <circle cx="100" cy="100" r="90" 
-                            class="gauge-fill {% if overall_score >= 80 %}good{% elif overall_score >= 50 %}average{% else %}poor{% endif %}"
+                            class="gauge-fill {% if overall_score is number and overall_score >= 80 %}good{% elif overall_score is number and overall_score >= 50 %}average{% else %}poor{% endif %}"
                             stroke-dasharray="565.48"
-                            stroke-dashoffset="{{ 565.48 * (1 - overall_score / 100) }}"></circle>
+                            stroke-dashoffset="{{ 565.48 * (1 - overall_score / 100) if overall_score is number else 565.48 }}"></circle>
                 </svg>
-                <div class="score-text {% if overall_score >= 80 %}good{% elif overall_score >= 50 %}average{% else %}poor{% endif %}" style="color: {% if overall_score >= 80 %}var(--color-pass){% elif overall_score >= 50 %}var(--color-average){% else %}var(--color-fail){% endif %}">
-                    {{ overall_score|round|int }}
+                <div class="score-text {% if overall_score is number and overall_score >= 80 %}good{% elif overall_score is number and overall_score >= 50 %}average{% else %}poor{% endif %}" style="color: {{ overall_score|score_color }}">
+                    {{ overall_score|number }}
                 </div>
                 <div class="score-label">Overall Score</div>
             </div>
@@ -540,8 +548,8 @@
             <div class="category-scores">
                 {% for category, score in category_scores.items() %}
                 <div class="category-score">
-                    <div class="category-score-value" style="color: {% if score >= 80 %}var(--color-pass){% elif score >= 50 %}var(--color-average){% else %}var(--color-fail){% endif %}">
-                        {{ score|round|int }}
+                    <div class="category-score-value" style="color: {{ score|score_color }}">
+                        {{ score|number }}
                     </div>
                     <div class="category-score-label">{{ category|title }}</div>
                 </div>
@@ -589,6 +597,7 @@
                             <div class="issue-category">{{ severity|upper }}</div>
                         </div>
                         <div class="issue-message">{{ issue.message }}</div>
+                        {{ rule_finding(issue) }}
                         {% if issue.details %}
                         <div class="issue-details">
                             <pre>{{ issue.details|tojson(indent=2) }}</pre>
@@ -616,8 +625,24 @@
         </section>
         {% endif %}
         
+
+        {% if pages_summary|length > 1 or summary %}
+        <section class="pages-section">
+            <h2>Pages ({{ pages_summary|length }})</h2>
+            <table class="pages-table">
+                <thead><tr><th>URL</th><th>Score</th><th>Status</th><th>Load time</th><th>Issues</th><th>Analysis status</th></tr></thead>
+                <tbody>{% for page in pages_summary %}
+                <tr><td>{{ page.url }}</td><td>{{ page.score|number }}</td>
+                <td>{{ page.status_code if page.status_code is not none else 'Unavailable' }}</td>
+                <td>{{ page.load_time|number(2, 's') }}</td><td>{{ page.issue_count }}</td>
+                <td>{{ page.error or page.status or '' }}</td></tr>
+                {% endfor %}</tbody>
+            </table>
+        </section>
+        {% endif %}
+
         <footer>
-            <p>Generated by TFQ0SEO v2.2.0 - Fast SEO Analysis Tool</p>
+            <p>Generated by TFQ0SEO - Fast SEO Analysis Tool</p>
         </footer>
     </div>
     

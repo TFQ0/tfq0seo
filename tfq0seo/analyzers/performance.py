@@ -1,4 +1,4 @@
-"""Advanced performance analyzer with Core Web Vitals, resource optimization, and network analysis."""
+"""Static performance inspection with explicit measurement provenance."""
 
 import re
 import math
@@ -9,6 +9,41 @@ from collections import defaultdict, Counter
 from dataclasses import dataclass, field
 from enum import Enum
 from bs4 import BeautifulSoup, Tag
+from .common import (classify_url, document_base_url, is_nonblocking_script,
+                     make_issue, resolve_url, score_grade)
+from ..rules import RuleDefinition, RuleCollector, register_rules, score_findings, recommendations_for
+from ..page_facts import PageFacts, ensure_page_facts
+
+
+_SCRIPT_REFERENCE = 'https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script'
+PERFORMANCE_RULES = (
+    RuleDefinition('performance.blocking_scripts', 'performance', 'warning',
+        'Review parser-blocking scripts in a browser trace. Use defer for order-dependent scripts or async for independent scripts only when compatible with their behavior.',
+        'External classic JavaScript in head lacks async/defer. Static attributes identify parser-blocking candidates; timing impact is not measured.',
+        (_SCRIPT_REFERENCE, 'https://html.spec.whatwg.org/multipage/scripting.html#the-script-element',
+         'https://mimesniff.spec.whatwg.org/#javascript-mime-type'), '2026-09-14'),
+    RuleDefinition('performance.responsive_images', 'performance', 'notice',
+        'Check image display sizes and transfer sizes across devices; supply responsive sources where they improve the actual image use case.',
+        'Image elements lack srcset/sizes hints. Small fixed-size images and vector images may need no alternatives; the 30% threshold is a local review heuristic.',
+        ('https://web.dev/articles/responsive-images',), '2026-09-14', scored=False),
+    RuleDefinition('performance.large_inline_scripts', 'performance', 'notice',
+        'Measure the cost of the inline JavaScript before changing its loading or caching strategy.',
+        'Executable inline script text exceeds 1000 characters; this local review threshold does not measure transfer or execution cost.',
+        (_SCRIPT_REFERENCE,), '2026-09-14', scored=False),
+    RuleDefinition('performance.jquery_references', 'performance', 'notice',
+        'Inspect the referenced scripts for duplicate libraries before removing any dependency.',
+        'Multiple script URLs contain a jQuery naming pattern; plugins and custom filenames may be legitimate.',
+        (_SCRIPT_REFERENCE,), '2026-09-14', scored=False),
+    RuleDefinition('performance.inline_styles', 'performance', 'notice',
+        'Review style maintenance and browser measurements before moving repeated styles into a stylesheet.',
+        'More than 20 elements have inline style attributes; this local count does not establish a rendering problem.',
+        ('https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/style',), '2026-09-14', scored=False),
+    RuleDefinition('performance.document_write', 'performance', 'notice',
+        'Review whether document.write is actually executed and replace it with DOM APIs when feasible.',
+        'Executable inline JavaScript contains a document.write text reference; comments and unreachable code can match.',
+        ('https://developer.mozilla.org/en-US/docs/Web/API/Document/write',), '2026-09-14', scored=False),
+)
+register_rules(PERFORMANCE_RULES)
 
 
 class ResourceType(Enum):
@@ -38,35 +73,36 @@ class ResourceProfile:
     """Detailed resource information."""
     url: str
     type: ResourceType
-    size: int = 0
-    load_time: float = 0.0
+    size: Optional[int] = None
+    load_time: Optional[float] = None
     is_render_blocking: bool = False
     is_async: bool = False
     is_deferred: bool = False
     is_lazy: bool = False
     is_critical: bool = False
     is_third_party: bool = False
-    is_cached: bool = False
+    is_cached: Optional[bool] = None
     priority: str = "auto"
     compression: Optional[str] = None
-    cache_duration: int = 0
+    cache_duration: Optional[int] = None
 
 
 @dataclass
 class PerformanceMetrics:
     """Container for performance metrics."""
-    load_time: float = 0.0
-    dom_content_loaded: float = 0.0
-    time_to_first_byte: float = 0.0
-    first_contentful_paint: float = 0.0
-    largest_contentful_paint: float = 0.0
-    first_input_delay: float = 0.0
-    cumulative_layout_shift: float = 0.0
-    time_to_interactive: float = 0.0
-    speed_index: float = 0.0
-    total_blocking_time: float = 0.0
-    max_potential_fid: float = 0.0
-    total_byte_weight: int = 0
+    load_time: Optional[float] = None
+    dom_content_loaded: Optional[float] = None
+    time_to_first_byte: Optional[float] = None
+    first_contentful_paint: Optional[float] = None
+    largest_contentful_paint: Optional[float] = None
+    first_input_delay: Optional[float] = None
+    interaction_to_next_paint: Optional[float] = None
+    cumulative_layout_shift: Optional[float] = None
+    time_to_interactive: Optional[float] = None
+    speed_index: Optional[float] = None
+    total_blocking_time: Optional[float] = None
+    max_potential_fid: Optional[float] = None
+    total_byte_weight: Optional[int] = None
     dom_size: int = 0
 
 
@@ -90,37 +126,39 @@ class OptimizationOpportunity:
     title: str
     impact: str  # high, medium, low
     category: str
-    estimated_savings_ms: float = 0
-    estimated_savings_bytes: int = 0
+    estimated_savings_ms: Optional[float] = None
+    estimated_savings_bytes: Optional[int] = None
     description: str = ""
     implementation: str = ""
 
 
-def create_issue(category: str, severity: str, message: str, details: Optional[Dict] = None) -> Dict[str, Any]:
-    """Create an enhanced issue with optimization guidance."""
-    issue = {
-        'category': category,
-        'severity': severity,
-        'message': message
-    }
-    if details:
-        issue['details'] = details
-    
-    # Add specific optimization recommendations
-    if 'image' in message.lower():
-        issue['fix'] = "Optimize images: Use WebP/AVIF formats, implement lazy loading, serve responsive images with srcset"
-    elif 'script' in message.lower() or 'javascript' in message.lower():
-        issue['fix'] = "Optimize scripts: Minify, bundle, use async/defer, implement code splitting, remove unused code"
-    elif 'css' in message.lower() or 'stylesheet' in message.lower():
-        issue['fix'] = "Optimize CSS: Extract critical CSS, minify, remove unused rules, implement CSS-in-JS for components"
-    elif 'cache' in message.lower():
-        issue['fix'] = "Implement caching: Set proper Cache-Control headers, use CDN, implement service worker caching"
-    elif 'font' in message.lower():
-        issue['fix'] = "Optimize fonts: Use font-display: swap, preload critical fonts, subset fonts, use variable fonts"
+def create_issue(category: str, severity: str, message: str, details: Optional[Dict] = None,
+                 rule_id: Optional[str] = None, evidence: Any = None,
+                 confidence: str = 'high') -> Dict[str, Any]:
+    """Compatibility helper; registered rule identity supplies the guidance."""
+    return make_issue(category, severity, message, details, rule_id, evidence,
+                      confidence=confidence)
+
+
+def _is_classic_javascript(script: Tag) -> bool:
+    """Exclude module scripts and data blocks from parser-blocking checks."""
+    if not (script.has_attr('type') if isinstance(script, Tag) else 'type' in script):
+        language = str(script.get('language', ''))
+        script_type = ('text/' + language) if language else 'text/javascript'
     else:
-        issue['fix'] = "Review performance best practices and implement appropriate optimizations"
-    
-    return issue
+        declared_type = str(script.get('type', ''))
+        script_type = 'text/javascript' if declared_type == '' else declared_type.strip(' \t\n\r\f')
+    script_type = script_type.lower()
+    return script_type in (
+        'application/ecmascript', 'application/javascript', 'application/x-ecmascript',
+        'application/x-javascript', 'text/ecmascript', 'text/javascript', 'text/javascript1.0',
+        'text/javascript1.1', 'text/javascript1.2', 'text/javascript1.3', 'text/javascript1.4',
+        'text/javascript1.5', 'text/jscript', 'text/livescript', 'text/x-ecmascript', 'text/x-javascript',
+    )
+
+
+def _is_executable_script(script: Tag) -> bool:
+    return _is_classic_javascript(script) or str(script.get('type', '')).strip().lower() == 'module'
 
 
 def detect_resource_type(element: Tag, url: str = "") -> ResourceType:
@@ -158,29 +196,8 @@ def detect_resource_type(element: Tag, url: str = "") -> ResourceType:
 
 
 def is_third_party(resource_url: str, page_url: str) -> bool:
-    """Check if a resource is from a third-party domain."""
-    if not resource_url or resource_url.startswith(('data:', 'blob:', '#')):
-        return False
-    
-    try:
-        resource_domain = urlparse(resource_url).netloc
-        page_domain = urlparse(page_url).netloc
-        
-        # Remove www prefix for comparison
-        resource_domain = resource_domain.replace('www.', '')
-        page_domain = page_domain.replace('www.', '')
-        
-        # Check if same domain or subdomain
-        if resource_domain == page_domain:
-            return False
-        
-        # Check if subdomain of main domain
-        if resource_domain.endswith('.' + page_domain) or page_domain.endswith('.' + resource_domain):
-            return False
-        
-        return True
-    except:
-        return False
+    """Classify resource references using the same URL rules as link analysis."""
+    return classify_url(resource_url, page_url) == 'external'
 
 
 def calculate_resource_priority(resource: ResourceProfile) -> str:
@@ -201,44 +218,27 @@ def calculate_resource_priority(resource: ResourceProfile) -> str:
     return "auto"
 
 
-def estimate_compression_savings(content: str, content_type: str) -> int:
-    """Estimate potential compression savings."""
-    if not content:
-        return 0
-    
-    original_size = len(content.encode('utf-8'))
-    
-    # Estimate compression ratio based on content type
-    compression_ratios = {
-        'html': 0.3,
-        'css': 0.25,
-        'js': 0.35,
-        'json': 0.2,
-        'svg': 0.3,
-        'xml': 0.25
-    }
-    
-    ratio = 0.5  # Default
-    for type_key, type_ratio in compression_ratios.items():
-        if type_key in content_type.lower():
-            ratio = type_ratio
-            break
-    
-    estimated_compressed = int(original_size * ratio)
-    return original_size - estimated_compressed
+def estimate_compression_savings(content: str, content_type: str) -> Optional[int]:
+    """Actual transfer savings require compressed and uncompressed byte counts."""
+    return None
 
 
-def analyze_critical_rendering_path(soup: BeautifulSoup) -> Dict[str, Any]:
+def analyze_critical_rendering_path(soup: BeautifulSoup, *, facts: Optional[PageFacts] = None) -> Dict[str, Any]:
     """Analyze the critical rendering path."""
     critical_path = {
         'render_blocking_resources': [],
         'critical_request_chains': [],
-        'estimated_savings_ms': 0
+        'estimated_savings_ms': None,
+        'status': 'static_candidates',
+        'source': 'html',
+        'critical_request_chains_status': 'unknown'
     }
     
     # Find render-blocking resources
     # CSS in head without media queries
-    for link in soup.find_all('link', rel='stylesheet'):
+    links = ([record['attrs'] for record in facts.link_tags if 'stylesheet' in record['attrs'].get('rel', [])]
+             if facts is not None else soup.find_all('link', rel='stylesheet'))
+    for link in links:
         media = link.get('media', 'all')
         if media in ['all', 'screen', '']:
             critical_path['render_blocking_resources'].append({
@@ -248,84 +248,90 @@ def analyze_critical_rendering_path(soup: BeautifulSoup) -> Dict[str, Any]:
             })
     
     # Scripts in head without async/defer
-    head = soup.find('head')
-    if head:
-        for script in head.find_all('script', src=True):
-            if not script.get('async') and not script.get('defer'):
-                critical_path['render_blocking_resources'].append({
-                    'type': 'script',
-                    'url': script.get('src', ''),
-                    'impact': 'high'
-                })
-    
-    # Estimate impact (100ms per blocking resource as rough estimate)
-    critical_path['estimated_savings_ms'] = len(critical_path['render_blocking_resources']) * 100
+    if facts is not None:
+        scripts = [record['attrs'] for record in facts.scripts if record['in_head'] and 'src' in record['attrs']]
+    else:
+        head = soup.find('head')
+        scripts = head.find_all('script', src=True) if head else []
+    for script in scripts:
+        if _is_classic_javascript(script) and not is_nonblocking_script(script):
+            critical_path['render_blocking_resources'].append({
+                'type': 'script', 'url': script.get('src', ''), 'impact': 'high'
+            })
     
     return critical_path
 
 
-def detect_performance_patterns(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Detect common performance patterns and anti-patterns."""
-    patterns = {
-        'good_patterns': [],
-        'bad_patterns': [],
-        'opportunities': []
-    }
-    
-    # Good patterns
-    if soup.find('link', rel='preconnect'):
-        patterns['good_patterns'].append('Uses preconnect for third-party origins')
-    
-    if soup.find('link', rel='dns-prefetch'):
-        patterns['good_patterns'].append('Uses DNS prefetching')
-    
-    if soup.find('link', rel='preload'):
-        patterns['good_patterns'].append('Uses resource preloading')
-    
-    if soup.find('script', attrs={'type': 'module'}):
+def _script_records(soup: BeautifulSoup, facts: Optional[PageFacts] = None) -> List[Dict[str, Any]]:
+    if facts is not None:
+        return facts.scripts
+    return [{'attrs': dict(script.attrs), 'text': script.string or '',
+             'in_head': script.find_parent('head') is not None, 'index': index}
+            for index, script in enumerate(soup.find_all('script'))]
+
+
+def detect_performance_patterns(soup: BeautifulSoup, *, facts: Optional[PageFacts] = None) -> Dict[str, Any]:
+    """Describe source patterns using the shared attribute and script snapshot."""
+    patterns = {'good_patterns': [], 'bad_patterns': [], 'opportunities': [],
+                'status': 'heuristic', 'source': 'html'}
+    links = [record['attrs'] for record in facts.link_tags] if facts is not None else soup.find_all('link')
+    scripts = _script_records(soup, facts)
+    images = [record['attrs'] for record in facts.images] if facts is not None else soup.find_all('img')
+    metas = [record['attrs'] for record in facts.meta] if facts is not None else soup.find_all('meta')
+    for relation, message in (
+        ('preconnect', 'Declares preconnect hints'), ('dns-prefetch', 'Uses DNS prefetching'),
+        ('preload', 'Uses resource preloading'),
+    ):
+        if any(relation in link.get('rel', []) for link in links):
+            patterns['good_patterns'].append(message)
+    if any(script['attrs'].get('type') == 'module' for script in scripts):
         patterns['good_patterns'].append('Uses ES6 modules')
-    
-    if soup.find('img', loading='lazy'):
+    if any(image.get('loading') == 'lazy' for image in images):
         patterns['good_patterns'].append('Implements lazy loading for images')
-    
-    # Check for service worker
-    if soup.find('script', string=re.compile(r'serviceWorker|navigator\.serviceWorker')):
-        patterns['good_patterns'].append('Has service worker for offline support')
-    
-    # Bad patterns
-    inline_scripts = soup.find_all('script', src=False)
-    large_inline_scripts = [s for s in inline_scripts if s.string and len(s.string) > 1000]
+    if any(re.search(r'serviceWorker|navigator\.serviceWorker', script['text']) for script in scripts):
+        patterns['good_patterns'].append('Contains a service worker code reference; registration was not verified')
+    inline_scripts = [script for script in scripts if 'src' not in script['attrs'] and _is_executable_script(script['attrs'])]
+    large_inline_scripts = [script for script in inline_scripts if len(script['text']) > 1000]
     if large_inline_scripts:
         patterns['bad_patterns'].append(f'Large inline scripts ({len(large_inline_scripts)} found)')
-    
-    # Multiple jQuery versions
-    jquery_scripts = soup.find_all('script', src=re.compile(r'jquery[\.-]'))
+    jquery_scripts = [script for script in scripts if re.search(r'jquery[\.-]', script['attrs'].get('src', ''))]
     if len(jquery_scripts) > 1:
-        patterns['bad_patterns'].append('Multiple jQuery versions detected')
-    
-    # Inline styles on many elements
+        patterns['bad_patterns'].append('Multiple jQuery-named script references; review for duplicate loading')
     elements_with_style = soup.find_all(style=True)
     if len(elements_with_style) > 20:
         patterns['bad_patterns'].append(f'Excessive inline styles ({len(elements_with_style)} elements)')
-    
-    # document.write usage
-    if soup.find('script', string=re.compile(r'document\.write')):
+    if any(re.search(r'document\.write', script['text']) for script in scripts):
         patterns['bad_patterns'].append('Uses document.write() which blocks parsing')
-    
-    # Opportunities
-    if not soup.find('link', rel='modulepreload'):
+    if not any('modulepreload' in link.get('rel', []) for link in links):
         patterns['opportunities'].append('Consider modulepreload for ES6 modules')
-    
-    if not soup.find('meta', attrs={'http-equiv': 'Accept-CH'}):
+    if not any(meta.get('http-equiv') == 'Accept-CH' for meta in metas):
         patterns['opportunities'].append('Consider Client Hints for responsive images')
-    
-    if not soup.find('link', attrs={'as': 'font', 'crossorigin': True}):
+    if not any(link.get('as') == 'font' and 'crossorigin' in link for link in links):
         patterns['opportunities'].append('Preload fonts with crossorigin attribute')
-    
+    collector = RuleCollector('performance')
+    observations = (
+        ('performance.large_inline_scripts', bool(large_inline_scripts),
+         {'scripts': [{'characters': len(script['text'])} for script in large_inline_scripts], 'threshold_characters': 1000},
+         f'Large inline script text ({len(large_inline_scripts)} found)', bool(inline_scripts)),
+        ('performance.jquery_references', len(jquery_scripts) > 1,
+         {'urls': [script['attrs'].get('src', '') for script in jquery_scripts]},
+         'Multiple jQuery-named script references; review for duplicate loading', bool(jquery_scripts)),
+        ('performance.inline_styles', len(elements_with_style) > 20,
+         {'element_count': len(elements_with_style), 'threshold': 20},
+         f'Inline styles found on {len(elements_with_style)} elements', bool(elements_with_style)),
+        ('performance.document_write', any(re.search(r'document\.write', script['text']) for script in inline_scripts),
+         {'matches': [script['text'] for script in inline_scripts if re.search(r'document\.write', script['text'])]},
+         'Inline script text contains document.write; execution was not verified', bool(inline_scripts)),
+    )
+    for rule_id, failed, evidence, message, applicable in observations:
+        collector.check(rule_id, failed, evidence=evidence, message=message, category='Performance',
+                        applicable=applicable, reason='Requires matching HTML elements.', confidence='low')
+    patterns['findings'] = collector.issues
+    patterns['rule_results'] = collector.results
     return patterns
 
 
-def analyze_image_optimization(soup: BeautifulSoup) -> Dict[str, Any]:
+def analyze_image_optimization(soup: BeautifulSoup, *, facts: Optional[PageFacts] = None) -> Dict[str, Any]:
     """Analyze image optimization opportunities."""
     image_analysis = {
         'total_images': 0,
@@ -334,10 +340,12 @@ def analyze_image_optimization(soup: BeautifulSoup) -> Dict[str, Any]:
         'with_dimensions': 0,
         'responsive_images': 0,
         'issues': [],
-        'savings_potential_kb': 0
+        'savings_potential_kb': None,
+        'savings_status': 'unknown',
+        'source': 'html_attributes'
     }
     
-    images = soup.find_all('img')
+    images = [record['attrs'] for record in facts.images] if facts is not None else soup.find_all('img')
     image_analysis['total_images'] = len(images)
     
     for img in images:
@@ -361,636 +369,264 @@ def analyze_image_optimization(soup: BeautifulSoup) -> Dict[str, Any]:
     
     # Calculate issues and savings
     if image_analysis['total_images'] > 0:
-        # Estimate 30% savings with WebP/AVIF
-        unoptimized = image_analysis['total_images'] - image_analysis['optimized_formats']
-        image_analysis['savings_potential_kb'] = unoptimized * 50  # Assume 50KB average savings per image
-        
-        if image_analysis['lazy_loaded'] < image_analysis['total_images'] * 0.5:
-            image_analysis['issues'].append('Most images are not lazy loaded')
-        
         if image_analysis['with_dimensions'] < image_analysis['total_images'] * 0.8:
             image_analysis['issues'].append('Many images missing width/height attributes')
         
         if image_analysis['responsive_images'] < image_analysis['total_images'] * 0.3:
             image_analysis['issues'].append('Few responsive images implemented')
     
+    collector = RuleCollector('performance')
+    missing_dimensions = [dict(index=index, src=img.get('src', '')) for index, img in enumerate(images)
+                          if not (img.get('width') and img.get('height'))]
+    collector.check('images.missing_dimensions', bool(missing_dimensions),
+        evidence={'images': missing_dimensions, 'count': len(missing_dimensions), 'css_layout_checked': False},
+        applicable=bool(images), reason='Requires image elements.', category='Performance', confidence='low',
+        message=f'{len(missing_dimensions)} images lack width/height attributes; CSS may reserve their layout space')
+    collector.check('performance.responsive_images', image_analysis['responsive_images'] < len(images) * 0.3,
+        evidence={'image_count': len(images), 'with_responsive_attributes': image_analysis['responsive_images'], 'ratio_threshold': 0.3},
+        applicable=bool(images), reason='Requires image elements.', category='Performance', confidence='low',
+        message='Few image elements declare responsive sources; review whether variants are useful')
+    image_analysis['findings'] = collector.issues
+    image_analysis['rule_results'] = collector.results
     return image_analysis
 
 
-def analyze_javascript_optimization(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Analyze JavaScript optimization opportunities."""
+def analyze_javascript_optimization(soup: BeautifulSoup, page_url: Optional[str] = None, *,
+                                    facts: Optional[PageFacts] = None) -> Dict[str, Any]:
+    """Analyze JavaScript attributes using the shared script snapshot."""
     js_analysis = {
-        'total_scripts': 0,
-        'async_scripts': 0,
-        'defer_scripts': 0,
-        'module_scripts': 0,
-        'inline_scripts': 0,
-        'minified_scripts': 0,
-        'render_blocking': 0,
-        'third_party_scripts': [],
-        'bundle_analysis': {}
+        'total_scripts': 0, 'async_scripts': 0, 'defer_scripts': 0, 'module_scripts': 0,
+        'inline_scripts': 0, 'minified_scripts': None, 'minified_filename_references': 0,
+        'minification_status': 'not_measured', 'render_blocking': 0,
+        'third_party_scripts': [], 'third_party_status': 'observed_references', 'bundle_analysis': {}
     }
-    
-    scripts = soup.find_all('script')
+    scripts = _script_records(soup, facts)
     js_analysis['total_scripts'] = len(scripts)
-    
-    for script in scripts:
+    base_url = facts.base_url if facts is not None else document_base_url(soup, page_url) if page_url else None
+    for record in scripts:
+        script, text = record['attrs'], record['text']
         src = script.get('src', '')
-        
         if src:
-            # External script
-            if script.get('async'):
+            if 'async' in script:
                 js_analysis['async_scripts'] += 1
-            elif script.get('defer'):
+            if 'defer' in script:
                 js_analysis['defer_scripts'] += 1
-            else:
-                # Check if in head (render-blocking)
-                if script.find_parent('head'):
-                    js_analysis['render_blocking'] += 1
-            
-            # Check for modules
+            if _is_classic_javascript(script) and not is_nonblocking_script(script) and record['in_head']:
+                js_analysis['render_blocking'] += 1
             if script.get('type') == 'module':
                 js_analysis['module_scripts'] += 1
-            
-            # Check for minification
             if '.min.js' in src or '-min.js' in src or '.prod.js' in src:
-                js_analysis['minified_scripts'] += 1
-            
-            # Detect third-party scripts
-            third_party_patterns = [
-                'google-analytics', 'googletagmanager', 'facebook', 
-                'twitter', 'linkedin', 'hotjar', 'mixpanel', 'segment',
-                'intercom', 'drift', 'hubspot', 'zendesk'
-            ]
-            
-            for pattern in third_party_patterns:
-                if pattern in src.lower():
-                    js_analysis['third_party_scripts'].append({
-                        'name': pattern,
-                        'url': src,
-                        'async': bool(script.get('async')),
-                        'defer': bool(script.get('defer'))
-                    })
-                    break
+                js_analysis['minified_filename_references'] += 1
+            if page_url and classify_url(src, page_url, base_url) == 'external':
+                resolved = resolve_url(src, base_url)
+                js_analysis['third_party_scripts'].append({
+                    'name': urlparse(resolved).hostname, 'url': resolved,
+                    'async': 'async' in script, 'defer': 'defer' in script
+                })
         else:
-            # Inline script
             js_analysis['inline_scripts'] += 1
-            
-            # Check size of inline script
-            if script.string:
-                size = len(script.string)
-                if size > 10000:  # 10KB
-                    if 'large_inline' not in js_analysis['bundle_analysis']:
-                        js_analysis['bundle_analysis']['large_inline'] = []
-                    js_analysis['bundle_analysis']['large_inline'].append(size)
-    
+            if len(text) > 10000:
+                js_analysis['bundle_analysis'].setdefault('large_inline', []).append(len(text))
     return js_analysis
 
 
 def calculate_performance_score(metrics: PerformanceMetrics, resource_count: int) -> Tuple[int, str]:
-    """Calculate overall performance score and grade."""
+    """Score only supplied measurements; missing values incur no penalty."""
     score = 100
-    
-    # Core Web Vitals weights (40% of score)
-    # LCP
-    if metrics.largest_contentful_paint > 4.0:
-        score -= 15
-    elif metrics.largest_contentful_paint > 2.5:
-        score -= 8
-    
-    # FID
-    if metrics.first_input_delay > 300:
-        score -= 15
-    elif metrics.first_input_delay > 100:
-        score -= 8
-    
-    # CLS
-    if metrics.cumulative_layout_shift > 0.25:
-        score -= 10
-    elif metrics.cumulative_layout_shift > 0.1:
-        score -= 5
-    
-    # Other metrics (60% of score)
-    # Load time
-    if metrics.load_time > 5.0:
-        score -= 20
-    elif metrics.load_time > 3.0:
-        score -= 10
-    elif metrics.load_time > 2.0:
-        score -= 5
-    
-    # Page weight
-    mb_size = metrics.total_byte_weight / (1024 * 1024)
-    if mb_size > 5.0:
-        score -= 15
-    elif mb_size > 3.0:
-        score -= 10
-    elif mb_size > 2.0:
-        score -= 5
-    
-    # Resource count
-    if resource_count > 100:
-        score -= 10
-    elif resource_count > 70:
-        score -= 5
-    
-    # Time to Interactive
-    if metrics.time_to_interactive > 7.3:
-        score -= 10
-    elif metrics.time_to_interactive > 5.2:
-        score -= 5
-    
-    # Total Blocking Time
-    if metrics.total_blocking_time > 600:
-        score -= 10
-    elif metrics.total_blocking_time > 300:
-        score -= 5
-    
-    # Determine grade
+    checks = (
+        (metrics.largest_contentful_paint, 4.0, 15, 2.5, 8),
+        (metrics.interaction_to_next_paint, 500, 15, 200, 8),
+        (metrics.cumulative_layout_shift, 0.25, 10, 0.1, 5),
+        (metrics.load_time, 5.0, 20, 3.0, 10),
+        (metrics.total_byte_weight, 5 * 1024 * 1024, 15, 3 * 1024 * 1024, 10),
+        (metrics.total_blocking_time, 600, 10, 300, 5),
+    )
+    for value, poor, poor_penalty, moderate, moderate_penalty in checks:
+        if value is not None and math.isfinite(value):
+            if value > poor:
+                score -= poor_penalty
+            elif value > moderate:
+                score -= moderate_penalty
     score = max(0, min(100, score))
-    
-    if score >= 90:
-        grade = 'A'
-    elif score >= 80:
-        grade = 'B'
-    elif score >= 70:
-        grade = 'C'
-    elif score >= 60:
-        grade = 'D'
-    else:
-        grade = 'F'
-    
-    return score, grade
+    return score, score_grade(score)
 
 
 def generate_performance_budget(metrics: PerformanceMetrics, resources: Dict) -> Dict[str, Any]:
-    """Generate a performance budget recommendation."""
+    """Budgets remain unknown until the corresponding quantity is measured."""
     budget = {
         'metrics': {
             'load_time': {'target': 3.0, 'current': metrics.load_time},
             'lcp': {'target': 2.5, 'current': metrics.largest_contentful_paint},
-            'fid': {'target': 100, 'current': metrics.first_input_delay},
+            'inp': {'target': 200, 'current': metrics.interaction_to_next_paint},
             'cls': {'target': 0.1, 'current': metrics.cumulative_layout_shift},
-            'tti': {'target': 5.0, 'current': metrics.time_to_interactive}
+            'tti': {'target': 5.0, 'current': metrics.time_to_interactive},
         },
         'resources': {
-            'total_size': {'target': 2000000, 'current': metrics.total_byte_weight},  # 2MB
-            'images': {'target': 1000000, 'current': 0},  # 1MB for images
-            'scripts': {'target': 500000, 'current': 0},  # 500KB for JS
-            'stylesheets': {'target': 200000, 'current': 0},  # 200KB for CSS
-            'fonts': {'target': 300000, 'current': 0}  # 300KB for fonts
+            'total_size': {'target': 2000000, 'current': metrics.total_byte_weight},
+            'images': {'target': 1000000, 'current': None},
+            'scripts': {'target': 500000, 'current': None},
+            'stylesheets': {'target': 200000, 'current': None},
+            'fonts': {'target': 300000, 'current': None},
         },
         'counts': {
-            'total_requests': {'target': 50, 'current': resources.get('total', 0) if isinstance(resources.get('total'), int) else len(resources.get('total', []))},
-            'third_party_requests': {'target': 10, 'current': 0}
-        }
+            'total_requests': {'target': 50, 'current': None},
+            'third_party_requests': {'target': 10, 'current': None},
+        },
     }
-    
-    # Calculate if budget is met
-    for category in budget:
-        for metric in budget[category]:
-            target = budget[category][metric]['target']
-            current = budget[category][metric]['current']
-            budget[category][metric]['status'] = 'pass' if current <= target else 'fail'
-            if current > 0:
-                budget[category][metric]['ratio'] = round(current / target, 2)
-    
+    for category in budget.values():
+        for value in category.values():
+            current = value['current']
+            value['source'] = 'not_measured' if current is None else 'supplied_measurement'
+            value['status'] = 'unknown' if current is None else 'pass' if current <= value['target'] else 'fail'
+            if current is not None:
+                value['ratio'] = round(current / value['target'], 2)
     return budget
 
 
-def detect_caching_strategy(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Detect caching and CDN usage."""
-    caching = {
-        'has_service_worker': False,
-        'uses_cdn': False,
-        'cdn_providers': [],
-        'cache_control_hints': [],
-        'estimated_cache_hit_rate': 0
+def detect_caching_strategy(soup: BeautifulSoup, *, facts: Optional[PageFacts] = None) -> Dict[str, Any]:
+    """Record HTML hints without inferring cache policy or cache hit rates."""
+    providers = {
+        'cloudflare': ('cdnjs.cloudflare.com',), 'cloudfront': ('cloudfront.net',),
+        'fastly': ('fastly.net',), 'akamai': ('akamaihd.net',),
+        'jsdelivr': ('jsdelivr.net',), 'unpkg': ('unpkg.com',),
     }
-    
-    # Check for service worker
-    if soup.find('script', string=re.compile(r'serviceWorker|navigator\.serviceWorker')):
-        caching['has_service_worker'] = True
-    
-    # Check for CDN usage
-    cdn_patterns = {
-        'cloudflare': ['cloudflare', 'cdnjs'],
-        'cloudfront': ['cloudfront', 'amazonaws'],
-        'fastly': ['fastly'],
-        'akamai': ['akamai'],
-        'maxcdn': ['maxcdn'],
-        'jsdelivr': ['jsdelivr'],
-        'unpkg': ['unpkg'],
-        'staticaly': ['staticaly']
-    }
-    
-    all_resources = soup.find_all(['link', 'script', 'img'], src=True) + \
-                   soup.find_all(['link', 'script', 'img'], href=True)
-    
-    for element in all_resources:
-        url = element.get('src', '') or element.get('href', '')
-        for provider, patterns in cdn_patterns.items():
-            if any(pattern in url.lower() for pattern in patterns):
-                if provider not in caching['cdn_providers']:
-                    caching['cdn_providers'].append(provider)
-                    caching['uses_cdn'] = True
-    
-    # Estimate cache hit rate based on resource types
-    static_resources = len([e for e in all_resources 
-                           if any(ext in str(e.get('src', '') or e.get('href', ''))
-                                 for ext in ['.css', '.js', '.jpg', '.png', '.woff'])])
-    
-    if static_resources > 0:
-        # Assume 70% cache hit rate for static resources with proper caching
-        caching['estimated_cache_hit_rate'] = 70 if caching['uses_cdn'] else 30
-    
-    return caching
-
-
-def analyze_performance(soup: BeautifulSoup, url: str, load_time: float = 0, content_length: int = 0) -> Dict[str, Any]:
-    """Advanced performance analysis with comprehensive metrics and optimization detection."""
-    issues = []
-    data = {}
-    
-    # Initialize performance metrics
-    metrics = PerformanceMetrics(
-        load_time=load_time,
-        total_byte_weight=content_length,
-        dom_size=len(soup.find_all())
-    )
-    
-    # Estimate Core Web Vitals based on available data
-    # LCP estimate (based on load time and content)
-    metrics.largest_contentful_paint = load_time * 0.8 if load_time > 0 else 2.5
-    
-    # FID estimate (based on JavaScript complexity)
-    scripts = soup.find_all('script')
-    if len(scripts) > 15:
-        metrics.first_input_delay = 300
-    elif len(scripts) > 8:
-        metrics.first_input_delay = 150
+    found = set()
+    if facts is not None:
+        elements = [record['attrs'] for record in facts.link_tags + facts.scripts + facts.images]
     else:
-        metrics.first_input_delay = 50
-    
-    # CLS estimate (based on layout stability factors)
-    cls_factors = 0
-    images_without_dimensions = len([img for img in soup.find_all('img') 
-                                    if not (img.get('width') and img.get('height'))])
-    if images_without_dimensions > 3:
-        cls_factors += 2
-    
-    fonts_loaded = len(soup.find_all('link', rel='preload', as_='font'))
-    if fonts_loaded > 4:
-        cls_factors += 1
-    
-    if not soup.find('style'):  # No critical CSS
-        cls_factors += 1
-    
-    metrics.cumulative_layout_shift = min(0.5, cls_factors * 0.1)
-    
-    # Estimate other metrics
-    metrics.time_to_interactive = load_time * 1.5 if load_time > 0 else 3.8
-    metrics.first_contentful_paint = load_time * 0.3 if load_time > 0 else 1.8
-    metrics.total_blocking_time = len(scripts) * 50  # Rough estimate
-    metrics.time_to_first_byte = load_time * 0.2 if load_time > 0 else 0.8
-    
-    # Store basic metrics
-    data['metrics'] = {
-        'load_time': round(metrics.load_time, 2),
-        'dom_size': metrics.dom_size,
-        'content_size_mb': round(content_length / (1024 * 1024), 2),
-        'lcp': round(metrics.largest_contentful_paint, 2),
-        'fid': round(metrics.first_input_delay),
-        'cls': round(metrics.cumulative_layout_shift, 3),
-        'fcp': round(metrics.first_contentful_paint, 2),
-        'tti': round(metrics.time_to_interactive, 2),
-        'tbt': round(metrics.total_blocking_time),
-        'ttfb': round(metrics.time_to_first_byte, 2)
+        elements = soup.find_all(['link', 'script', 'img'])
+    for element in elements:
+        reference = element.get('src') or element.get('href') or ''
+        try:
+            hostname = urlparse(reference).hostname or ''
+        except ValueError:
+            continue
+        for provider, domains in providers.items():
+            if any(hostname == domain or hostname.endswith('.' + domain) for domain in domains):
+                found.add(provider)
+    registration_hint = any(re.search(r'navigator\.serviceWorker\.register', script['text'])
+                            for script in _script_records(soup, facts))
+    return {
+        'has_service_worker': None, 'service_worker_registration_reference': registration_hint,
+        'uses_cdn': None, 'cdn_providers': sorted(found), 'cache_control_hints': [],
+        'estimated_cache_hit_rate': None, 'status': 'unknown', 'source': 'html_references_only',
     }
-    
-    # Analyze resources in detail
-    resources = defaultdict(list)
+
+
+def analyze_performance(soup: BeautifulSoup, url: str, load_time: float = 0,
+                        content_length: int = 0, *, facts: Optional[PageFacts] = None) -> Dict[str, Any]:
+    """Inspect static HTML. Browser timing and network budgets are unavailable."""
+    facts = ensure_page_facts(soup, url, facts=facts)
+    collector = RuleCollector('performance')
+    metrics = PerformanceMetrics(dom_size=facts.dom_size)
+    fetch_time = load_time if isinstance(load_time, (int, float)) and math.isfinite(load_time) and load_time > 0 else None
+    html_bytes = content_length if isinstance(content_length, int) and content_length >= 0 else None
+    # A default zero does not establish that an HTTP response was observed.
+    if html_bytes == 0 and fetch_time is None:
+        html_bytes = None
+    data = {
+        'score_scope': 'static_html_checks',
+        'measurement_status': 'browser_not_measured',
+        'measurement_source': 'html_and_optional_document_fetch',
+        'metrics': {
+            'load_time': None, 'html_fetch_time': fetch_time,
+            'dom_size': metrics.dom_size, 'html_content_bytes': html_bytes,
+            'content_size_mb': round(html_bytes / (1024 * 1024), 4) if html_bytes is not None else None,
+            'lcp': None, 'inp': None, 'fid': None, 'cls': None, 'fcp': None,
+            'tti': None, 'tbt': None, 'ttfb': None,
+        },
+    }
+    data['metric_sources'] = {
+        key: ('html_document' if key == 'dom_size' else
+              'document_fetch' if key in ('html_fetch_time', 'html_content_bytes', 'content_size_mb') and value is not None else
+              'not_measured')
+        for key, value in data['metrics'].items()
+    }
+    resources = {key: [] for key in ('scripts', 'stylesheets', 'images', 'fonts', 'videos')}
     resource_profiles = []
-    
-    # Scripts
-    scripts = soup.find_all('script')
+    base_url = facts.base_url
+
+    def add_resource(element, attribute, resource_type, group, in_head=False):
+        reference = element.get(attribute, '')
+        resolved = resolve_url(reference, base_url)
+        if not resolved:
+            return
+        resources[group].append(resolved)
+        resource_profiles.append(ResourceProfile(
+            url=resolved, type=resource_type,
+            is_async='async' in element if resource_type == ResourceType.SCRIPT else False,
+            is_deferred=('defer' in element or element.get('type') == 'module') if resource_type == ResourceType.SCRIPT else False,
+            is_render_blocking=(_is_classic_javascript(element) and not is_nonblocking_script(element) and in_head) if resource_type == ResourceType.SCRIPT else False,
+            is_lazy=element.get('loading') == 'lazy',
+            is_third_party=classify_url(reference, url, base_url) == 'external',
+        ))
+
+    scripts, links = facts.scripts, facts.link_tags
     for script in scripts:
-        src = script.get('src', '')
-        if src:
-            profile = ResourceProfile(
-                url=src,
-                type=ResourceType.SCRIPT,
-                is_async=bool(script.get('async')),
-                is_deferred=bool(script.get('defer')),
-                is_render_blocking=not (script.get('async') or script.get('defer')),
-                is_third_party=is_third_party(src, url)
-            )
-            profile.priority = calculate_resource_priority(profile)
-            resource_profiles.append(profile)
-            resources['scripts'].append(src)
-    
-    # Stylesheets
-    stylesheets = soup.find_all('link', rel='stylesheet')
-    for link in stylesheets:
-        href = link.get('href', '')
-        if href:
-            profile = ResourceProfile(
-                url=href,
-                type=ResourceType.STYLESHEET,
-                is_render_blocking=True,
-                is_third_party=is_third_party(href, url),
-                is_critical=(link.find_parent('head') is not None)
-            )
-            profile.priority = calculate_resource_priority(profile)
-            resource_profiles.append(profile)
-            resources['stylesheets'].append(href)
-    
-    # Images
-    images = soup.find_all('img')
-    for img in images:
-        src = img.get('src', '') or img.get('data-src', '')
-        if src:
-            profile = ResourceProfile(
-                url=src,
-                type=ResourceType.IMAGE,
-                is_lazy=img.get('loading') == 'lazy',
-                is_third_party=is_third_party(src, url)
-            )
-            # Check if above the fold (simplified check)
-            parent = img.find_parent(['header', 'nav', 'hero', 'banner'])
-            profile.is_critical = parent is not None
-            profile.priority = calculate_resource_priority(profile)
-            resource_profiles.append(profile)
-            resources['images'].append(src)
-    
-    # Fonts
-    font_links = soup.find_all('link', rel='preload', as_='font')
-    for link in font_links:
-        href = link.get('href', '')
-        if href:
-            profile = ResourceProfile(
-                url=href,
-                type=ResourceType.FONT,
-                is_critical=True,
-                is_third_party=is_third_party(href, url)
-            )
-            profile.priority = calculate_resource_priority(profile)
-            resource_profiles.append(profile)
-            resources['fonts'].append(href)
-    
-    # Videos
-    videos = soup.find_all(['video', 'iframe'])
-    for video in videos:
-        if video.name == 'video':
-            src = video.get('src', '')
-        else:  # iframe
-            src = video.get('src', '')
-            if not ('youtube' in src or 'vimeo' in src or 'video' in src):
-                continue
-        
-        if src:
-            profile = ResourceProfile(
-                url=src,
-                type=ResourceType.VIDEO,
-                is_lazy=video.get('loading') == 'lazy',
-                is_third_party=is_third_party(src, url)
-            )
-            profile.priority = 'low'
-            resource_profiles.append(profile)
-            resources['videos'].append(src)
-    
-    # Calculate total resources
+        if 'src' in script['attrs']:
+            add_resource(script['attrs'], 'src', ResourceType.SCRIPT, 'scripts', script['in_head'])
+    for link in links:
+        if 'stylesheet' in link['attrs'].get('rel', []):
+            add_resource(link['attrs'], 'href', ResourceType.STYLESHEET, 'stylesheets')
+    for image in facts.images:
+        img = image['attrs']
+        add_resource(img, 'src' if img.get('src') else 'data-src', ResourceType.IMAGE, 'images')
+    for link in links:
+        if 'preload' in link['attrs'].get('rel', []) and link['attrs'].get('as') == 'font':
+            add_resource(link['attrs'], 'href', ResourceType.FONT, 'fonts')
+    for video in soup.find_all('video'):
+        add_resource(video.attrs, 'src', ResourceType.VIDEO, 'videos')
+        for source in video.find_all('source', src=True):
+            add_resource(source.attrs, 'src', ResourceType.VIDEO, 'videos')
     resources['total'] = len(resource_profiles)
     data['total_resources'] = resources['total']
-    
-    # Network metrics
-    network = NetworkMetrics(
-        total_requests=len(resource_profiles),
-        total_size=content_length
-    )
-    
-    third_party_resources = [r for r in resource_profiles if r.is_third_party]
-    network.third_party_requests = len(third_party_resources)
-    
-    # Extract unique domains
-    for profile in resource_profiles:
-        try:
-            domain = urlparse(profile.url).netloc
-            if domain:
-                network.domains.add(domain)
-        except:
-            pass
-    
+    domains = sorted({urlparse(profile.url).netloc for profile in resource_profiles
+                      if urlparse(profile.url).scheme in ('http', 'https')})
     data['network_metrics'] = {
-        'total_requests': network.total_requests,
-        'third_party_requests': network.third_party_requests,
-        'unique_domains': len(network.domains),
-        'domains': list(network.domains)[:10]  # Top 10 domains
+        'total_requests': None, 'third_party_requests': None,
+        'referenced_resources': len(resource_profiles),
+        'third_party_references': sum(profile.is_third_party for profile in resource_profiles),
+        'unique_domains': len(domains), 'domains': domains,
+        'status': 'not_measured', 'source': 'html_references_only',
     }
-    
-    # Analyze critical rendering path
-    critical_path = analyze_critical_rendering_path(soup)
+    critical_path = analyze_critical_rendering_path(soup, facts=facts)
     data['critical_rendering_path'] = critical_path
-    
-    if len(critical_path['render_blocking_resources']) > 3:
-        issues.append(create_issue('Performance', 'critical',
-            f"{len(critical_path['render_blocking_resources'])} render-blocking resources found",
-            {'resources': critical_path['render_blocking_resources'][:5]}))
-    
-    # Detect performance patterns
-    patterns = detect_performance_patterns(soup)
-    data['performance_patterns'] = patterns
-    
-    for bad_pattern in patterns['bad_patterns']:
-        issues.append(create_issue('Performance', 'warning', bad_pattern))
-    
-    # Image optimization analysis
-    image_analysis = analyze_image_optimization(soup)
-    data['image_optimization'] = image_analysis
-    
-    if image_analysis['total_images'] > 0:
-        if image_analysis['optimized_formats'] < image_analysis['total_images'] * 0.3:
-            issues.append(create_issue('Performance', 'warning',
-                f"Only {image_analysis['optimized_formats']}/{image_analysis['total_images']} images use modern formats (WebP/AVIF)"))
-        
-        if image_analysis['lazy_loaded'] < image_analysis['total_images'] * 0.5:
-            issues.append(create_issue('Performance', 'warning',
-                f"Only {image_analysis['lazy_loaded']}/{image_analysis['total_images']} images are lazy loaded"))
-    
-    # JavaScript optimization analysis
-    js_analysis = analyze_javascript_optimization(soup)
-    data['javascript_optimization'] = js_analysis
-    
-    if js_analysis['render_blocking'] > 2:
-        issues.append(create_issue('Performance', 'critical',
-            f"{js_analysis['render_blocking']} render-blocking scripts in head"))
-    
-    if js_analysis['third_party_scripts']:
-        issues.append(create_issue('Performance', 'notice',
-            f"{len(js_analysis['third_party_scripts'])} third-party scripts detected",
-            {'scripts': [s['name'] for s in js_analysis['third_party_scripts']]}))
-    
-    # Caching strategy detection
-    caching = detect_caching_strategy(soup)
-    data['caching_strategy'] = caching
-    
-    if not caching['has_service_worker']:
-        issues.append(create_issue('Performance', 'notice',
-            'No service worker detected for offline support and caching'))
-    
-    if not caching['uses_cdn']:
-        issues.append(create_issue('Performance', 'warning',
-            'Not using CDN for static assets delivery'))
-    
-    # Generate performance budget
-    budget = generate_performance_budget(metrics, resources)
-    data['performance_budget'] = budget
-    
-    # Count budget violations
-    budget_violations = 0
-    for category in budget:
-        for metric in budget[category]:
-            if budget[category][metric].get('status') == 'fail':
-                budget_violations += 1
-    
-    if budget_violations > 3:
-        issues.append(create_issue('Performance', 'warning',
-            f'{budget_violations} performance budget violations detected'))
-    
-    # Resource priorities
-    high_priority = [r for r in resource_profiles if calculate_resource_priority(r) == 'high']
-    data['high_priority_resources'] = len(high_priority)
-    
-    # Check for resource hints
-    preconnect = soup.find_all('link', rel='preconnect')
-    dns_prefetch = soup.find_all('link', rel='dns-prefetch')
-    preload = soup.find_all('link', rel='preload')
-    prefetch = soup.find_all('link', rel='prefetch')
-    
+    data['performance_patterns'] = detect_performance_patterns(soup, facts=facts)
+    data['image_optimization'] = analyze_image_optimization(soup, facts=facts)
+    collector.results.extend(data['performance_patterns']['rule_results'])
+    collector.results.extend(data['image_optimization']['rule_results'])
+    javascript = analyze_javascript_optimization(soup, url, facts=facts)
+    data['javascript_optimization'] = javascript
+    blocking = [resource['url'] for resource in critical_path['render_blocking_resources'] if resource['type'] == 'script']
+    collector.check('performance.blocking_scripts', bool(blocking),
+        evidence={'urls': blocking, 'count': len(blocking), 'browser_timing_measured': False},
+        applicable=any('src' in script['attrs'] for script in scripts), reason='Requires external script elements.',
+        message=f'{len(blocking)} external classic scripts in head lack async or defer', category='Performance')
+    issues = collector.issues
+    data['caching_strategy'] = detect_caching_strategy(soup, facts=facts)
+    data['performance_budget'] = generate_performance_budget(metrics, resources)
+    data['high_priority_resources'] = None
+    data['priority_status'] = 'requires_browser_trace'
     data['resource_hints'] = {
-        'preconnect': len(preconnect),
-        'dns_prefetch': len(dns_prefetch),
-        'preload': len(preload),
-        'prefetch': len(prefetch)
+        name.replace('-', '_'): sum(name in link['attrs'].get('rel', []) for link in links)
+        for name in ('preconnect', 'dns-prefetch', 'preload', 'prefetch')
     }
-    
-    if len(preconnect) == 0 and network.third_party_requests > 5:
-        issues.append(create_issue('Performance', 'warning',
-            f'No preconnect hints but {network.third_party_requests} third-party requests'))
-    
-    # Optimization opportunities
-    opportunities = []
-    
-    # Image optimization
-    if image_analysis['savings_potential_kb'] > 100:
-        opportunities.append(OptimizationOpportunity(
-            title="Optimize images",
-            impact="high" if image_analysis['savings_potential_kb'] > 500 else "medium",
-            category="images",
-            estimated_savings_bytes=image_analysis['savings_potential_kb'] * 1024,
-            description=f"Convert {image_analysis['total_images'] - image_analysis['optimized_formats']} images to WebP/AVIF",
-            implementation="Use image CDN or build process to automatically convert images"
-        ))
-    
-    # JavaScript optimization
-    if js_analysis['render_blocking'] > 0:
-        opportunities.append(OptimizationOpportunity(
-            title="Eliminate render-blocking scripts",
-            impact="high",
-            category="javascript",
-            estimated_savings_ms=js_analysis['render_blocking'] * 100,
-            description=f"Make {js_analysis['render_blocking']} scripts non-blocking",
-            implementation="Add async or defer attributes, or move scripts to bottom of body"
-        ))
-    
-    # Bundle size
-    if len(resources['scripts']) > 10:
-        opportunities.append(OptimizationOpportunity(
-            title="Reduce JavaScript bundles",
-            impact="medium",
-            category="javascript",
-            description=f"Consolidate {len(resources['scripts'])} script files",
-            implementation="Use webpack or rollup to bundle and tree-shake JavaScript"
-        ))
-    
-    # Critical CSS
-    if len(resources['stylesheets']) > 3 and not soup.find('style'):
-        opportunities.append(OptimizationOpportunity(
-            title="Extract critical CSS",
-            impact="high",
-            category="css",
-            estimated_savings_ms=200,
-            description="Inline critical CSS and defer non-critical styles",
-            implementation="Use critical CSS tools to extract above-the-fold styles"
-        ))
-    
     data['optimization_opportunities'] = [
         {
-            'title': o.title,
-            'impact': o.impact,
-            'category': o.category,
-            'savings_ms': o.estimated_savings_ms,
-            'savings_kb': round(o.estimated_savings_bytes / 1024),
-            'description': o.description,
-            'implementation': o.implementation
+            'title': issue['title'], 'impact': 'requires_measurement',
+            'rule_id': issue['rule_id'], 'category': 'performance', 'savings_ms': None, 'savings_kb': None,
+            'status': 'unmeasured', 'source': 'html_attributes',
+            'description': issue['message'], 'implementation': issue['fix'],
         }
-        for o in opportunities
+        for issue in issues
     ]
-    
-    # Calculate final score and grade
-    score, grade = calculate_performance_score(metrics, resources['total'])
-    
-    # Additional score adjustments based on issues
-    for issue in issues:
-        if issue['severity'] == 'critical':
-            score -= 10
-        elif issue['severity'] == 'warning':
-            score -= 5
-        elif issue['severity'] == 'notice':
-            score -= 2
-    
-    score = max(0, min(100, score))
-    
-    # Performance level classification
-    if metrics.load_time <= 1.0:
-        performance_level = PerformanceLevel.FAST
-    elif metrics.load_time <= 3.0:
-        performance_level = PerformanceLevel.MODERATE
-    elif metrics.load_time <= 5.0:
-        performance_level = PerformanceLevel.SLOW
-    else:
-        performance_level = PerformanceLevel.CRITICAL
-    
-    data['performance_level'] = performance_level.value
+    score = score_findings(issues)
+    grade = score_grade(score)
+    data['performance_level'] = None
     data['grade'] = grade
-    
-    # Summary recommendations
-    recommendations = []
-    
-    if grade in ['D', 'F']:
-        recommendations.append("Critical performance issues detected. Prioritize render-blocking resource elimination.")
-    
-    if metrics.largest_contentful_paint > 2.5:
-        recommendations.append("Improve LCP: Optimize server response time, use CDN, preload critical resources.")
-    
-    if metrics.cumulative_layout_shift > 0.1:
-        recommendations.append("Reduce CLS: Add size attributes to images/videos, avoid inserting content above existing content.")
-    
-    if metrics.first_input_delay > 100:
-        recommendations.append("Improve FID: Break up long tasks, optimize JavaScript execution, use web workers.")
-    
-    if network.third_party_requests > 10:
-        recommendations.append("Reduce third-party impact: Lazy load third-party scripts, use facades for embeds.")
-    
-    if not caching['uses_cdn']:
-        recommendations.append("Implement CDN for global content delivery and improved caching.")
-    
-    data['recommendations'] = recommendations
-    
+    data['recommendations'] = recommendations_for(issues)
     return {
-        'score': score,
-        'grade': grade,
-        'issues': issues,
-        'data': data,
-        'resources': dict(resources)
+        'score': score, 'grade': grade, 'issues': issues, 'data': data,
+        'resources': resources, 'recommendations': data['recommendations'],
+        'rule_results': collector.results, 'rule_coverage': collector.coverage,
     }

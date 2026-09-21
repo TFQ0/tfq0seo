@@ -1,0 +1,72 @@
+{# Shared presentation only: imported report fields remain autoescaped. #}
+{% macro styles() -%}
+<style>
+    .rule-metadata, .rule-assessment { margin-top: 1rem; overflow-wrap: anywhere; }
+    .rule-metadata p, .rule-assessment p { margin: .4rem 0; }
+    .rule-metadata ul { padding-left: 1.5rem; }
+    .rule-evidence { margin-top: .65rem; }
+    .rule-evidence summary { cursor: pointer; }
+    .rule-evidence pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; padding: .75rem; }
+</style>
+{%- endmacro %}
+
+{% macro finding(issue) -%}
+{% if issue.get('rule_id') or issue.get('status') or issue.get('applicability') or issue.get('source') or issue.get('references') or issue.get('reviewed_on') or 'evidence' in issue %}
+<div class="rule-metadata" data-rule-id="{{ issue.get('rule_id', '') }}">
+    {% if issue.get('rule_id') %}<p><strong>Rule:</strong> <code>{{ issue.rule_id }}</code></p>{% endif %}
+    {% if issue.get('status') %}<p><strong>Outcome:</strong> {{ issue.status }}</p>{% endif %}
+    {% if issue.get('applicability') %}<p><strong>Applicability:</strong> {{ issue.applicability }}</p>{% endif %}
+    {% if issue.get('rule_applicability') %}<p>{{ issue.rule_applicability }}</p>{% endif %}
+    {% if issue.get('reason') %}<p>{{ issue.reason }}</p>{% endif %}
+    {% if issue.get('source') %}<p><strong>Observation source:</strong> {{ issue.source }}</p>{% endif %}
+    {% if issue.get('score_owner') or issue.get('owner') %}<p><strong>Score category:</strong> {{ issue.get('score_owner') or issue.owner }}</p>{% endif %}
+    {% if 'penalty' in issue %}<p><strong>Rule deduction:</strong> {{ issue.penalty|number }} points</p>{% endif %}
+    {% if issue.get('references') %}
+    <p><strong>Rule references:</strong></p>
+    <ul class="rule-references">
+        {% set references = [issue.references] if issue.references is string else issue.references %}
+        {% for reference in references %}
+        <li>{% if reference|safe_url %}<a href="{{ reference|safe_url }}" target="_blank" rel="noopener noreferrer">{{ reference }}</a>{% else %}{{ reference }}{% endif %}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+    {% if issue.get('reviewed_on') %}<p><strong>Rule reviewed:</strong> {{ issue.reviewed_on }}</p>{% endif %}
+    {% if 'evidence' in issue and issue.evidence is not none %}
+    <details class="rule-evidence"><summary>Recorded evidence</summary><pre>{{ issue.evidence|json_text }}</pre></details>
+    {% endif %}
+    {% if issue.get('observations') %}
+    <details class="rule-evidence"><summary>Combined observations</summary><pre>{{ issue.observations|json_text }}</pre></details>
+    {% endif %}
+    {% if issue.get('evidence_by_page') %}
+    <details class="rule-evidence"><summary>Evidence by affected page</summary><pre>{{ issue.evidence_by_page|json_text }}</pre></details>
+    {% endif %}
+</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro overview(policies, versions, coverage) -%}
+{% if policies or versions or coverage %}
+<section class="rule-assessment" aria-label="Scoring policy and rule coverage">
+    <h3>Scoring policy and rule coverage</h3>
+    {% if versions %}<p><strong>Scoring versions:</strong> {{ versions|join(', ') }}</p>{% endif %}
+    {% for policy in policies %}
+    {% if policy.get('ruleset_version') %}<p><strong>Ruleset:</strong> {{ policy.ruleset_version }}</p>{% endif %}
+    {% if policy.get('policy') %}<p>{{ policy.policy }}</p>{% endif %}
+    {% if policy.get('scope') %}<p>{{ policy.scope }}</p>{% endif %}
+    {% if policy.get('weights') %}
+    <details class="rule-evidence"><summary>Configured category weights</summary><pre>{{ policy.weights|json_text }}</pre></details>
+    {% endif %}
+    {% endfor %}
+    {% if policies or versions %}<p>Scores and weights are TFQ0SEO checklist policy, not search ranking factors or promises from the reference sources.</p>{% endif %}
+    {% if coverage %}
+    <p><strong>Recorded rule evaluations:</strong> {{ coverage.get('total')|number }}.
+       <strong>Assessed:</strong> {{ coverage.get('assessed')|number }}.</p>
+    {% if coverage.get('counts') is mapping %}
+    <ul class="rule-coverage-counts">{% for outcome, count in coverage.counts.items() %}<li>{{ outcome }}: {{ count|number }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if coverage.get('scope') %}<p>{{ coverage.scope }}</p>{% endif %}
+    <p>Unknown, error, and not-applicable outcomes are not passed checks. Disabled or unattempted checks are not assumed to pass.</p>
+    {% endif %}
+</section>
+{% endif %}
+{%- endmacro %}

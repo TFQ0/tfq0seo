@@ -1,0 +1,547 @@
+{
+  "benchmark_schema_version": 2,
+  "status": "complete",
+  "benchmarks": [
+    {
+      "type": "offline",
+      "fixture_version": 1,
+      "scenario": "mixed",
+      "requested_pages": 2000,
+      "network_access": false,
+      "config": {
+        "crawler": {
+          "max_concurrent": 20,
+          "max_connections_per_host": 5,
+          "timeout": 30,
+          "connect_timeout": 10,
+          "read_timeout": 30,
+          "user_agent": "tfq0seo/3.0.0 (+https://github.com/TFQ0/tfq0seo)",
+          "custom_headers": {},
+          "follow_redirects": true,
+          "max_redirects": 10,
+          "max_pages": 2000,
+          "max_depth": 5,
+          "max_page_size": 10485760,
+          "max_crawl_time": 3600,
+          "delay_between_requests": 0.0,
+          "adaptive_delay": true,
+          "min_delay": 0.0,
+          "max_delay": 5.0,
+          "rate_limit_per_second": null,
+          "respect_robots_txt": true,
+          "robots_cache_ttl": 86400,
+          "crawl_delay_factor": 1.0,
+          "allowed_domains": [],
+          "allowed_schemes": [
+            "http",
+            "https"
+          ],
+          "excluded_patterns": [
+            "\\.pdf$",
+            "\\.zip$",
+            "\\.exe$",
+            "\\.dmg$",
+            "/wp-admin",
+            "/admin",
+            "/login",
+            "\\?.*session",
+            "\\?.*utm_"
+          ],
+          "store_html": false,
+          "max_retries": 3,
+          "retry_on_status": [
+            429,
+            500,
+            502,
+            503,
+            504
+          ],
+          "retry_backoff_factor": 2.0,
+          "cache_enabled": false,
+          "cache_ttl": 3600,
+          "cache_size_mb": 100,
+          "use_sitemap": true,
+          "discover_sitemaps": true,
+          "use_connection_pooling": true,
+          "dns_cache_ttl": 300,
+          "verify_ssl": true,
+          "proxy": null
+        },
+        "analysis": {
+          "enabled_analyzers": [
+            "seo",
+            "content",
+            "technical",
+            "performance",
+            "links"
+          ],
+          "analysis_mode": "standard",
+          "parallel_analysis": true,
+          "max_analysis_threads": 4,
+          "check_external_links": false,
+          "check_internal_links": true,
+          "check_broken_links": true,
+          "max_external_links_per_page": 100,
+          "external_link_timeout": 10,
+          "target_keywords": [],
+          "check_content_uniqueness": true,
+          "score_weights": {
+            "seo": 0.3,
+            "content": 0.25,
+            "technical": 0.2,
+            "performance": 0.15,
+            "links": 0.1
+          }
+        },
+        "export": {
+          "formats": [
+            "html"
+          ],
+          "primary_format": "html",
+          "html_template": "optimized",
+          "output_directory": "./reports",
+          "filename_pattern": "{domain}_{timestamp}_{format}"
+        },
+        "profile": "standard",
+        "version": "3.0.0",
+        "debug": false,
+        "continue_on_error": true,
+        "max_memory_mb": 1024
+      },
+      "fixture": {
+        "version": 1,
+        "generated_pages": 2000,
+        "html_bytes": 8158500,
+        "dom_elements": 143352,
+        "href_references": 27308,
+        "image_elements": 5336,
+        "analyzed_word_count": 898986,
+        "pages_with_word_count": 2000,
+        "variants": {
+          "basic": 667,
+          "content-heavy": 667,
+          "link-dense": 666
+        },
+        "sha256": "028909e0dea50dfb82979acf9129d3cdb5b1b46026423fdc7ce3867cbb88839f"
+      },
+      "timeout_seconds": 360.0,
+      "timed_out": false,
+      "timeout_scope": "Cooperative checks between pages and after reporting; synchronous work can overrun the deadline.",
+      "report_completeness": {
+        "expected_pages": 2000,
+        "retained_rows": 2000,
+        "unique_urls": 2000,
+        "missing_urls": 0,
+        "unexpected_urls": 0,
+        "duplicate_rows": 0,
+        "complete": true
+      },
+      "readability": {
+        "status_counts": {
+          "not_requested": 667,
+          "unavailable": 1333
+        },
+        "missing_resources": [
+          "nltk:corpora/cmudict"
+        ]
+      },
+      "workload": "Fixture generation, HTML parsing, static analysis, site report aggregation and retained-URL verification; no HTTP, browser or export measurement",
+      "analysis_duration_seconds": 132.48825890000444,
+      "report_duration_seconds": 70.79365659999894,
+      "report_pages": 2000,
+      "report_status": "complete",
+      "report_summary": {
+        "total_pages": 2000,
+        "successful_pages": 2000,
+        "partial_pages": 0,
+        "failed_pages": 0,
+        "skipped_pages": 0,
+        "analysis_mode": "standard",
+        "analysis_timestamp": 1789963457.3870037,
+        "analysis_duration": 0,
+        "crawl_complete": false,
+        "limits_reached": [],
+        "discovery_errors": [],
+        "scope_note": "Results describe fetched pages; unvisited targets remain unchecked."
+      },
+      "rule_coverage": {
+        "counts": {
+          "pass": 77294,
+          "fail": 0,
+          "informational": 9373,
+          "unknown": 5333,
+          "not_applicable": 44000,
+          "error": 0
+        },
+        "assessed": 86667,
+        "total": 136000,
+        "ratio": 0.9420326086956522,
+        "scope": "Counts are unique rule evaluations per page, not a complete site inventory."
+      },
+      "site_analysis": {
+        "version": "1.0",
+        "coverage": {
+          "inventory_pages": 2000,
+          "pages_with_facts": 2000,
+          "complete_html_pages": 2000,
+          "crawl_complete": false,
+          "note": "A completed crawl still obeys its configured scope. Missing targets and paths remain unverified."
+        },
+        "node_count": 2000,
+        "edge_count": 23312,
+        "finding_count": 0
+      },
+      "status": "complete",
+      "successful_pages": 2000,
+      "partial_pages": 0,
+      "failed_pages": 0,
+      "skipped_pages": 0,
+      "observed_results": 2000,
+      "missing_results": 0,
+      "pages_analyzed": 2000,
+      "pages_per_second": 9.816020526068504,
+      "avg_time_per_page": 0.10187427759999991,
+      "duration_seconds": 203.74855519999983,
+      "clock": "perf_counter",
+      "memory_rss_start_mb": 76.684,
+      "memory_rss_end_mb": 1060.215,
+      "memory_rss_delta_mb": 983.531,
+      "memory_sampled_peak_mb": 1702.445,
+      "memory_sample_count": 2798,
+      "memory_sampling_interval_seconds": 0.05,
+      "memory_measurement": "Sampled process RSS; allocations between samples may be missed.",
+      "memory_used_mb": 983.531,
+      "errors": [],
+      "timestamp": "2026-09-21T04:04:29.047144+00:00",
+      "repetition": 1,
+      "run_order": 1
+    },
+    {
+      "type": "offline",
+      "fixture_version": 1,
+      "scenario": "mixed",
+      "requested_pages": 2000,
+      "network_access": false,
+      "config": {
+        "crawler": {
+          "max_concurrent": 20,
+          "max_connections_per_host": 5,
+          "timeout": 30,
+          "connect_timeout": 10,
+          "read_timeout": 30,
+          "user_agent": "tfq0seo/3.0.0 (+https://github.com/TFQ0/tfq0seo)",
+          "custom_headers": {},
+          "follow_redirects": true,
+          "max_redirects": 10,
+          "max_pages": 2000,
+          "max_depth": 5,
+          "max_page_size": 10485760,
+          "max_crawl_time": 3600,
+          "delay_between_requests": 0.0,
+          "adaptive_delay": true,
+          "min_delay": 0.0,
+          "max_delay": 5.0,
+          "rate_limit_per_second": null,
+          "respect_robots_txt": true,
+          "robots_cache_ttl": 86400,
+          "crawl_delay_factor": 1.0,
+          "allowed_domains": [],
+          "allowed_schemes": [
+            "http",
+            "https"
+          ],
+          "excluded_patterns": [
+            "\\.pdf$",
+            "\\.zip$",
+            "\\.exe$",
+            "\\.dmg$",
+            "/wp-admin",
+            "/admin",
+            "/login",
+            "\\?.*session",
+            "\\?.*utm_"
+          ],
+          "store_html": false,
+          "max_retries": 3,
+          "retry_on_status": [
+            429,
+            500,
+            502,
+            503,
+            504
+          ],
+          "retry_backoff_factor": 2.0,
+          "cache_enabled": false,
+          "cache_ttl": 3600,
+          "cache_size_mb": 100,
+          "use_sitemap": true,
+          "discover_sitemaps": true,
+          "use_connection_pooling": true,
+          "dns_cache_ttl": 300,
+          "verify_ssl": true,
+          "proxy": null
+        },
+        "analysis": {
+          "enabled_analyzers": [
+            "seo",
+            "content",
+            "technical",
+            "performance",
+            "links"
+          ],
+          "analysis_mode": "standard",
+          "parallel_analysis": true,
+          "max_analysis_threads": 4,
+          "check_external_links": false,
+          "check_internal_links": true,
+          "check_broken_links": true,
+          "max_external_links_per_page": 100,
+          "external_link_timeout": 10,
+          "target_keywords": [],
+          "check_content_uniqueness": true,
+          "score_weights": {
+            "seo": 0.3,
+            "content": 0.25,
+            "technical": 0.2,
+            "performance": 0.15,
+            "links": 0.1
+          }
+        },
+        "export": {
+          "formats": [
+            "html"
+          ],
+          "primary_format": "html",
+          "html_template": "optimized",
+          "output_directory": "./reports",
+          "filename_pattern": "{domain}_{timestamp}_{format}"
+        },
+        "profile": "standard",
+        "version": "3.0.0",
+        "debug": false,
+        "continue_on_error": true,
+        "max_memory_mb": 1024
+      },
+      "fixture": {
+        "version": 1,
+        "generated_pages": 2000,
+        "html_bytes": 8158500,
+        "dom_elements": 143352,
+        "href_references": 27308,
+        "image_elements": 5336,
+        "analyzed_word_count": 898986,
+        "pages_with_word_count": 2000,
+        "variants": {
+          "basic": 667,
+          "content-heavy": 667,
+          "link-dense": 666
+        },
+        "sha256": "028909e0dea50dfb82979acf9129d3cdb5b1b46026423fdc7ce3867cbb88839f"
+      },
+      "timeout_seconds": 360.0,
+      "timed_out": false,
+      "timeout_scope": "Cooperative checks between pages and after reporting; synchronous work can overrun the deadline.",
+      "report_completeness": {
+        "expected_pages": 2000,
+        "retained_rows": 2000,
+        "unique_urls": 2000,
+        "missing_urls": 0,
+        "unexpected_urls": 0,
+        "duplicate_rows": 0,
+        "complete": true
+      },
+      "readability": {
+        "status_counts": {
+          "not_requested": 667,
+          "unavailable": 1333
+        },
+        "missing_resources": [
+          "nltk:corpora/cmudict"
+        ]
+      },
+      "workload": "Fixture generation, HTML parsing, static analysis, site report aggregation and retained-URL verification; no HTTP, browser or export measurement",
+      "analysis_duration_seconds": 123.17364019999513,
+      "report_duration_seconds": 60.40574000001652,
+      "report_pages": 2000,
+      "report_status": "complete",
+      "report_summary": {
+        "total_pages": 2000,
+        "successful_pages": 2000,
+        "partial_pages": 0,
+        "failed_pages": 0,
+        "skipped_pages": 0,
+        "analysis_mode": "standard",
+        "analysis_timestamp": 1789963644.561493,
+        "analysis_duration": 0,
+        "crawl_complete": false,
+        "limits_reached": [],
+        "discovery_errors": [],
+        "scope_note": "Results describe fetched pages; unvisited targets remain unchecked."
+      },
+      "rule_coverage": {
+        "counts": {
+          "pass": 77294,
+          "fail": 0,
+          "informational": 9373,
+          "unknown": 5333,
+          "not_applicable": 44000,
+          "error": 0
+        },
+        "assessed": 86667,
+        "total": 136000,
+        "ratio": 0.9420326086956522,
+        "scope": "Counts are unique rule evaluations per page, not a complete site inventory."
+      },
+      "site_analysis": {
+        "version": "1.0",
+        "coverage": {
+          "inventory_pages": 2000,
+          "pages_with_facts": 2000,
+          "complete_html_pages": 2000,
+          "crawl_complete": false,
+          "note": "A completed crawl still obeys its configured scope. Missing targets and paths remain unverified."
+        },
+        "node_count": 2000,
+        "edge_count": 23312,
+        "finding_count": 0
+      },
+      "status": "complete",
+      "successful_pages": 2000,
+      "partial_pages": 0,
+      "failed_pages": 0,
+      "skipped_pages": 0,
+      "observed_results": 2000,
+      "missing_results": 0,
+      "pages_analyzed": 2000,
+      "pages_per_second": 10.867857227312523,
+      "avg_time_per_page": 0.09201445869999589,
+      "duration_seconds": 184.02891739999177,
+      "clock": "perf_counter",
+      "memory_rss_start_mb": 526.355,
+      "memory_rss_end_mb": 1005.086,
+      "memory_rss_delta_mb": 478.73,
+      "memory_sampled_peak_mb": 1704.723,
+      "memory_sample_count": 2495,
+      "memory_sampling_interval_seconds": 0.05,
+      "memory_measurement": "Sampled process RSS; allocations between samples may be missed.",
+      "memory_used_mb": 478.73,
+      "errors": [],
+      "timestamp": "2026-09-21T04:07:33.590864+00:00",
+      "repetition": 2,
+      "run_order": 2
+    }
+  ],
+  "summaries": [
+    {
+      "scenario": "mixed",
+      "requested_pages": 2000,
+      "runs": 2,
+      "complete_runs": 2,
+      "partial_runs": 0,
+      "failed_runs": 0,
+      "metrics_scope": "Only complete runs; inspect raw outcomes for excluded failed or partial runs.",
+      "metrics": {
+        "duration_seconds": {
+          "median": 193.8887362999958,
+          "min": 184.02891739999177,
+          "max": 203.74855519999983
+        },
+        "analysis_duration_seconds": {
+          "median": 127.83094954999979,
+          "min": 123.17364019999513,
+          "max": 132.48825890000444
+        },
+        "report_duration_seconds": {
+          "median": 65.59969830000773,
+          "min": 60.40574000001652,
+          "max": 70.79365659999894
+        },
+        "pages_per_second": {
+          "median": 10.341938876690513,
+          "min": 9.816020526068504,
+          "max": 10.867857227312523
+        },
+        "memory_rss_delta_mb": {
+          "median": 731.1305,
+          "min": 478.73,
+          "max": 983.531
+        },
+        "memory_sampled_peak_mb": {
+          "median": 1703.5839999999998,
+          "min": 1702.445,
+          "max": 1704.723
+        }
+      }
+    }
+  ],
+  "system_info": {
+    "os": {
+      "system": "Windows",
+      "release": "11",
+      "version": "10.0.26200"
+    },
+    "architecture": "AMD64",
+    "cpu_model": "AMD Ryzen 7 7735HS with Radeon Graphics",
+    "cpu_count": 16,
+    "physical_cpu_count": 8,
+    "memory_total_gb": 63.21,
+    "python_version": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+    "python_implementation": "CPython",
+    "package_version": "3.0.0",
+    "installed_distribution_version": "3.0.0",
+    "schema_version": "1.0",
+    "ruleset_version": "2026.09.21",
+    "scoring_version": "2.0",
+    "facts_version": "1.1",
+    "direct_dependencies": {
+      "aiohttp": "3.14.3",
+      "beautifulsoup4": "4.15.0",
+      "click": "8.5.0",
+      "jinja2": "3.1.6",
+      "rich": "15.0.0",
+      "textstat": "0.7.13",
+      "validators": "0.35.0",
+      "pyyaml": "6.0.3",
+      "python-dateutil": "2.9.0.post0",
+      "urllib3": "2.7.0",
+      "psutil": "7.2.2"
+    },
+    "optional_dependencies": {
+      "lxml": "6.1.3",
+      "openpyxl": "3.1.5",
+      "pandas": "3.0.5"
+    },
+    "readability_dependencies": {
+      "nltk": "3.10.3",
+      "pyphen": "0.18.1",
+      "cmudict": null
+    },
+    "source_fingerprint": {
+      "algorithm": "sha256",
+      "scope": "package Python source paths and bytes",
+      "file_count": 23,
+      "digest": "077a203b8b1c65de3022f4001a48cc6a1897e89624e9e7e8f967d20f525f4893"
+    },
+    "timestamp": "2026-09-21T04:01:05.292881+00:00"
+  },
+  "source_unchanged_during_suite": true,
+  "errors": [],
+  "suite": {
+    "scenarios": [
+      "mixed"
+    ],
+    "page_counts": [
+      2000
+    ],
+    "repetitions": 2,
+    "timeout_seconds": 360.0,
+    "order": "Page counts, then scenarios, then repetitions, in supplied order.",
+    "isolation": "Same process; fresh analyzer per run, disabled page cache; library caches and allocator state may remain warm."
+  },
+  "execution_guard": {
+    "dns_attempts": 0,
+    "external_connection_attempts": 0,
+    "network_policy": "DNS and non-loopback TCP connects blocked; loopback allowed for asyncio internals.",
+    "parent_hard_timeout_seconds": 1200
+  }
+}

@@ -1,486 +1,222 @@
-"""CLI module for tfq0seo using Click and Rich for beautiful output."""
+"""Click commands for analysis, complete reports, and explicit failure statuses."""
 
 import asyncio
 import json
-import time
-import sys
+import logging
 from pathlib import Path
 from typing import Optional, List
 
 import click
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 from rich.table import Table
-from rich.panel import Panel
-from rich.layout import Layout
-from rich.live import Live
-from rich import print as rprint
+from rich.text import Text
 
+from . import __version__
 from .core.app import SEOAnalyzer
 from .core.config import Config
+from .core.models import ANALYZER_NAMES
 from .exporters.base import ExportManager
 
 console = Console()
+FORMATS = click.Choice(['json', 'html', 'csv', 'xlsx'])
+CONFIG_PATH = click.Path(exists=True, dir_okay=False)
+
+
+def _reject_json_constant(value):
+    raise ValueError(f'Non-finite JSON number {value} is not allowed')
 
 
 def create_summary_table(results: dict) -> Table:
-    """Create a summary table for the results."""
-    table = Table(title="Analysis Summary", show_header=True, header_style="bold magenta")
-    table.add_column("Metric", style="cyan", width=20)
-    table.add_column("Value", style="green")
-    
-    # Overall score - handle both old and new formats
-    score = 0
-    if 'scores' in results and isinstance(results['scores'], dict):
-        score = results['scores'].get('overall', 0)
-    else:
-        score = results.get('overall_score', 0)
-    
-    score_style = "green" if score >= 80 else "yellow" if score >= 50 else "red"
-    table.add_row("Overall Score", f"[{score_style}]{score:.1f}/100[/{score_style}]")
-    
-    # Category scores - handle both formats
-    category_scores = {}
-    if 'scores' in results and isinstance(results['scores'], dict):
-        category_scores = results['scores'].get('categories', {})
-    elif 'category_scores' in results:
-        category_scores = results['category_scores']
-    
-    if category_scores:
-        for category, cat_score in category_scores.items():
-            cat_style = "green" if cat_score >= 80 else "yellow" if cat_score >= 50 else "red"
-            table.add_row(f"  {category}", f"[{cat_style}]{cat_score:.1f}[/{cat_style}]")
-    
-    # Issue counts - handle both old and new formats
-    if 'issues' in results:
-        if isinstance(results['issues'], dict):
-            # New format with nested structure
-            if 'counts' in results['issues']:
-                counts = results['issues']['counts']
-                critical = counts.get('critical', 0)
-                warnings = counts.get('warning', 0)
-                notices = counts.get('notice', 0)
-            else:
-                # Try to extract from aggregated issues
-                issues_list = results['issues'].get('aggregated', [])
-                critical = sum(1 for i in issues_list if isinstance(i, dict) and i.get('severity') == 'critical')
-                warnings = sum(1 for i in issues_list if isinstance(i, dict) and i.get('severity') == 'warning')
-                notices = sum(1 for i in issues_list if isinstance(i, dict) and i.get('severity') == 'notice')
-        else:
-            # Old format - issues is a list
-            issues_list = results['issues']
-            critical = sum(1 for i in issues_list if isinstance(i, dict) and i.get('severity') == 'critical')
-            warnings = sum(1 for i in issues_list if isinstance(i, dict) and i.get('severity') == 'warning')
-            notices = sum(1 for i in issues_list if isinstance(i, dict) and i.get('severity') == 'notice')
-        
-        table.add_row("Critical Issues", f"[red]{critical}[/red]")
-        table.add_row("Warnings", f"[yellow]{warnings}[/yellow]")
-        table.add_row("Notices", f"[blue]{notices}[/blue]")
-    elif 'issue_counts' in results:
-        # Fallback to issue_counts if available
-        counts = results['issue_counts']
-        table.add_row("Critical Issues", f"[red]{counts.get('critical', 0)}[/red]")
-        table.add_row("Warnings", f"[yellow]{counts.get('warning', 0)}[/yellow]")
-        table.add_row("Notices", f"[blue]{counts.get('notice', 0)}[/blue]")
-    
-    # Performance metrics - handle both formats
-    if 'performance_metrics' in results:
-        # New format with detailed metrics
-        perf = results['performance_metrics']
-        if 'load_time_stats' in perf:
-            table.add_row("Avg Load Time", f"{perf['load_time_stats'].get('mean', 0):.2f}s")
-        if 'pages_by_status' in perf:
-            successful = perf['pages_by_status'].get('2xx', 0)
-            table.add_row("Successful Pages", str(successful))
-    elif 'performance' in results:
-        # Old format
-        perf = results['performance']
-        if 'average_load_time' in perf:
-            table.add_row("Avg Load Time", f"{perf['average_load_time']:.2f}s")
-        elif 'load_time' in perf:
-            table.add_row("Load Time", f"{perf.get('load_time', 0):.2f}s")
-        if 'content_size' in perf:
-            table.add_row("Content Size", f"{perf.get('content_size', 0) / 1024:.1f}KB")
-    
-    # Summary information if available
-    if 'summary' in results:
-        summary = results['summary']
-        table.add_row("Total Pages", str(summary.get('total_pages', 0)))
-        table.add_row("Successful Pages", str(summary.get('successful_pages', 0)))
-        if summary.get('failed_pages', 0) > 0:
-            table.add_row("Failed Pages", f"[red]{summary['failed_pages']}[/red]")
-    
+    table = Table(title='Analysis Summary', show_header=True)
+    table.add_column('Metric', style='cyan')
+    table.add_column('Value')
+    scores = results.get('scores', {})
+    overall = scores.get('overall', results.get('overall_score'))
+    table.add_row('Overall Score', 'Unavailable' if overall is None else f'{overall:.1f}/100')
+    categories = scores.get('categories', results.get('category_scores', {}))
+    if not categories:
+        categories = {name: results[name].get('score') for name in ANALYZER_NAMES if name in results}
+    for name, score in categories.items():
+        table.add_row(name, 'Unavailable' if score is None else f'{score:.1f}')
+    issues = results.get('issues', [])
+    counts = issues.get('counts', {}) if isinstance(issues, dict) else SEOAnalyzer._count_issues(issues)
+    for severity in ('critical', 'warning', 'notice'):
+        table.add_row(severity.title(), str(counts.get(severity, 0)))
+    timings = results.get('performance_metrics', {}).get('load_time_stats', {})
+    if 'average' in timings:
+        table.add_row('Avg HTML Fetch Time', f"{timings['average']:.2f}s")
+    elif results.get('load_time') is not None:
+        table.add_row('HTML Fetch Time', f"{results['load_time']:.2f}s")
+    for name in ('total_pages', 'successful_pages', 'partial_pages', 'failed_pages', 'skipped_pages'):
+        if name in results.get('summary', {}):
+            table.add_row(name.replace('_', ' ').title(), str(results['summary'][name]))
+    table.add_row('Status', results.get('status', 'complete'))
     return table
 
 
 def create_issues_table(issues: List[dict], limit: int = 10) -> Table:
-    """Create a table showing top issues."""
-    table = Table(title=f"Top {limit} Issues", show_header=True, header_style="bold magenta")
-    table.add_column("Severity", width=10)
-    table.add_column("Category", width=15)
-    table.add_column("Issue", width=50)
-    
-    # Sort issues by severity
-    severity_order = {'critical': 0, 'warning': 1, 'notice': 2}
-    sorted_issues = sorted(issues, key=lambda x: severity_order.get(x.get('severity', 'notice'), 3))
-    
-    for issue in sorted_issues[:limit]:
-        severity = issue.get('severity', 'notice')
-        severity_style = "red" if severity == 'critical' else "yellow" if severity == 'warning' else "blue"
-        
-        table.add_row(
-            f"[{severity_style}]{severity.upper()}[/{severity_style}]",
-            issue.get('category', 'General'),
-            issue.get('message', 'No description')[:50]
-        )
-    
+    table = Table(title=f'Top {limit} Issues')
+    for name in ('Severity', 'Category', 'Issue'):
+        table.add_column(name)
+    ordered = sorted(issues, key=lambda issue: {'critical': 0, 'warning': 1, 'notice': 2}.get(issue.get('severity'), 3))
+    for issue in ordered[:limit]:
+        table.add_row(Text(issue.get('severity', 'notice')), Text(issue.get('category', 'General')),
+                      Text(issue.get('message', '')))
     return table
 
 
+def _configuration(path: Optional[str], **crawler_overrides) -> Config:
+    cfg = Config.from_file(path) if path else Config()
+    environment = Config.environment_overrides()
+    if environment:
+        cfg = cfg.merge(environment)
+    changes = {name: value for name, value in crawler_overrides.items() if value is not None}
+    if changes:
+        cfg = cfg.merge({'crawler': changes})
+    cfg.require_valid()
+    return cfg
+
+
+def _report(data, cfg, format, output):
+    format = format or cfg.export.primary_format
+    if format == 'json' and output is None:
+        click.echo(json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False))
+    else:
+        console.print(create_summary_table(data))
+        issues = data.get('issues', [])
+        if isinstance(issues, dict):
+            issues = issues.get('aggregated', [])
+        if issues:
+            console.print(create_issues_table(issues))
+        if output is not None or not data.get('error'):
+            destination = ExportManager(cfg.export).export(data, format, output)
+            console.print(f'Report saved to: {destination}', markup=False)
+    if data.get('error'):
+        raise click.ClickException(data['error'])
+    if data.get('skipped'):
+        raise click.ClickException('Page was not analyzed: ' + data.get('reason', 'Skipped'))
+    if data.get('status') == 'partial' or data.get('analyzer_errors'):
+        errors = '; '.join(data.get('analyzer_errors', {}).values())
+        raise click.ClickException('Analysis is incomplete; inspect the report for failures.' + (' ' + errors if errors else ''))
+    if data.get('status') == 'error':
+        raise click.ClickException('No pages were analyzed successfully; inspect the report for failures.')
+
+
 @click.group()
-@click.version_option(version='2.3.2', prog_name='tfq0seo')
+@click.version_option(version=__version__, prog_name='tfq0seo')
 def cli():
-    """TFQ0SEO - Fast SEO analysis tool with reports."""
-    pass
+    """Static SEO analysis with evidence and explicit coverage."""
 
 
 @cli.command()
 @click.argument('url')
-@click.option('--config', '-c', type=click.Path(exists=True), help='Configuration file (JSON/YAML)')
-@click.option('--format', '-f', type=click.Choice(['json', 'html', 'csv', 'xlsx']), default='html', help='Output format')
-@click.option('--output', '-o', type=click.Path(), help='Output file path')
-@click.option('--verbose', '-v', is_flag=True, help='Verbose output')
-def analyze(url: str, config: Optional[str], format: str, output: Optional[str], verbose: bool):
+@click.option('--config', '-c', type=CONFIG_PATH)
+@click.option('--format', '-f', type=FORMATS, default=None)
+@click.option('--output', '-o', type=click.Path(dir_okay=False))
+@click.option('--verbose', '-v', is_flag=True)
+def analyze(url, config, format, output, verbose):
     """Analyze a single URL."""
-    with console.status(f"[bold green]Analyzing {url}...") as status:
-        # Load configuration
-        if config:
-            cfg = Config.from_file(config)
-        else:
-            cfg = Config()
-        
-        # Run analysis
-        analyzer = SEOAnalyzer(cfg)
-        
-        try:
-            # Run async analysis
-            results = asyncio.run(analyzer.analyze_url(url))
-            
-            if not results:
-                console.print("[red]Analysis failed![/red]")
-                sys.exit(1)
-            
-            # Display summary
-            console.print("\n")
-            console.print(create_summary_table(results))
-            
-            # Display top issues
-            if 'issues' in results and results['issues']:
-                console.print("\n")
-                console.print(create_issues_table(results['issues']))
-            
-            # Export results
-            if output:
-                exporter = ExportManager(cfg.export)
-                exported_file = exporter.export(results, format, output)
-                console.print(f"\n[green]✓[/green] Report saved to: {exported_file}")
-            elif format != 'html':
-                # For non-HTML formats without output file, print to console
-                if format == 'json':
-                    rprint(json.dumps(results, indent=2, default=str))
-            
-            # Print recommendations
-            if verbose and 'recommendations' in results:
-                console.print("\n[bold]Recommendations:[/bold]")
-                for i, rec in enumerate(results['recommendations'][:5], 1):
-                    console.print(f"{i}. {rec}")
-                    
-        except Exception as e:
-            console.print(f"[red]Error during analysis: {e}[/red]")
-            if verbose:
-                import traceback
-                traceback.print_exc()
-            sys.exit(1)
+    try:
+        if verbose:
+            logging.basicConfig(level=logging.INFO)
+        cfg = _configuration(config)
+        result = asyncio.run(SEOAnalyzer(cfg).analyze_url(url))
+        _report(result, cfg, format, output)
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @cli.command()
 @click.argument('url')
-@click.option('--depth', '-d', type=int, default=5, help='Maximum crawl depth')
-@click.option('--max-pages', '-m', type=int, default=100, help='Maximum pages to crawl')
-@click.option('--concurrent', type=int, default=10, help='Concurrent requests')
-@click.option('--config', '-c', type=click.Path(exists=True), help='Configuration file')
-@click.option('--format', '-f', type=click.Choice(['json', 'html', 'csv', 'xlsx']), default='html')
-@click.option('--output', '-o', type=click.Path(), required=True, help='Output file path')
-@click.option('--follow-redirects/--no-follow-redirects', default=True, help='Follow redirects')
-@click.option('--respect-robots/--ignore-robots', default=True, help='Respect robots.txt')
-def crawl(url: str, depth: int, max_pages: int, concurrent: int, config: Optional[str], 
-         format: str, output: str, follow_redirects: bool, respect_robots: bool):
-    """Crawl and analyze an entire website."""
-    
-    # Load configuration
-    if config:
-        cfg = Config.from_file(config)
-    else:
-        cfg = Config()
-    
-    # Override with CLI options
-    cfg.crawler.max_depth = depth
-    cfg.crawler.max_pages = max_pages
-    cfg.crawler.max_concurrent = concurrent
-    cfg.crawler.follow_redirects = follow_redirects
-    cfg.crawler.respect_robots_txt = respect_robots
-    
-    analyzer = SEOAnalyzer(cfg)
-    
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TimeElapsedColumn(),
-        console=console
-    ) as progress:
-        
-        # Add crawling task
-        crawl_task = progress.add_task(
-            f"[cyan]Crawling {url}...", 
-            total=max_pages
-        )
-        
-        async def run_crawl():
-            """Run the crawl with progress updates."""
-            results = []
-            analyzed = 0
-            
-            async for page_result in analyzer.crawl_site(url):
-                analyzed += 1
-                progress.update(crawl_task, advance=1, description=f"[cyan]Analyzed {analyzed}/{max_pages} pages")
-                
-                # Update with current URL
-                if 'url' in page_result:
-                    progress.update(crawl_task, description=f"[cyan]Analyzing: {page_result['url'][:50]}...")
-                
-                results.append(page_result)
-                
-                # Show live stats
-                if analyzed % 10 == 0:
-                    stats = analyzer.get_crawl_statistics()
-                    console.print(f"[dim]Speed: {stats.get('pages_per_second', 0):.1f} pages/sec | "
-                                f"Memory: {stats.get('memory_usage', 0):.1f}MB[/dim]")
-            
-            return results
-        
-        try:
-            # Run the crawl
-            results = asyncio.run(run_crawl())
-            
-            if not results:
-                console.print("[red]No pages were analyzed![/red]")
-                sys.exit(1)
-            
-            # Generate report
-            progress.add_task("[green]Generating report...", total=None)
-            
-            # Aggregate results
-            report = analyzer.generate_site_report(results)
-            
-            # Export
-            exporter = ExportManager(cfg.export)
-            exported_file = exporter.export(report, format, output)
-            
-            # Show summary
-            console.print("\n")
-            console.print(Panel.fit(
-                f"[green]✓[/green] Crawl completed!\n"
-                f"Pages analyzed: {len(results)}\n"
-                f"Report saved to: {exported_file}",
-                title="Success",
-                border_style="green"
-            ))
-            
-            # Display summary table
-            console.print("\n")
-            console.print(create_summary_table(report))
-            
-        except KeyboardInterrupt:
-            console.print("\n[yellow]Crawl interrupted by user[/yellow]")
-            sys.exit(1)
-        except Exception as e:
-            console.print(f"[red]Error during crawl: {e}[/red]")
-            import traceback
-            traceback.print_exc()
-            sys.exit(1)
+@click.option('--depth', '-d', type=click.IntRange(min=0), default=None)
+@click.option('--max-pages', '-m', type=click.IntRange(min=1), default=None)
+@click.option('--concurrent', type=click.IntRange(min=1), default=None)
+@click.option('--config', '-c', type=CONFIG_PATH)
+@click.option('--format', '-f', type=FORMATS, default=None)
+@click.option('--output', '-o', type=click.Path(dir_okay=False), required=True)
+@click.option('--follow-redirects/--no-follow-redirects', default=None)
+@click.option('--respect-robots/--ignore-robots', default=None)
+def crawl(url, depth, max_pages, concurrent, config, format, output, follow_redirects, respect_robots):
+    """Crawl pages within the configured scope and export a complete report."""
+    try:
+        cfg = _configuration(config, max_depth=depth, max_pages=max_pages, max_concurrent=concurrent,
+                             follow_redirects=follow_redirects, respect_robots_txt=respect_robots)
+        analyzer = SEOAnalyzer(cfg)
+        async def run():
+            return [page async for page in analyzer.crawl_site(url)]
+        results = asyncio.run(run())
+        _report(analyzer.generate_site_report(results), cfg, format, output)
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @cli.command()
-@click.argument('urls_file', type=click.Path(exists=True))
-@click.option('--concurrent', type=int, default=10, help='Concurrent requests')
-@click.option('--config', '-c', type=click.Path(exists=True), help='Configuration file')
-@click.option('--format', '-f', type=click.Choice(['json', 'html', 'csv', 'xlsx']), default='html')
-@click.option('--output', '-o', type=click.Path(), required=True, help='Output file path')
-def batch(urls_file: str, concurrent: int, config: Optional[str], format: str, output: str):
-    """Analyze a batch of URLs from a file."""
-    
-    # Load URLs
-    with open(urls_file, 'r') as f:
-        urls = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-    
-    if not urls:
-        console.print("[red]No valid URLs found in file![/red]")
-        sys.exit(1)
-    
-    console.print(f"[cyan]Found {len(urls)} URLs to analyze[/cyan]")
-    
-    # Load configuration
-    if config:
-        cfg = Config.from_file(config)
-    else:
-        cfg = Config()
-    
-    cfg.crawler.max_concurrent = concurrent
-    
-    analyzer = SEOAnalyzer(cfg)
-    
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TimeElapsedColumn(),
-        console=console
-    ) as progress:
-        
-        # Add task
-        batch_task = progress.add_task(
-            f"[cyan]Analyzing {len(urls)} URLs...", 
-            total=len(urls)
-        )
-        
-        async def run_batch():
-            """Run batch analysis."""
-            results = []
-            
-            async for page_result in analyzer.analyze_urls(urls):
-                progress.update(batch_task, advance=1)
-                results.append(page_result)
-                
-                # Update description
-                if 'url' in page_result:
-                    progress.update(batch_task, description=f"[cyan]Analyzed: {page_result['url'][:50]}...")
-            
-            return results
-        
-        try:
-            # Run batch analysis
-            results = asyncio.run(run_batch())
-            
-            # Generate report
-            report = analyzer.generate_batch_report(results)
-            
-            # Export
-            exporter = ExportManager(cfg.export)
-            exported_file = exporter.export(report, format, output)
-            
-            # Show summary
-            console.print("\n")
-            console.print(Panel.fit(
-                f"[green]✓[/green] Batch analysis completed!\n"
-                f"URLs analyzed: {len(results)}\n"
-                f"Report saved to: {exported_file}",
-                title="Success",
-                border_style="green"
-            ))
-            
-            # Display summary
-            console.print("\n")
-            console.print(create_summary_table(report))
-            
-        except Exception as e:
-            console.print(f"[red]Error during batch analysis: {e}[/red]")
-            sys.exit(1)
+@click.argument('urls_file', type=CONFIG_PATH)
+@click.option('--concurrent', type=click.IntRange(min=1), default=None)
+@click.option('--config', '-c', type=CONFIG_PATH)
+@click.option('--format', '-f', type=FORMATS, default=None)
+@click.option('--output', '-o', type=click.Path(dir_okay=False), required=True)
+def batch(urls_file, concurrent, config, format, output):
+    """Analyze URLs from a UTF-8 file (one per line)."""
+    try:
+        urls = [line.strip() for line in Path(urls_file).read_text(encoding='utf-8').splitlines()
+                if line.strip() and not line.lstrip().startswith('#')]
+        if not urls:
+            raise ValueError('The input file contains no URLs')
+        cfg = _configuration(config, max_concurrent=concurrent)
+        analyzer = SEOAnalyzer(cfg)
+        async def run():
+            return [page async for page in analyzer.analyze_urls(urls)]
+        results = asyncio.run(run())
+        _report(analyzer.generate_batch_report(results), cfg, format, output)
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @cli.command()
 @click.argument('sitemap_url')
-@click.option('--max-pages', '-m', type=int, default=100, help='Maximum pages to analyze')
-@click.option('--config', '-c', type=click.Path(exists=True), help='Configuration file')
-@click.option('--format', '-f', type=click.Choice(['json', 'html', 'csv', 'xlsx']), default='html')
-@click.option('--output', '-o', type=click.Path(), required=True, help='Output file path')
-def sitemap(sitemap_url: str, max_pages: int, config: Optional[str], format: str, output: str):
-    """Analyze URLs from a sitemap."""
-    
-    # Load configuration
-    if config:
-        cfg = Config.from_file(config)
-    else:
-        cfg = Config()
-    
-    cfg.crawler.max_pages = max_pages
-    
-    analyzer = SEOAnalyzer(cfg)
-    
-    with console.status(f"[bold green]Fetching sitemap from {sitemap_url}...") as status:
-        try:
-            # Analyze sitemap
-            results = asyncio.run(analyzer.analyze_sitemap(sitemap_url))
-            
-            if not results:
-                console.print("[red]No URLs found in sitemap![/red]")
-                sys.exit(1)
-            
-            # Generate report
-            report = analyzer.generate_site_report(results)
-            
-            # Export
-            exporter = ExportManager(cfg.export)
-            exported_file = exporter.export(report, format, output)
-            
-            # Show summary
-            console.print("\n")
-            console.print(Panel.fit(
-                f"[green]✓[/green] Sitemap analysis completed!\n"
-                f"URLs analyzed: {len(results)}\n"
-                f"Report saved to: {exported_file}",
-                title="Success",
-                border_style="green"
-            ))
-            
-            # Display summary
-            console.print("\n")
-            console.print(create_summary_table(report))
-            
-        except Exception as e:
-            console.print(f"[red]Error during sitemap analysis: {e}[/red]")
-            sys.exit(1)
+@click.option('--max-pages', '-m', type=click.IntRange(min=1), default=None)
+@click.option('--config', '-c', type=CONFIG_PATH)
+@click.option('--format', '-f', type=FORMATS, default=None)
+@click.option('--output', '-o', type=click.Path(dir_okay=False), required=True)
+def sitemap(sitemap_url, max_pages, config, format, output):
+    """Analyze eligible URLs from an XML sitemap or sitemap index."""
+    try:
+        cfg = _configuration(config, max_pages=max_pages)
+        analyzer = SEOAnalyzer(cfg)
+        results = asyncio.run(analyzer.analyze_sitemap(sitemap_url))
+        _report(analyzer.generate_site_report(results), cfg, format, output)
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @cli.command()
-@click.option('--input', '-i', 'input_file', type=click.Path(exists=True), required=True, help='Input JSON file')
-@click.option('--format', '-f', type=click.Choice(['html', 'csv', 'xlsx']), required=True, help='Output format')
-@click.option('--output', '-o', type=click.Path(), required=True, help='Output file path')
-@click.option('--config', '-c', type=click.Path(exists=True), help='Configuration file')
-def export(input_file: str, format: str, output: str, config: Optional[str]):
-    """Convert analysis results to different formats."""
-    
-    # Load data
-    with open(input_file, 'r') as f:
-        data = json.load(f)
-    
-    # Load configuration
-    if config:
-        cfg = Config.from_file(config)
-    else:
-        cfg = Config()
-    
-    # Export
-    exporter = ExportManager(cfg.export)
-    exported_file = exporter.export(data, format, output)
-    
-    console.print(f"[green]✓[/green] Exported to: {exported_file}")
+@click.option('--input', '-i', 'input_file', type=CONFIG_PATH, required=True)
+@click.option('--format', '-f', type=click.Choice(['html', 'csv', 'xlsx']), required=True)
+@click.option('--output', '-o', type=click.Path(dir_okay=False), required=True)
+@click.option('--config', '-c', type=CONFIG_PATH)
+def export(input_file, format, output, config):
+    """Convert a page or site JSON report to another format."""
+    try:
+        data = json.loads(Path(input_file).read_text(encoding='utf-8'), parse_constant=_reject_json_constant)
+        if not isinstance(data, dict):
+            raise ValueError('A report must be a JSON object')
+        cfg = _configuration(config)
+        destination = ExportManager(cfg.export).export(data, format, output)
+        console.print(f'Exported to: {destination}', markup=False)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def main():
-    """Main entry point."""
     cli()
 
 

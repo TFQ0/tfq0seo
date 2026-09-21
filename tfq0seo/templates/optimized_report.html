@@ -1,3 +1,4 @@
+{% from "rule_metadata.html" import finding as rule_finding, overview as rule_overview, styles as rule_styles %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -455,8 +456,13 @@
             }
         }
     </style>
+    {{ rule_styles() }}
 </head>
 <body>
+    {% if report_status == "partial" %}<div role="status">Analysis is partial. Review the reported errors and page status.</div>{% endif %}
+    {% if score_source in ("static_html", "static_rule_heuristics") %}<p>Scores summarize completed static HTML checks.</p>{% endif %}
+    {% if error %}<div role="alert">Analysis failed: {{ error }}</div>{% endif %}
+    {% for analyzer_error in analysis_errors %}<div role="status">{{ analyzer_error.analyzer|title }}: {{ analyzer_error.error }}</div>{% endfor %}
     <div class="container">
         <!-- Executive Summary -->
         <section class="executive-summary">
@@ -472,7 +478,7 @@
             
             <div class="summary-grid">
                 <div class="summary-card">
-                    <div class="summary-value">{{ overall_score|round|int }}/100</div>
+                    <div class="summary-value">{{ overall_score|number(0, '/100') }}</div>
                     <div class="summary-label">Overall Score</div>
                 </div>
                 {% if executive_summary %}
@@ -505,6 +511,8 @@
         
         <!-- Overview Tab -->
         <div class="tab-panel active" id="overview">
+            {{ rule_overview(scoring_policies, scoring_versions, rule_coverage) }}
+            {% include "site_analysis.html" %}
             {% if executive_summary.quick_wins %}
             <section class="quick-wins">
                 <h3>🎯 Quick Wins (High Impact, Low Effort)</h3>
@@ -520,19 +528,19 @@
                 <h3>Category Scores</h3>
                 <div class="score-grid">
                     <div class="score-card main-score-card">
-                        <h4>Overall Performance</h4>
-                        <div style="font-size: 48px; font-weight: bold; color: {% if overall_score >= 80 %}var(--color-pass){% elif overall_score >= 50 %}var(--color-average){% else %}var(--color-fail){% endif %}">
-                            {{ overall_score|round|int }}/100
+                        <h4>Overall Score</h4>
+                        <div style="font-size: 48px; font-weight: bold; color: {{ overall_score|score_color }}">
+                            {{ overall_score|number(0, '/100') }}
                         </div>
                         <canvas id="overallChart" width="200" height="200"></canvas>
                     </div>
                     {% for category, score in category_scores.items() %}
                     <div class="score-card">
                         <h4>{{ category|title }}</h4>
-                        <div style="font-size: 36px; font-weight: bold; color: {% if score >= 80 %}var(--color-pass){% elif score >= 50 %}var(--color-average){% else %}var(--color-fail){% endif %}">
-                            {{ score|round|int }}
+                        <div style="font-size: 36px; font-weight: bold; color: {{ score|score_color }}">
+                            {{ score|number }}
                         </div>
-                        <progress value="{{ score }}" max="100" style="width: 100%; height: 8px;"></progress>
+                        {% if score is number %}<progress value="{{ score }}" max="100" style="width: 100%; height: 8px;"></progress>{% endif %}
                     </div>
                     {% endfor %}
                 </div>
@@ -573,6 +581,7 @@
                         <div class="issue-header">
                             <div>
                                 <strong>[{{ issue.category }}]</strong> {{ issue.message }}
+                            {{ rule_finding(issue) }}
                             </div>
                             <div class="issue-count-badge">
                                 {{ issue.count }} occurrence{% if issue.count > 1 %}s{% endif %}
@@ -597,6 +606,7 @@
                         <div class="issue-header">
                             <div>
                                 <strong>[{{ issue.category }}]</strong> {{ issue.message }}
+                            {{ rule_finding(issue) }}
                             </div>
                         </div>
                     </div>
@@ -649,14 +659,14 @@
                 {% if performance_metrics %}
                 <div class="performance-grid">
                     <div class="chart-container">
-                        <h4 class="chart-title">Load Time Distribution</h4>
+                        <h4 class="chart-title">HTML Fetch Time Distribution</h4>
                         <canvas id="loadTimeChart"></canvas>
                         {% if performance_metrics.load_time_stats %}
                         <div style="margin-top: 12px;">
                             <small>
-                                Avg: {{ performance_metrics.load_time_stats.average|round(2) }}s |
-                                Min: {{ performance_metrics.load_time_stats.min|round(2) }}s |
-                                Max: {{ performance_metrics.load_time_stats.max|round(2) }}s
+                                Avg: {{ performance_metrics.load_time_stats.average|number(2, 's') }} |
+                                Min: {{ performance_metrics.load_time_stats.min|number(2, 's') }} |
+                                Max: {{ performance_metrics.load_time_stats.max|number(2, 's') }}
                             </small>
                         </div>
                         {% endif %}
@@ -675,14 +685,14 @@
                         <thead>
                             <tr>
                                 <th>URL</th>
-                                <th>Load Time</th>
+                                <th>HTML fetch time</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for page in performance_metrics.slowest_pages[:5] %}
                             <tr>
                                 <td>{{ page.url|truncate(80) }}</td>
-                                <td>{{ page.time|round(2) }}s</td>
+                                <td>{{ page.time|number(2, 's') }}</td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -704,20 +714,22 @@
                             <th>URL</th>
                             <th>Score</th>
                             <th>Status</th>
-                            <th>Load Time</th>
+                            <th>HTML fetch time</th>
                             <th>Issues</th>
+                            <th>Analysis status</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for page in pages_summary[:20] %}
                         <tr>
-                            <td>{{ page.url|truncate(60) }}</td>
-                            <td style="color: {% if page.score >= 80 %}var(--color-pass){% elif page.score >= 50 %}var(--color-average){% else %}var(--color-fail){% endif %}">
-                                {{ page.score|round|int }}
+                            <td>{{ page.url }}</td>
+                            <td style="color: {{ page.score|score_color }}">
+                                {{ page.score|number }}
                             </td>
-                            <td>{{ page.status_code }}</td>
-                            <td>{{ page.load_time|round(2) }}s</td>
+                            <td>{{ page.status_code if page.status_code is not none else 'Unavailable' }}</td>
+                            <td>{{ page.load_time|number(2, 's') }}</td>
                             <td>{{ page.issue_count }}</td>
+                            <td>{{ page.error or page.status or '' }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -758,19 +770,20 @@
             });
         });
         
+        if (typeof Chart !== "undefined") {
         // Chart.js configuration
         Chart.defaults.font.family = "'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
         
         // Overall Score Gauge
         const overallCtx = document.getElementById('overallChart');
-        if (overallCtx) {
+        if (overallCtx && {{ (overall_score is not none)|tojson }}) {
             new Chart(overallCtx, {
                 type: 'doughnut',
                 data: {
                     datasets: [{
-                        data: [{{ overall_score|round|int }}, {{ 100 - overall_score|round|int }}],
+                        data: {{ score_chart_values|tojson }},
                         backgroundColor: [
-                            '{% if overall_score >= 80 %}#0cce6b{% elif overall_score >= 50 %}#ffa400{% else %}#ff4e42{% endif %}',
+                            '{% if overall_score is number and overall_score >= 80 %}#0cce6b{% elif overall_score is number and overall_score >= 50 %}#ffa400{% else %}#ff4e42{% endif %}',
                             '#e8eaed'
                         ],
                         borderWidth: 0
@@ -906,13 +919,15 @@
         }
         {% endif %}
         
+        }
+
         // Pagination for pages table
         let currentPage = 1;
         const rowsPerPage = 20;
         const pagesData = {{ pages_summary|tojson if pages_summary else '[]' }};
         
         function changePage(direction) {
-            const totalPages = Math.ceil(pagesData.length / rowsPerPage);
+            const totalPages = Math.max(1, Math.ceil(pagesData.length / rowsPerPage));
             currentPage += direction;
             
             if (currentPage < 1) currentPage = 1;
@@ -929,21 +944,30 @@
             const end = start + rowsPerPage;
             const pageData = pagesData.slice(start, end);
             
-            table.innerHTML = pageData.map(page => `
-                <tr>
-                    <td>${page.url.substring(0, 60)}${page.url.length > 60 ? '...' : ''}</td>
-                    <td style="color: ${page.score >= 80 ? 'var(--color-pass)' : page.score >= 50 ? 'var(--color-average)' : 'var(--color-fail)'}">
-                        ${Math.round(page.score)}
-                    </td>
-                    <td>${page.status_code}</td>
-                    <td>${page.load_time.toFixed(2)}s</td>
-                    <td>${page.issue_count}</td>
-                </tr>
-            `).join('');
+            table.replaceChildren();
+            pageData.forEach(page => {
+                const row = document.createElement('tr');
+                const values = [
+                    page.url,
+                    Number.isFinite(page.score) ? Math.round(page.score) : 'Not measured',
+                    page.status_code ?? 'Unavailable',
+                    Number.isFinite(page.load_time) ? page.load_time.toFixed(2) + 's' : 'Not measured',
+                    page.issue_count,
+                    page.error || page.status || ''
+                ];
+                values.forEach(value => {
+                    const cell = document.createElement('td');
+                    cell.textContent = String(value ?? '');
+                    row.appendChild(cell);
+                });
+                row.children[1].style.color = !Number.isFinite(page.score) ? 'var(--color-gray)' :
+                    page.score >= 80 ? 'var(--color-pass)' : page.score >= 50 ? 'var(--color-average)' : 'var(--color-fail)';
+                table.appendChild(row);
+            });
             
             const pageInfo = document.getElementById('pageInfo');
             if (pageInfo) {
-                pageInfo.textContent = `Page ${currentPage} of ${Math.ceil(pagesData.length / rowsPerPage)}`;
+                pageInfo.textContent = `Page ${currentPage} of ${Math.max(1, Math.ceil(pagesData.length / rowsPerPage))}`;
             }
         }
     </script>

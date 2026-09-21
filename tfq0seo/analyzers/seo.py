@@ -10,14 +10,100 @@ from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
 from bs4 import BeautifulSoup, Tag
+from .common import classify_url, document_base_url, header_values, heading_facts, make_issue, parse_robots, resolve_url
+from ..page_facts import PageFacts, ensure_page_facts
+from ..rules import RuleDefinition, RuleCollector, register_rules, score_findings, recommendations_for
+
+
+_SEARCH_DOCS = 'https://developers.google.com/search/docs/'
+_TITLE_REFERENCE = _SEARCH_DOCS + 'appearance/title-link'
+_SNIPPET_REFERENCE = _SEARCH_DOCS + 'appearance/snippet'
+_CANONICAL_REFERENCE = _SEARCH_DOCS + 'crawling-indexing/consolidate-duplicate-urls'
+_JSONLD_REFERENCE = 'https://www.w3.org/TR/json-ld11/'
+_ENCODING_REFERENCE = 'https://html.spec.whatwg.org/multipage/semantics.html#charset'
+_REVIEWED_ON = '2026-09-14'
+
+# References were reviewed on the recorded date. These are bounded HTML checks,
+# not a prediction of rankings, search appearance, or complete standards conformance.
+SEO_RULES = (
+    RuleDefinition('seo.title_missing', 'seo', 'warning',
+        'Provide a descriptive title that identifies the subject of this page.',
+        'HTML documents intended to have a descriptive page title.',
+        (_TITLE_REFERENCE,), _REVIEWED_ON),
+    RuleDefinition('seo.title_repetition', 'seo', 'notice',
+        'Review repeated title words in context; keep necessary names and natural phrasing.',
+        'A whitespace-delimited title repeats a word; repetition alone does not establish keyword stuffing.',
+        (_TITLE_REFERENCE,), _REVIEWED_ON, scored=False),
+    RuleDefinition('seo.description_missing', 'seo', 'notice',
+        'For pages you want to promote in search, consider a relevant summary in the meta description; snippets may use page content.',
+        'A meta description is optional; its usefulness depends on the page and search intent.',
+        (_SNIPPET_REFERENCE,), _REVIEWED_ON, scored=False),
+    RuleDefinition('seo.meta_keywords', 'seo', 'notice',
+        'Do not rely on meta keywords for Google Search; keep them only if another consumer needs them.',
+        'An observed meta keywords tag; other consumers are not assessed.',
+        (_SEARCH_DOCS + 'crawling-indexing/special-tags',), _REVIEWED_ON, scored=False),
+    RuleDefinition('seo.canonical_preference', 'seo', 'notice',
+        'If duplicate or similar URLs exist, choose a consistent canonical preference using supported signals.',
+        'A canonical preference is optional and requires knowledge of duplicate or similar pages.',
+        (_CANONICAL_REFERENCE,), _REVIEWED_ON, scored=False),
+    RuleDefinition('seo.canonical_invalid', 'seo', 'warning',
+        'Correct the declared canonical href so it resolves to the intended HTTP or HTTPS URL.',
+        'An HTML canonical link is declared; HTTP Link headers and destination content are assessed separately.',
+        (_CANONICAL_REFERENCE,), _REVIEWED_ON),
+    RuleDefinition('seo.og_incomplete', 'seo', 'notice',
+        'Complete the Open Graph object with og:title, og:type, og:image, and og:url when Open Graph sharing is intended.',
+        'The page already declares at least one Open Graph property.',
+        ('https://ogp.me/',), _REVIEWED_ON, scored=False),
+    RuleDefinition('seo.og_image_dimensions', 'seo', 'notice',
+        'Consider describing the Open Graph image dimensions for consumers that use them; these properties are optional.',
+        'An Open Graph image is declared; its dimensions have not been fetched.',
+        ('https://ogp.me/',), _REVIEWED_ON, scored=False),
+    RuleDefinition('seo.jsonld_syntax', 'seo', 'warning',
+        'Correct the recorded JSON syntax error in the JSON-LD script.',
+        'Scripts explicitly declared as application/ld+json; only JSON syntax is checked here.',
+        (_JSONLD_REFERENCE,), _REVIEWED_ON),
+    RuleDefinition('seo.jsonld_shape', 'seo', 'warning',
+        'Correct the recorded JSON-LD node, graph, or @type shape and validate with a JSON-LD processor.',
+        'Locally inspected JSON-LD structures; remote contexts, keyword aliases, and vocabulary rules are not expanded.',
+        (_JSONLD_REFERENCE,), _REVIEWED_ON),
+    RuleDefinition('seo.jsonld_empty', 'seo', 'notice',
+        'Review the empty JSON-LD script if it was intended to describe an entity.',
+        'A valid JSON-LD script contains no locally extractable nodes; empty graphs are not syntax failures.',
+        (_JSONLD_REFERENCE,), _REVIEWED_ON, scored=False),
+    RuleDefinition('seo.jsonld_eligibility', 'seo', 'notice',
+        'Check the relevant search feature documentation and validation tools if enhanced search appearance is intended.',
+        'Search feature eligibility needs page purpose, content, vocabulary-specific requirements, and search-engine validation.',
+        (_SEARCH_DOCS + 'appearance/structured-data/sd-policies',), _REVIEWED_ON, scored=False),
+    RuleDefinition('seo.language_format', 'seo', 'notice',
+        'Use a BCP 47 language tag for the document language; validate the complete tag against the language subtag registry.',
+        'A nonempty lang attribute; this check catches only obviously malformed separators and characters.',
+        ('https://www.w3.org/International/articles/language-tags/',), _REVIEWED_ON),
+    RuleDefinition('seo.viewport_width', 'seo', 'notice',
+        'Review the viewport configuration and test the actual layout on narrow screens.',
+        'A viewport declaration is present; absence of device-width alone does not prove an unusable layout.',
+        ('https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/meta/name/viewport',), _REVIEWED_ON, scored=False),
+    RuleDefinition('seo.charset_missing', 'seo', 'notice',
+        'Verify that the response or document declares its character encoding, accounting for any byte-order mark.',
+        'Parsed HTML and optional response headers; original bytes and byte-order marks may be unavailable.',
+        (_ENCODING_REFERENCE,), _REVIEWED_ON, scored=False),
+    RuleDefinition('seo.charset_non_utf8', 'seo', 'notice',
+        'Use UTF-8 consistently in the document bytes and declaration when updating the encoding.',
+        'An encoding is explicitly declared; the actual original byte encoding is not verified.',
+        (_ENCODING_REFERENCE,), _REVIEWED_ON, scored=False),
+    RuleDefinition('seo.favicon_missing', 'seo', 'notice',
+        'If a Google Search favicon is desired, declare an appropriate icon on the site homepage and verify crawl access.',
+        'Homepage HTML only; a default favicon or other platform-specific icon may still exist.',
+        (_SEARCH_DOCS + 'appearance/favicon-in-search',), _REVIEWED_ON, scored=False),
+)
+register_rules(SEO_RULES)
 
 
 class SEOPriority(Enum):
-    """SEO priority levels for issues."""
-    CRITICAL = "critical"  # Will prevent indexing or ranking
-    HIGH = "high"         # Significant ranking impact
-    MEDIUM = "medium"     # Moderate ranking impact
-    LOW = "low"          # Minor optimization opportunity
+    """Legacy presentation priorities; these do not predict ranking impact."""
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
 
 
 class SchemaType(Enum):
@@ -79,7 +165,7 @@ class StructuredDataItem:
     properties: Dict[str, Any]
     is_valid: bool = True
     validation_errors: List[str] = field(default_factory=list)
-    rich_snippet_eligible: bool = False
+    rich_snippet_eligible: Optional[bool] = None
     snippet_type: Optional[RichSnippetType] = None
 
 
@@ -108,40 +194,17 @@ class SERPPreview:
     description_pixels: int = 0
     breadcrumbs: Optional[str] = None
     rich_snippets: List[str] = field(default_factory=list)
-    sitelinks_eligible: bool = False
+    sitelinks_eligible: Optional[bool] = None
 
 
-def create_issue(category: str, severity: str, message: str, details: Optional[Dict] = None) -> Dict[str, Any]:
-    """Create an enhanced SEO issue with recommendations."""
-    issue = {
-        'category': category,
-        'severity': severity,
-        'message': message
-    }
-    if details:
-        issue['details'] = details
-    
-    # Add specific SEO recommendations
-    if 'title' in message.lower():
-        issue['fix'] = "Optimize title: Include primary keyword, keep under 60 chars, make unique and compelling"
-        issue['impact'] = "High - Title tags are a primary ranking factor"
-    elif 'description' in message.lower():
-        issue['fix'] = "Write compelling meta description: 150-160 chars, include keywords, add call-to-action"
-        issue['impact'] = "Medium - Affects click-through rate from search results"
-    elif 'structured data' in message.lower() or 'schema' in message.lower():
-        issue['fix'] = "Implement Schema.org markup for rich snippets and better SERP visibility"
-        issue['impact'] = "High - Enables rich snippets and improves click-through rates"
-    elif 'canonical' in message.lower():
-        issue['fix'] = "Add canonical URL to prevent duplicate content issues"
-        issue['impact'] = "High - Prevents duplicate content penalties"
-    elif 'h1' in message.lower() or 'heading' in message.lower():
-        issue['fix'] = "Use single H1 with primary keyword, follow proper heading hierarchy"
-        issue['impact'] = "High - H1 tags signal main topic to search engines"
-    else:
-        issue['fix'] = "Review SEO best practices for this element"
-        issue['impact'] = "Varies based on implementation"
-    
-    return issue
+def create_issue(category: str, severity: str, message: str, details: Optional[Dict] = None,
+                 rule_id: Optional[str] = None, evidence: Any = None,
+                 confidence: str = 'high') -> Dict[str, Any]:
+    """Compatibility wrapper; findings require an explicit registered rule."""
+    if not rule_id or evidence is None:
+        raise ValueError('SEO findings require a registered rule_id and observed evidence')
+    return make_issue(category, severity, message, details, rule_id, evidence,
+                      confidence=confidence)
 
 
 def calculate_text_pixel_width(text: str, font_size: int = 16) -> int:
@@ -167,339 +230,124 @@ def calculate_text_pixel_width(text: str, font_size: int = 16) -> int:
     return total_width
 
 
-def extract_meta_tags(soup: BeautifulSoup) -> MetaTagProfile:
-    """Extract comprehensive meta tag information."""
+def extract_meta_tags(soup: BeautifulSoup, *, facts: Optional[PageFacts] = None) -> MetaTagProfile:
+    """Build the legacy metadata profile from shared declaration records."""
     profile = MetaTagProfile()
-    
-    # Basic meta tags
-    title_tag = soup.find('title')
-    if title_tag:
-        profile.title = title_tag.text.strip()
-    
-    # Standard meta tags
-    meta_mappings = {
-        'description': 'description',
-        'keywords': 'keywords',
-        'author': 'author',
-        'robots': 'robots',
-        'googlebot': 'googlebot',
-        'viewport': 'viewport'
-    }
-    
-    for name, attr in meta_mappings.items():
-        tag = soup.find('meta', attrs={'name': name})
-        if tag and tag.get('content'):
-            setattr(profile, attr, tag.get('content').strip())
-    
-    # Charset
-    charset_tag = soup.find('meta', charset=True)
-    if charset_tag:
-        profile.charset = charset_tag.get('charset')
-    else:
-        charset_tag = soup.find('meta', attrs={'http-equiv': 'Content-Type'})
-        if charset_tag:
-            content = charset_tag.get('content', '')
-            if 'charset=' in content:
-                profile.charset = content.split('charset=')[-1].strip()
-    
-    # Canonical URL
-    canonical = soup.find('link', attrs={'rel': 'canonical'})
-    if canonical:
-        profile.canonical = canonical.get('href')
-    
-    # Alternate languages (hreflang)
-    for link in soup.find_all('link', attrs={'rel': 'alternate', 'hreflang': True}):
-        lang = link.get('hreflang')
-        href = link.get('href')
-        if lang and href:
-            profile.alternate_languages[lang] = href
-    
-    # Open Graph tags
-    for tag in soup.find_all('meta', property=re.compile('^og:')):
-        prop = tag.get('property')
-        content = tag.get('content')
-        if prop and content:
-            profile.og_tags[prop] = content
-    
-    # Twitter Card tags
-    for tag in soup.find_all('meta', attrs={'name': re.compile('^twitter:')}):
-        name = tag.get('name')
-        content = tag.get('content')
-        if name and content:
-            profile.twitter_tags[name] = content
-    
-    # Article meta tags
-    for tag in soup.find_all('meta', property=re.compile('^article:')):
-        prop = tag.get('property')
-        content = tag.get('content')
-        if prop and content:
-            profile.article_tags[prop] = content
-    
-    # Dublin Core metadata
-    for tag in soup.find_all('meta', attrs={'name': re.compile(r'^dc\.')}):
-        name = tag.get('name')
-        content = tag.get('content')
-        if name and content:
-            profile.dublin_core[name] = content
-    
-    # Custom meta tags
-    for tag in soup.find_all('meta'):
-        name = tag.get('name', '')
-        property = tag.get('property', '')
-        content = tag.get('content', '')
-        
-        # Skip already processed tags
-        if (name and not any(name.startswith(p) for p in ['description', 'keywords', 'author', 'robots', 'viewport', 'twitter', 'dc.']) 
-            and content):
-            profile.custom_meta[name] = content
-        elif (property and not property.startswith(('og:', 'article:')) and content):
-            profile.custom_meta[property] = content
-    
+    title_tag = soup.find('title') if facts is None else None
+    profile.title = facts.title if facts is not None else title_tag.get_text().strip() if title_tag else None
+    metas = facts.meta if facts is not None else [{'attrs': tag.attrs} for tag in soup.find_all('meta')]
+    links = facts.link_tags if facts is not None else [{'attrs': tag.attrs} for tag in soup.find_all('link')]
+    mappings = {'description': 'description', 'keywords': 'keywords', 'author': 'author',
+                'robots': 'robots', 'googlebot': 'googlebot', 'viewport': 'viewport'}
+    seen = set()
+    for record in metas:
+        attrs = record['attrs']
+        name = str(attrs.get('name', ''))
+        key = name.casefold()
+        prop = str(attrs.get('property', ''))
+        content = str(attrs.get('content') or '').strip()
+        if key in mappings and key not in seen:
+            seen.add(key)
+            if content:
+                setattr(profile, mappings[key], content)
+        if 'charset' in attrs and profile.charset is None:
+            profile.charset = attrs['charset']
+        if content:
+            if prop.startswith('og:'):
+                profile.og_tags[prop] = content
+            elif prop.startswith('article:'):
+                profile.article_tags[prop] = content
+            elif prop:
+                profile.custom_meta[prop] = content
+            if name.startswith('twitter:'):
+                profile.twitter_tags[name] = content
+            elif name.startswith('dc.'):
+                profile.dublin_core[name] = content
+            elif name and not any(name.startswith(prefix) for prefix in
+                                  ('description', 'keywords', 'author', 'robots', 'viewport', 'twitter', 'dc.')):
+                profile.custom_meta[name] = content
+    if profile.charset is None:
+        for record in metas:
+            attrs = record['attrs']
+            if str(attrs.get('http-equiv', '')).casefold() == 'content-type':
+                match = re.search(r"charset\s*=\s*[\"']?([^;\s\"']+)", str(attrs.get('content', '')), re.I)
+                if match:
+                    profile.charset = match.group(1)
+                    break
+    canonical_seen = False
+    for record in links:
+        attrs = record['attrs']
+        rel = attrs.get('rel', [])
+        rel = rel if isinstance(rel, list) else str(rel).split()
+        if 'canonical' in rel and not canonical_seen:
+            profile.canonical = attrs.get('href')
+            canonical_seen = True
+        if 'alternate' in rel and attrs.get('hreflang') and attrs.get('href'):
+            profile.alternate_languages[attrs['hreflang']] = attrs['href']
     return profile
 
 
 def validate_structured_data(data: Dict[str, Any]) -> StructuredDataItem:
-    """Validate structured data against Schema.org requirements."""
-    item = StructuredDataItem(
-        type=data.get('@type', 'Unknown'),
-        properties=data
-    )
-    
-    # Basic validation
-    if '@context' not in data:
-        item.validation_errors.append("Missing @context")
+    """Check the local @type shape without inventing required schema properties.
+
+    A context or type need not occur on every node. Context expansion, vocabulary
+    validation, and search feature requirements require a separate validator.
+    """
+    raw_type = data.get('@type')
+    types = raw_type if isinstance(raw_type, list) else [raw_type]
+    schema_types = [value for value in types if isinstance(value, str)]
+    item = StructuredDataItem(type=schema_types[0] if schema_types else 'Unknown', properties=data)
+    if '@type' in data and (not isinstance(raw_type, (str, list))
+                           or any(not isinstance(value, str) for value in types)):
+        item.validation_errors.append('@type must be a string or an array of strings')
         item.is_valid = False
-    
-    if '@type' not in data:
-        item.validation_errors.append("Missing @type")
-        item.is_valid = False
-    
-    # Type-specific validation
-    schema_type = data.get('@type', '')
-    
-    # Product validation
-    if schema_type == 'Product':
-        required = ['name', 'image']
-        recommended = ['description', 'sku', 'offers', 'aggregateRating', 'review']
-        
-        for field in required:
-            if field not in data:
-                item.validation_errors.append(f"Product missing required field: {field}")
-                item.is_valid = False
-        
-        if 'offers' in data:
-            offer = data['offers'] if isinstance(data['offers'], dict) else data['offers'][0]
-            offer_required = ['priceCurrency', 'price']
-            for field in offer_required:
-                if field not in offer:
-                    item.validation_errors.append(f"Product offer missing: {field}")
-        
-        if 'aggregateRating' in data or 'review' in data:
-            item.rich_snippet_eligible = True
-            item.snippet_type = RichSnippetType.PRODUCT
-    
-    # Article validation
-    elif schema_type in ['Article', 'NewsArticle', 'BlogPosting']:
-        required = ['headline', 'datePublished', 'author']
-        recommended = ['image', 'dateModified', 'publisher']
-        
-        for field in required:
-            if field not in data:
-                item.validation_errors.append(f"Article missing required field: {field}")
-                item.is_valid = False
-        
-        item.rich_snippet_eligible = True
-        item.snippet_type = RichSnippetType.ARTICLE
-    
-    # Organization validation
-    elif schema_type == 'Organization':
-        required = ['name', 'url']
-        recommended = ['logo', 'sameAs', 'contactPoint']
-        
-        for field in required:
-            if field not in data:
-                item.validation_errors.append(f"Organization missing required field: {field}")
-                item.is_valid = False
-    
-    # LocalBusiness validation
-    elif 'LocalBusiness' in schema_type:
-        required = ['name', 'address']
-        recommended = ['telephone', 'openingHours', 'geo', 'review']
-        
-        for field in required:
-            if field not in data:
-                item.validation_errors.append(f"LocalBusiness missing required field: {field}")
-                item.is_valid = False
-        
-        if 'address' in data:
-            address_required = ['streetAddress', 'addressLocality', 'addressRegion', 'postalCode']
-            address = data['address'] if isinstance(data['address'], dict) else {}
-            for field in address_required:
-                if field not in address:
-                    item.validation_errors.append(f"Address missing: {field}")
-    
-    # FAQ validation
-    elif schema_type == 'FAQPage':
-        if 'mainEntity' not in data:
-            item.validation_errors.append("FAQPage missing mainEntity")
-            item.is_valid = False
-        else:
-            item.rich_snippet_eligible = True
-            item.snippet_type = RichSnippetType.FAQ
-    
-    # Recipe validation
-    elif schema_type == 'Recipe':
-        required = ['name', 'image', 'recipeIngredient', 'recipeInstructions']
-        recommended = ['prepTime', 'cookTime', 'totalTime', 'recipeYield', 'nutrition', 'aggregateRating']
-        
-        for field in required:
-            if field not in data:
-                item.validation_errors.append(f"Recipe missing required field: {field}")
-                item.is_valid = False
-        
-        if all(field in data for field in required):
-            item.rich_snippet_eligible = True
-            item.snippet_type = RichSnippetType.RECIPE
-    
-    # Event validation
-    elif schema_type == 'Event':
-        required = ['name', 'startDate', 'location']
-        
-        for field in required:
-            if field not in data:
-                item.validation_errors.append(f"Event missing required field: {field}")
-                item.is_valid = False
-        
-        if all(field in data for field in required):
-            item.rich_snippet_eligible = True
-            item.snippet_type = RichSnippetType.EVENT
-    
-    # BreadcrumbList validation
-    elif schema_type == 'BreadcrumbList':
-        if 'itemListElement' not in data:
-            item.validation_errors.append("BreadcrumbList missing itemListElement")
-            item.is_valid = False
-        else:
-            item.rich_snippet_eligible = True
-            item.snippet_type = RichSnippetType.BREADCRUMBS
-    
-    # VideoObject validation
-    elif schema_type == 'VideoObject':
-        required = ['name', 'description', 'thumbnailUrl', 'uploadDate']
-        
-        for field in required:
-            if field not in data:
-                item.validation_errors.append(f"VideoObject missing required field: {field}")
-                item.is_valid = False
-        
-        if all(field in data for field in required):
-            item.rich_snippet_eligible = True
-            item.snippet_type = RichSnippetType.VIDEO
-    
     return item
 
 
-def analyze_heading_structure(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Analyze heading hierarchy and structure."""
-    headings = {
-        'h1': [], 'h2': [], 'h3': [], 'h4': [], 'h5': [], 'h6': []
-    }
-    
-    issues = []
-    hierarchy_valid = True
-    
-    # Extract all headings
-    for level in range(1, 7):
-        tag_name = f'h{level}'
-        for heading in soup.find_all(tag_name):
-            text = heading.get_text(strip=True)
-            if text:
-                headings[tag_name].append({
-                    'text': text,
-                    'length': len(text),
-                    'has_keywords': False  # Would need keyword list to check
-                })
-    
-    # Check H1
-    if len(headings['h1']) == 0:
-        issues.append("No H1 tag found")
-        hierarchy_valid = False
-    elif len(headings['h1']) > 1:
-        issues.append(f"Multiple H1 tags found ({len(headings['h1'])})")
-        hierarchy_valid = False
-    
-    # Check hierarchy
-    prev_level = 0
-    for level in range(1, 7):
-        tag_name = f'h{level}'
-        if headings[tag_name]:
-            if prev_level == 0:
-                prev_level = level
-            elif level > prev_level + 1:
-                issues.append(f"Heading hierarchy broken: H{prev_level} followed by H{level}")
-                hierarchy_valid = False
-            prev_level = level
-    
-    # Calculate metrics
-    total_headings = sum(len(h) for h in headings.values())
-    avg_length = 0
-    if total_headings > 0:
-        all_lengths = [h['length'] for heading_list in headings.values() for h in heading_list]
-        avg_length = sum(all_lengths) / len(all_lengths)
-    
-    return {
-        'headings': headings,
-        'total_count': total_headings,
-        'hierarchy_valid': hierarchy_valid,
-        'average_length': round(avg_length, 1),
-        'issues': issues
-    }
+def iter_structured_data(data: Any, context: Any = None):
+    """Yield nodes from top-level arrays/graphs, retaining inherited context."""
+    if isinstance(data, list):
+        for node in data:
+            yield from iter_structured_data(node, context)
+    elif isinstance(data, dict):
+        local_context = data.get('@context', context)
+        if '@type' in data or '@graph' not in data:
+            node = dict(data)
+            if '@context' not in node and local_context is not None:
+                node['@context'] = local_context
+            yield node
+        if '@graph' in data:
+            graph = data['@graph']
+            if not isinstance(graph, (dict, list)):
+                raise ValueError('@graph must contain a node object or array')
+            yield from iter_structured_data(graph, local_context)
+    else:
+        raise ValueError('JSON-LD must contain node objects or arrays')
 
 
-def analyze_internal_linking_seo(soup: BeautifulSoup, url: str) -> Dict[str, Any]:
-    """Analyze internal linking from SEO perspective."""
-    internal_links = []
-    external_links = []
-    
-    # Parse base URL
-    base_domain = urlparse(url).netloc
-    
-    for link in soup.find_all('a', href=True):
-        href = link.get('href', '')
-        text = link.get_text(strip=True)
-        
-        # Skip empty or anchor-only links
-        if not href or href.startswith('#'):
+def analyze_heading_structure(soup: BeautifulSoup, *, facts: Optional[PageFacts] = None) -> Dict[str, Any]:
+    """Return shared heading facts in document order."""
+    return facts.headings if facts is not None else heading_facts(soup)
+
+
+def analyze_internal_linking_seo(soup: BeautifulSoup, url: str, *, facts: Optional[PageFacts] = None) -> Dict[str, Any]:
+    """Describe link counts using the shared URL classification and anchor records."""
+    page_facts = ensure_page_facts(soup, url, facts=facts)
+    internal_links, external_links = [], []
+    for record in page_facts.anchors:
+        kind = record['url_kind']
+        if kind not in ('internal', 'external'):
             continue
-        
-        # Determine if internal
-        is_internal = True
-        if href.startswith(('http://', 'https://')):
-            link_domain = urlparse(href).netloc
-            is_internal = link_domain == base_domain or link_domain.endswith('.' + base_domain)
-        
-        link_data = {
-            'url': href,
-            'anchor_text': text,
-            'is_follow': 'nofollow' not in (link.get('rel', []) if isinstance(link.get('rel'), list) else [link.get('rel', '')])
-        }
-        
-        if is_internal:
-            internal_links.append(link_data)
-        else:
-            external_links.append(link_data)
-    
-    # Analyze anchor text diversity
-    internal_anchors = [l['anchor_text'].lower() for l in internal_links if l['anchor_text']]
-    anchor_diversity = len(set(internal_anchors)) / max(1, len(internal_anchors))
-    
-    return {
-        'internal_count': len(internal_links),
-        'external_count': len(external_links),
-        'follow_ratio': sum(1 for l in external_links if l['is_follow']) / max(1, len(external_links)),
-        'anchor_diversity': round(anchor_diversity, 2),
-        'top_anchors': Counter(internal_anchors).most_common(5)
-    }
+        rel = record['attrs'].get('rel', [])
+        rel = rel if isinstance(rel, list) else str(rel).split()
+        link_data = {'url': record['url'], 'anchor_text': record['text_compact'],
+                     'is_follow': 'nofollow' not in [str(value).casefold() for value in rel]}
+        (internal_links if kind == 'internal' else external_links).append(link_data)
+    anchors = [link['anchor_text'].lower() for link in internal_links if link['anchor_text']]
+    return {'internal_count': len(internal_links), 'external_count': len(external_links),
+            'follow_ratio': sum(link['is_follow'] for link in external_links) / max(1, len(external_links)),
+            'anchor_diversity': round(len(set(anchors)) / max(1, len(anchors)), 2),
+            'top_anchors': [list(item) for item in Counter(anchors).most_common(5)]}
 
 
 def generate_serp_preview(meta_profile: MetaTagProfile, url: str) -> SERPPreview:
@@ -549,550 +397,245 @@ def generate_serp_preview(meta_profile: MetaTagProfile, url: str) -> SERPPreview
         breadcrumbs=breadcrumbs
     )
     
-    # Check sitelinks eligibility (simplified)
-    if meta_profile.og_tags and 'og:site_name' in meta_profile.og_tags:
-        preview.sitelinks_eligible = True
-    
     return preview
 
 
 def detect_seo_opportunities(soup: BeautifulSoup, meta_profile: MetaTagProfile, structured_data: List[StructuredDataItem]) -> List[Dict[str, Any]]:
-    """Detect SEO optimization opportunities."""
-    opportunities = []
-    
-    # Rich snippet opportunities
-    rich_snippet_types = [item.snippet_type for item in structured_data if item.rich_snippet_eligible]
-    
-    potential_snippets = {
-        RichSnippetType.FAQ: "FAQ rich snippets can increase CTR by 50%+",
-        RichSnippetType.HOW_TO: "How-To rich snippets provide step-by-step visibility",
-        RichSnippetType.RECIPE: "Recipe cards get prominent SERP placement",
-        RichSnippetType.PRODUCT: "Product rich snippets show price and ratings",
-        RichSnippetType.REVIEW: "Review stars increase CTR significantly",
-        RichSnippetType.VIDEO: "Video thumbnails attract more clicks"
-    }
-    
-    for snippet_type, benefit in potential_snippets.items():
-        if snippet_type not in rich_snippet_types:
-            # Check if content suggests this type could be implemented
-            content = soup.get_text().lower()
-            
-            if snippet_type == RichSnippetType.FAQ and ('frequently asked' in content or 'faq' in content):
-                opportunities.append({
-                    'type': 'rich_snippet',
-                    'opportunity': f"Add FAQ structured data",
-                    'benefit': benefit,
-                    'priority': 'high'
-                })
-            elif snippet_type == RichSnippetType.HOW_TO and ('how to' in content or 'step' in content):
-                opportunities.append({
-                    'type': 'rich_snippet',
-                    'opportunity': f"Add How-To structured data",
-                    'benefit': benefit,
-                    'priority': 'medium'
-                })
-            elif snippet_type == RichSnippetType.PRODUCT and ('price' in content or '$' in content):
-                opportunities.append({
-                    'type': 'rich_snippet',
-                    'opportunity': f"Add Product structured data",
-                    'benefit': benefit,
-                    'priority': 'high'
-                })
-    
-    # Featured snippet opportunities
-    # Check for definition-style content
-    if soup.find(string=re.compile(r'(what is|definition of|meaning of)', re.I)):
-        opportunities.append({
-            'type': 'featured_snippet',
-            'opportunity': "Optimize for definition featured snippet",
-            'benefit': "Position 0 placement above organic results",
-            'priority': 'high'
-        })
-    
-    # Check for list content
-    if len(soup.find_all(['ul', 'ol'])) > 2:
-        opportunities.append({
-            'type': 'featured_snippet',
-            'opportunity': "Optimize for list featured snippet",
-            'benefit': "Prominent list display in search results",
-            'priority': 'medium'
-        })
-    
-    # Check for table content
-    if soup.find('table'):
-        opportunities.append({
-            'type': 'featured_snippet',
-            'opportunity': "Optimize for table featured snippet",
-            'benefit': "Table display directly in SERP",
-            'priority': 'medium'
-        })
-    
-    # International SEO opportunities
-    if not meta_profile.alternate_languages:
-        opportunities.append({
-            'type': 'international',
-            'opportunity': "Add hreflang tags for international targeting",
-            'benefit': "Serve correct language version to users",
-            'priority': 'high' if 'lang' not in str(soup.find('html')) else 'low'
-        })
-    
-    # E-commerce opportunities
-    if 'add to cart' in soup.get_text().lower() or 'buy now' in soup.get_text().lower():
-        if not any(item.type == 'Product' for item in structured_data):
-            opportunities.append({
-                'type': 'ecommerce',
-                'opportunity': "Add Product schema for e-commerce pages",
-                'benefit': "Show price, availability, and ratings in SERP",
-                'priority': 'critical'
-            })
-    
-    # Local SEO opportunities
-    if any(word in soup.get_text().lower() for word in ['address', 'location', 'hours', 'directions']):
-        if not any('LocalBusiness' in item.type for item in structured_data):
-            opportunities.append({
-                'type': 'local',
-                'opportunity': "Add LocalBusiness schema",
-                'benefit': "Appear in local pack and maps",
-                'priority': 'high'
-            })
-    
-    return opportunities
+    """Return no content-type guesses from language-dependent keyword matches."""
+    return []
 
 
 def calculate_seo_scores(issues: List[Dict], data: Dict[str, Any]) -> SEOScore:
-    """Calculate detailed SEO scores by category."""
+    """Retain score dimensions while using the shared, deduplicated rule policy."""
     scores = SEOScore()
-    
-    # Calculate individual category scores
-    for issue in issues:
-        penalty = 0
-        if issue['severity'] == 'critical':
-            penalty = 20
-        elif issue['severity'] == 'warning':
-            penalty = 10
-        elif issue['severity'] == 'notice':
-            penalty = 5
-        
-        # Categorize and apply penalties
-        if 'meta' in issue['category'].lower() or 'title' in issue['message'].lower() or 'description' in issue['message'].lower():
-            scores.meta_tags -= penalty
-        elif 'structured' in issue['message'].lower() or 'schema' in issue['message'].lower():
-            scores.structured_data -= penalty
-        elif 'mobile' in issue['message'].lower() or 'viewport' in issue['message'].lower():
-            scores.mobile -= penalty
-        elif 'social' in issue['message'].lower() or 'open graph' in issue['message'].lower() or 'twitter' in issue['message'].lower():
-            scores.social -= penalty
-        elif 'heading' in issue['message'].lower() or 'h1' in issue['message'].lower():
-            scores.content -= penalty
-        elif 'lang' in issue['message'].lower() or 'hreflang' in issue['message'].lower():
-            scores.international -= penalty
-        elif 'alt' in issue['message'].lower():
-            scores.accessibility -= penalty
-        elif 'https' in issue['message'].lower() or 'security' in issue['message'].lower():
-            scores.security -= penalty
-        else:
-            scores.technical -= penalty
-    
-    # Ensure scores don't go negative
-    for attr in ['technical', 'content', 'meta_tags', 'structured_data', 'social', 'mobile', 'international', 'accessibility', 'security']:
-        value = getattr(scores, attr)
-        setattr(scores, attr, max(0, min(100, value)))
-    
-    # Calculate weighted total
-    weights = {
-        'meta_tags': 0.20,
-        'content': 0.20,
-        'structured_data': 0.15,
-        'technical': 0.15,
-        'mobile': 0.10,
-        'social': 0.05,
-        'accessibility': 0.05,
-        'international': 0.05,
-        'security': 0.05
-    }
-    
-    scores.total = sum(getattr(scores, category) * weight for category, weight in weights.items())
-    scores.total = round(scores.total)
-    
+    dimensions = {'meta_tags': 'Meta Tags', 'structured_data': 'Structured Data',
+                  'mobile': 'Mobile SEO', 'social': 'Social SEO', 'content': 'Content SEO',
+                  'international': 'International SEO', 'accessibility': 'Accessibility SEO',
+                  'security': 'Security', 'technical': 'Technical SEO'}
+    for dimension, category in dimensions.items():
+        setattr(scores, dimension, score_findings([issue for issue in issues if issue.get('category') == category]))
+    scores.total = score_findings(issues)
     return scores
 
 
-def analyze_seo(soup: BeautifulSoup, url: str) -> Dict[str, Any]:
-    """Advanced SEO analysis with comprehensive optimization detection."""
-    issues = []
-    data = {}
-    
-    # Extract meta tags comprehensively
-    meta_profile = extract_meta_tags(soup)
-    
-    # Analyze meta title
-    if not meta_profile.title:
-        issues.append(create_issue('Meta Tags', 'critical', 'Missing page title'))
-    else:
-        title_length = len(meta_profile.title)
-        title_pixels = calculate_text_pixel_width(meta_profile.title)
-        
-        data['title'] = {
-            'text': meta_profile.title,
-            'length': title_length,
-            'pixels': title_pixels
-        }
-        
-        if title_length < 30:
-            issues.append(create_issue('Meta Tags', 'warning', 
-                f'Title too short ({title_length} chars, recommended 30-60)'))
-        elif title_length > 60:
-            issues.append(create_issue('Meta Tags', 'warning',
-                f'Title too long ({title_length} chars, recommended 30-60)'))
-        
-        if title_pixels > 600:
-            issues.append(create_issue('Meta Tags', 'warning',
-                f'Title too wide ({title_pixels}px, max 600px on desktop)'))
-        
-        # Check for keyword stuffing
-        words = meta_profile.title.lower().split()
-        word_counts = Counter(words)
-        if any(count > 2 for word, count in word_counts.items() if len(word) > 3):
-            issues.append(create_issue('Meta Tags', 'warning', 'Possible keyword stuffing in title'))
-    
-    # Analyze meta description
-    if not meta_profile.description:
-        issues.append(create_issue('Meta Tags', 'critical', 'Missing meta description'))
-    else:
-        desc_length = len(meta_profile.description)
-        desc_pixels = calculate_text_pixel_width(meta_profile.description)
-        
-        data['description'] = {
-            'text': meta_profile.description,
-            'length': desc_length,
-            'pixels': desc_pixels
-        }
-        
-        if desc_length < 120:
-            issues.append(create_issue('Meta Tags', 'warning',
-                f'Meta description too short ({desc_length} chars, recommended 120-160)'))
-        elif desc_length > 160:
-            issues.append(create_issue('Meta Tags', 'warning',
-                f'Meta description too long ({desc_length} chars, recommended 120-160)'))
-        
-        if desc_pixels > 920:
-            issues.append(create_issue('Meta Tags', 'warning',
-                f'Description too wide ({desc_pixels}px, max 920px on desktop)'))
-        
-        # Check for call-to-action
-        cta_words = ['learn', 'discover', 'find', 'get', 'shop', 'buy', 'read', 'download', 'sign up', 'try']
-        if not any(word in meta_profile.description.lower() for word in cta_words):
-            issues.append(create_issue('Meta Tags', 'notice',
-                'Meta description lacks call-to-action'))
-    
-    # Check meta keywords
-    if meta_profile.keywords:
-        issues.append(create_issue('Meta Tags', 'notice',
-            'Meta keywords tag is deprecated and ignored by search engines'))
-    
-    # Analyze canonical URL
-    if not meta_profile.canonical:
-        issues.append(create_issue('Technical SEO', 'warning', 'Missing canonical URL'))
-    else:
-        data['canonical'] = meta_profile.canonical
-        # Check if canonical matches current URL (simplified check)
-        if meta_profile.canonical != url and not url.endswith('/'):
-            if meta_profile.canonical != url + '/':
-                issues.append(create_issue('Technical SEO', 'notice',
-                    'Canonical URL differs from current URL'))
-    
-    # Analyze robots directives
-    if meta_profile.robots:
-        data['robots'] = meta_profile.robots
-        robots_lower = meta_profile.robots.lower()
-        
-        if 'noindex' in robots_lower:
-            issues.append(create_issue('Technical SEO', 'critical',
-                'Page is set to noindex (will not appear in search results)'))
-        
-        if 'nofollow' in robots_lower:
-            issues.append(create_issue('Technical SEO', 'warning',
-                'Page is set to nofollow (links will not pass PageRank)'))
-        
-        if 'nosnippet' in robots_lower:
-            issues.append(create_issue('Technical SEO', 'warning',
-                'Page is set to nosnippet (no text snippet in SERP)'))
-        
-        if 'noarchive' in robots_lower:
-            issues.append(create_issue('Technical SEO', 'notice',
-                'Page is set to noarchive (no cached version)'))
-    
-    # Analyze Open Graph tags
-    og_required = ['og:title', 'og:description', 'og:image', 'og:url', 'og:type']
-    og_missing = [tag for tag in og_required if tag not in meta_profile.og_tags]
-    
-    if og_missing:
-        issues.append(create_issue('Social SEO', 'warning',
-            f'Missing Open Graph tags: {", ".join(og_missing)}'))
-    
-    if 'og:image' in meta_profile.og_tags:
-        # Check for high-res image
-        if 'og:image:width' not in meta_profile.og_tags or 'og:image:height' not in meta_profile.og_tags:
-            issues.append(create_issue('Social SEO', 'notice',
-                'Open Graph image missing dimensions'))
-    
+def analyze_seo(soup: BeautifulSoup, url: str, headers: Any = None,
+                user_agent: Optional[str] = None, *, facts: Optional[PageFacts] = None) -> Dict[str, Any]:
+    """Evaluate explicit SEO rules over observed HTML and optional headers."""
+    page_facts = ensure_page_facts(soup, url, headers, user_agent, facts)
+    headers = page_facts.headers
+    user_agent = page_facts.user_agent
+    collector = RuleCollector('seo')
+    data = {'score_scope': 'static_html_rules'}
+    meta_profile = extract_meta_tags(soup, facts=page_facts)
+
+    def check(rule_id, failed, evidence, message, category='Technical SEO', **kwargs):
+        if kwargs.get('applicable') is False and not kwargs.get('reason'):
+            kwargs['reason'] = 'The element required by this rule is not declared in the observed HTML.'
+        return collector.check(rule_id, failed, evidence, message=message, category=category, **kwargs)
+
+    check('seo.title_missing', not bool(meta_profile.title), {'title': meta_profile.title},
+          'Missing page title', 'Meta Tags')
+    words = Counter((meta_profile.title or '').casefold().split())
+    repeated = {word: count for word, count in words.items() if count > 2 and len(word) > 3}
+    check('seo.title_repetition', bool(repeated), {'repeated_words': repeated},
+          'Review repeated words in the page title', 'Meta Tags', applicable=bool(meta_profile.title),
+          reason='Whitespace repetition is an editorial hint, not a keyword-stuffing diagnosis.', confidence='low')
+    for name, value in (('title', meta_profile.title), ('description', meta_profile.description)):
+        if value:
+            data[name] = {'text': value, 'length': len(value), 'pixels': calculate_text_pixel_width(value),
+                          'pixel_source': 'approximate_character_widths', 'length_requirement': None}
+    check('seo.description_missing', not bool(meta_profile.description), {'description': meta_profile.description},
+          'No meta description is declared', 'Meta Tags',
+          reason='Google may generate snippets from page content; this is an optional editorial improvement.')
+    check('seo.meta_keywords', bool(meta_profile.keywords), {'keywords': meta_profile.keywords},
+          'Meta keywords are not used by Google Search', 'Meta Tags')
+
+    base_url = page_facts.base_url
+    link_records = page_facts.link_tags
+    canonical_declared = any('canonical' in record['attrs'].get('rel', []) for record in link_records)
+    canonical_url = resolve_url(meta_profile.canonical, base_url) if canonical_declared else None
+    if canonical_url and urlparse(canonical_url).scheme not in ('http', 'https'):
+        canonical_url = None
+    check('seo.canonical_preference', False if canonical_url else None,
+          {'html_canonical': meta_profile.canonical, 'resolved_url': canonical_url},
+          'Canonical preference needs duplicate-page context',
+          reason='HTML observation only; a preference is optional and may also be expressed by other signals.')
+    check('seo.canonical_invalid', canonical_url is None,
+          {'href': meta_profile.canonical, 'base_url': base_url},
+          'The declared canonical does not resolve to an HTTP or HTTPS URL', applicable=canonical_declared)
+    if canonical_declared:
+        data['canonical'] = canonical_url
+        data['canonical_is_self_referencing'] = canonical_url == resolve_url(url, url)
+
+    robots = page_facts.robots
+    data['robots'] = ', '.join(robots['directives'])
+    data['robots_analysis'] = robots
+    for directive in ('noindex', 'nofollow', 'nosnippet'):
+        observed = robots[directive]
+        check('robots.' + directive, observed if observed or headers is not None else None,
+              {'directives': robots['directives'], 'observations': robots['evidence'],
+               'user_agent': user_agent, 'headers_checked': headers is not None},
+              'Page is set to ' + directive, source='html_and_headers',
+              reason='Review the directive against the intended publishing policy; absent headers leave coverage incomplete.')
+
+    og_required = ('og:title', 'og:type', 'og:image', 'og:url')
+    og_missing = [name for name in og_required if name not in meta_profile.og_tags]
+    check('seo.og_incomplete', bool(og_missing), {'missing': og_missing, 'declared': meta_profile.og_tags},
+          'Open Graph object is missing basic properties', 'Social SEO', applicable=bool(meta_profile.og_tags))
+    missing_og_dimensions = [name for name in ('og:image:width', 'og:image:height') if name not in meta_profile.og_tags]
+    check('seo.og_image_dimensions', bool(missing_og_dimensions), {'missing': missing_og_dimensions},
+          'Open Graph image dimensions are not declared', 'Social SEO', applicable='og:image' in meta_profile.og_tags)
     data['open_graph'] = meta_profile.og_tags
-    
-    # Analyze Twitter Card tags
-    if not meta_profile.twitter_tags:
-        issues.append(create_issue('Social SEO', 'warning',
-            'Missing Twitter Card tags for better social sharing'))
-    else:
-        twitter_type = meta_profile.twitter_tags.get('twitter:card', 'summary')
-        
-        if twitter_type == 'summary_large_image':
-            required = ['twitter:title', 'twitter:description', 'twitter:image']
-            twitter_missing = [tag for tag in required if tag not in meta_profile.twitter_tags]
-            if twitter_missing:
-                issues.append(create_issue('Social SEO', 'warning',
-                    f'Missing Twitter Card tags: {", ".join(twitter_missing)}'))
-    
     data['twitter_card'] = meta_profile.twitter_tags
-    
-    # Analyze structured data
+    data['social_preview_status'] = 'not_measured'
+
     structured_data_items = []
-    
-    for script in soup.find_all('script', type='application/ld+json'):
+    syntax_errors, shape_errors, empty_scripts = [], [], []
+    scripts = [record for record in page_facts.scripts
+               if str(record['attrs'].get('type', '')).casefold() == 'application/ld+json']
+    parsed_scripts = 0
+
+    def reject_constant(value):
+        raise ValueError('Non-JSON numeric constant: ' + value)
+
+    for index, script in enumerate(scripts):
         try:
-            json_data = json.loads(script.string)
-            
-            # Handle @graph arrays
-            if '@graph' in json_data:
-                for item in json_data['@graph']:
-                    validated = validate_structured_data(item)
-                    structured_data_items.append(validated)
-            else:
-                validated = validate_structured_data(json_data)
-                structured_data_items.append(validated)
-                
-        except json.JSONDecodeError:
-            issues.append(create_issue('Structured Data', 'critical',
-                'Invalid JSON-LD structured data found'))
-        except Exception as e:
-            issues.append(create_issue('Structured Data', 'warning',
-                f'Error parsing structured data: {str(e)}'))
-    
-    if not structured_data_items:
-        issues.append(create_issue('Structured Data', 'warning',
-            'No structured data (JSON-LD) found'))
-    else:
-        # Report validation errors
-        for item in structured_data_items:
+            json_data = json.loads(script['text'], parse_constant=reject_constant)
+        except (json.JSONDecodeError, ValueError) as exc:
+            syntax_errors.append({'script_index': index, 'error': str(exc),
+                                  'line': getattr(exc, 'lineno', None), 'column': getattr(exc, 'colno', None)})
+            continue
+        parsed_scripts += 1
+        try:
+            nodes = list(iter_structured_data(json_data))
+        except ValueError as exc:
+            shape_errors.append({'script_index': index, 'error': str(exc)})
+            continue
+        if not nodes:
+            empty_scripts.append(index)
+        for node_index, node in enumerate(nodes):
+            item = validate_structured_data(node)
+            structured_data_items.append(item)
             if not item.is_valid:
-                for error in item.validation_errors[:3]:  # Limit to 3 errors per item
-                    issues.append(create_issue('Structured Data', 'warning',
-                        f'{item.type}: {error}'))
-        
-        # Check for rich snippet eligibility
-        eligible_snippets = [item for item in structured_data_items if item.rich_snippet_eligible]
-        if eligible_snippets:
-            data['rich_snippets'] = [
-                {'type': item.snippet_type.value, 'schema': item.type}
-                for item in eligible_snippets
-            ]
-    
+                shape_errors.append({'script_index': index, 'node_index': node_index,
+                                     'type': item.type, 'errors': item.validation_errors})
+    check('seo.jsonld_syntax', bool(syntax_errors), {'scripts': len(scripts), 'errors': syntax_errors},
+          'Invalid JSON syntax in declared JSON-LD', 'Structured Data', applicable=bool(scripts))
+    check('seo.jsonld_shape', bool(shape_errors), {'parsed_scripts': parsed_scripts, 'errors': shape_errors},
+          'Unsupported JSON-LD node or type shape', 'Structured Data', applicable=bool(parsed_scripts),
+          reason='Only local node, graph and @type shapes are checked; this is not full JSON-LD validation.')
+    check('seo.jsonld_empty', bool(empty_scripts), {'script_indices': empty_scripts},
+          'JSON-LD scripts contain no locally extractable nodes', 'Structured Data', applicable=bool(parsed_scripts))
+    check('seo.jsonld_eligibility', None,
+          {'jsonld_script_count': len(scripts), 'types': [item.type for item in structured_data_items],
+           'other_syntax_checked': False}, 'Structured-data search eligibility is not assessed', 'Structured Data',
+          applicable=None, reason='Page purpose and feature-specific validation are unavailable; JSON-LD is optional.')
     data['structured_data'] = [
-        {
-            'type': item.type,
-            'valid': item.is_valid,
-            'rich_snippet_eligible': item.rich_snippet_eligible,
-            'errors': item.validation_errors[:3]  # Limit errors in output
-        }
+        {'type': item.type, 'valid': item.is_valid, 'rich_snippet_eligible': None,
+         'eligibility_status': 'unknown', 'validation_scope': 'local_shape_checks', 'errors': item.validation_errors}
         for item in structured_data_items
     ]
-    
-    # Analyze language and international SEO
-    html_tag = soup.find('html')
-    if html_tag:
-        lang = html_tag.get('lang')
-        if not lang:
-            issues.append(create_issue('International SEO', 'warning',
-                'Missing language declaration (lang attribute)'))
-        else:
-            data['language'] = lang
-            
-            # Check for proper language code format
-            if not re.match(r'^[a-z]{2}(-[A-Z]{2})?$', lang):
-                issues.append(create_issue('International SEO', 'notice',
-                    f'Non-standard language code format: {lang}'))
-    
-    # Check hreflang tags
+
+    lang = page_facts.language
+    check('language.missing', not bool(lang), {'lang': lang},
+          'Missing document language declaration', 'International SEO')
+    if lang:
+        data['language'] = lang
+    malformed_lang = bool(lang) and not bool(re.fullmatch(r'[A-Za-z]{1,8}(?:-[A-Za-z0-9]{1,8})*', lang))
+    check('seo.language_format', malformed_lang, {'lang': lang, 'registry_checked': False},
+          'Document language has a malformed language-tag shape', 'International SEO', applicable=bool(lang),
+          reason='This check does not validate registered subtags, tag ordering, or agreement with the text language.')
     if meta_profile.alternate_languages:
         data['hreflang'] = meta_profile.alternate_languages
-        
-        # Check for x-default
-        if 'x-default' not in meta_profile.alternate_languages:
-            issues.append(create_issue('International SEO', 'notice',
-                'Missing x-default hreflang tag'))
-    
-    # Mobile SEO
-    if not meta_profile.viewport:
-        issues.append(create_issue('Mobile SEO', 'critical',
-            'Missing viewport meta tag (not mobile-friendly)'))
-    else:
-        data['viewport'] = meta_profile.viewport
-        
-        # Check for proper viewport settings
-        if 'width=device-width' not in meta_profile.viewport:
-            issues.append(create_issue('Mobile SEO', 'warning',
-                'Viewport not set to device-width'))
-        
-        if 'user-scalable=no' in meta_profile.viewport:
-            issues.append(create_issue('Mobile SEO', 'warning',
-                'Viewport prevents user scaling (accessibility issue)'))
-    
-    # Analyze heading structure
-    heading_analysis = analyze_heading_structure(soup)
+    data['hreflang_status'] = 'site_validation_required' if meta_profile.alternate_languages else 'not_declared'
+
+    viewport = meta_profile.viewport
+    settings = {}
+    for entry in re.split(r'[,;]', viewport or ''):
+        key, separator, value = entry.partition('=')
+        if separator:
+            settings[key.strip().casefold()] = value.strip().casefold()
+    check('mobile.viewport_missing', not bool(viewport), {'viewport': viewport},
+          'Missing viewport meta tag', 'Mobile SEO')
+    check('seo.viewport_width', settings.get('width') != 'device-width', {'viewport': viewport, 'settings': settings},
+          'Review the viewport width on narrow screens', 'Mobile SEO', applicable=bool(viewport), confidence='low')
+    zoom_disabled = settings.get('user-scalable') in ('no', '0')
+    try:
+        max_scale = float(settings.get('maximum-scale', 'nan'))
+        zoom_disabled = zoom_disabled or 0 < max_scale < 2
+    except ValueError:
+        pass
+    check('mobile.viewport_zoom_disabled', zoom_disabled, {'viewport': viewport, 'settings': settings},
+          'Viewport requests restrictions on user zoom', 'Mobile SEO', applicable=bool(viewport),
+          reason='Browser enforcement varies; verify that users can enlarge text without loss of functionality.')
+    if viewport:
+        data['viewport'] = viewport
+
+    heading_analysis = analyze_heading_structure(soup, facts=page_facts)
     data['heading_structure'] = heading_analysis
-    
-    for heading_issue in heading_analysis['issues']:
-        severity = 'critical' if 'No H1' in heading_issue else 'warning'
-        issues.append(create_issue('Content SEO', severity, heading_issue))
-    
-    # Analyze images for SEO
-    images = soup.find_all('img')
-    images_without_alt = []
-    images_without_dimensions = []
-    large_images = []
-    
-    for img in images:
-        src = img.get('src', '')
-        
-        # Check alt text
-        if not img.get('alt'):
-            images_without_alt.append(src)
-        
-        # Check dimensions
-        if not (img.get('width') and img.get('height')):
-            images_without_dimensions.append(src)
-        
-        # Check for WebP/modern formats
-        if src and not any(fmt in src.lower() for fmt in ['.webp', '.avif']):
-            large_images.append(src)
-    
-    if images_without_alt:
-        issues.append(create_issue('Accessibility SEO', 'warning',
-            f'{len(images_without_alt)} images missing alt text'))
-    
-    if images_without_dimensions:
-        issues.append(create_issue('Technical SEO', 'warning',
-            f'{len(images_without_dimensions)} images missing dimensions (causes CLS)'))
-    
-    data['images'] = {
-        'total': len(images),
-        'missing_alt': len(images_without_alt),
-        'missing_dimensions': len(images_without_dimensions),
-        'non_optimized': len(large_images)
-    }
-    
-    # Internal linking analysis
-    internal_linking = analyze_internal_linking_seo(soup, url)
-    data['internal_linking'] = internal_linking
-    
-    if internal_linking['internal_count'] < 3:
-        issues.append(create_issue('Content SEO', 'warning',
-            'Too few internal links (less than 3)'))
-    
-    if internal_linking['anchor_diversity'] < 0.5:
-        issues.append(create_issue('Content SEO', 'notice',
-            'Low internal anchor text diversity'))
-    
-    # Generate SERP preview
-    serp_preview = generate_serp_preview(meta_profile, url)
-    data['serp_preview'] = {
-        'title': serp_preview.title,
-        'description': serp_preview.description,
-        'url': serp_preview.url,
-        'breadcrumbs': serp_preview.breadcrumbs,
-        'title_pixels': serp_preview.title_pixels,
-        'description_pixels': serp_preview.description_pixels
-    }
-    
-    # Detect SEO opportunities
-    opportunities = detect_seo_opportunities(soup, meta_profile, structured_data_items)
-    data['opportunities'] = opportunities
-    
-    # Check for common SEO issues
-    # Check charset
-    if not meta_profile.charset:
-        issues.append(create_issue('Technical SEO', 'warning',
-            'Missing charset declaration'))
-    elif meta_profile.charset.lower() != 'utf-8':
-        issues.append(create_issue('Technical SEO', 'notice',
-            f'Non-UTF-8 charset: {meta_profile.charset}'))
-    
-    # Check for favicon
-    if not soup.find('link', rel=re.compile('icon')):
-        issues.append(create_issue('Technical SEO', 'notice',
-            'Missing favicon'))
-    
-    # Check for sitemap link
-    if not soup.find('link', rel='sitemap'):
-        issues.append(create_issue('Technical SEO', 'notice',
-            'No sitemap link in HTML'))
-    
-    # Check for RSS/Atom feeds
-    if not soup.find('link', type=re.compile(r'application/(rss|atom)\+xml')):
-        issues.append(create_issue('Technical SEO', 'notice',
-            'No RSS/Atom feed detected'))
-    
-    # Calculate comprehensive SEO scores
+    for rule_id in ('headings.missing_h1', 'headings.empty', 'headings.skipped_level'):
+        findings = [finding for finding in heading_analysis['findings'] if finding['rule_id'] == rule_id]
+        check(rule_id, bool(findings), {'findings': findings, 'headings': heading_analysis['headings']},
+              '; '.join(finding['message'] for finding in findings) or 'Heading check passed', 'Content SEO')
+
+    images = [record['attrs'] for record in page_facts.images]
+    missing_alt = [img.get('src', '') for img in images if 'alt' not in img]
+    missing_dimensions = [img.get('src', '') for img in images if not (img.get('width') and img.get('height'))]
+    non_modern_references = [img.get('src', '') for img in images
+                             if img.get('src') and not re.search(r'\.(?:webp|avif)(?:[?#]|$)', img['src'], re.I)]
+    check('images.missing_alt', bool(missing_alt), {'urls': missing_alt, 'total_images': len(images)},
+          f'{len(missing_alt)} images missing alt attributes', 'Accessibility SEO', applicable=bool(images))
+    check('images.missing_dimensions', bool(missing_dimensions), {'urls': missing_dimensions},
+          'Images lack HTML dimensions; verify that layout space is reserved in CSS',
+          applicable=bool(images), confidence='low')
+    data['images'] = {'total': len(images), 'missing_alt': len(missing_alt),
+                      'missing_dimensions': len(missing_dimensions), 'non_optimized': None,
+                      'non_modern_filename_references': len(non_modern_references),
+                      'optimization_status': 'requires_resource_measurement'}
+    data['internal_linking'] = analyze_internal_linking_seo(soup, url, facts=page_facts)
+
+    preview = generate_serp_preview(meta_profile, url)
+    data['serp_preview'] = {name: getattr(preview, name) for name in
+                           ('title', 'description', 'url', 'breadcrumbs', 'title_pixels', 'description_pixels')}
+    data['serp_preview'].update({'status': 'illustrative', 'source': 'approximate_character_widths',
+                                 'search_appearance_verified': False})
+    data['opportunities'] = detect_seo_opportunities(soup, meta_profile, structured_data_items)
+
+    response_types = header_values(headers, 'Content-Type')
+    header_charsets = []
+    for content_type in response_types:
+        match = re.search(r"charset\s*=\s*[\"']?([^;\s\"']+)", content_type, re.I)
+        if match:
+            header_charsets.append(match.group(1))
+    charset = header_charsets[0] if header_charsets else meta_profile.charset
+    encoding_evidence = {'html_charset': meta_profile.charset, 'header_charsets': header_charsets,
+                         'headers_checked': headers is not None, 'original_bytes_checked': False}
+    check('seo.charset_missing', False if charset else None, encoding_evidence,
+          'Character encoding declaration needs verification', source='html_and_headers',
+          reason='No declaration observed does not exclude a byte-order mark in the original response.')
+    check('seo.charset_non_utf8', str(charset).casefold() not in ('utf-8', 'utf8'), encoding_evidence,
+          'A non-UTF-8 encoding is declared', applicable=bool(charset), source='html_and_headers')
+    icon_links = [record['attrs'] for record in link_records if 'icon' in record['attrs'].get('rel', [])]
+    check('seo.favicon_missing', not bool(icon_links), {'icon_hrefs': [tag.get('href') for tag in icon_links]},
+          'No explicit homepage favicon link is declared', applicable=urlparse(url).path in ('', '/'),
+          reason='Default icon paths and image responses have not been requested.')
+
+    issues = collector.issues
     seo_scores = calculate_seo_scores(issues, data)
-    
-    data['scores'] = {
-        'total': seo_scores.total,
-        'technical': seo_scores.technical,
-        'content': seo_scores.content,
-        'meta_tags': seo_scores.meta_tags,
-        'structured_data': seo_scores.structured_data,
-        'social': seo_scores.social,
-        'mobile': seo_scores.mobile,
-        'international': seo_scores.international,
-        'accessibility': seo_scores.accessibility,
-        'security': seo_scores.security
-    }
-    
-    # Generate recommendations based on scores
-    recommendations = []
-    
-    if seo_scores.meta_tags < 70:
-        recommendations.append("Priority: Optimize meta tags (title, description) for better SERP visibility")
-    
-    if seo_scores.structured_data < 70:
-        recommendations.append("Priority: Implement structured data for rich snippets")
-    
-    if seo_scores.mobile < 70:
-        recommendations.append("Priority: Fix mobile SEO issues for mobile-first indexing")
-    
-    if seo_scores.content < 70:
-        recommendations.append("Priority: Improve content structure and heading hierarchy")
-    
-    if opportunities:
-        high_priority = [o for o in opportunities if o.get('priority') in ['critical', 'high']]
-        if high_priority:
-            recommendations.append(f"Opportunity: {high_priority[0]['opportunity']}")
-    
+    data['scores'] = {name: getattr(seo_scores, name) for name in
+                      ('total', 'technical', 'content', 'meta_tags', 'structured_data', 'social',
+                       'mobile', 'international', 'accessibility', 'security')}
+    data['score_dimensions_scope'] = (
+        'Non-additive diagnostic subsets of rules observed by the SEO analyzer. '
+        'The page pipeline assigns each shared rule to one analyzer for aggregate scoring.'
+    )
+    recommendations = recommendations_for(issues)
     data['recommendations'] = recommendations
-    
-    # Store meta profile data
     data['meta_profile'] = {
-        'title': meta_profile.title,
-        'description': meta_profile.description,
-        'canonical': meta_profile.canonical,
-        'robots': meta_profile.robots,
-        'charset': meta_profile.charset,
-        'og_tags': dict(list(meta_profile.og_tags.items())[:10]),  # Limit output
-        'twitter_tags': meta_profile.twitter_tags,
-        'hreflang_count': len(meta_profile.alternate_languages)
+        'title': meta_profile.title, 'description': meta_profile.description,
+        'canonical': meta_profile.canonical, 'robots': meta_profile.robots, 'charset': meta_profile.charset,
+        'og_tags': meta_profile.og_tags, 'twitter_tags': meta_profile.twitter_tags,
+        'hreflang_count': len(meta_profile.alternate_languages),
     }
-    
-    return {
-        'score': seo_scores.total,
-        'issues': issues,
-        'data': data
-    }
+    return {'score': seo_scores.total, 'issues': issues, 'data': data, 'recommendations': recommendations,
+            'rule_results': collector.results, 'rule_coverage': collector.coverage, 'coverage': collector.coverage}

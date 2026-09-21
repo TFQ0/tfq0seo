@@ -4,17 +4,27 @@ import asyncio
 import time
 import hashlib
 import json
+import math
+import copy
+from functools import partial
 import psutil
 from typing import Dict, List, Any, Optional, AsyncIterator, Set, Tuple
 from urllib.parse import urlparse
-from collections import defaultdict, Counter
+from collections import defaultdict, Counter, OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
-from datetime import datetime, timedelta
 import logging
 
 from .config import Config
 from .crawler import Crawler
+from .models import (ANALYZER_NAMES, SCHEMA_VERSION, FetchResult, PageResult, SiteReport,
+                     ContractError, normalize_fetch_result, validate_analyzer_result)
+from .report_contracts import validate_page_result, validate_site_report
+from ..page_facts import FACTS_VERSION, extract_page_facts
+from ..urls import resolve_url
+from ..site_analysis import analyze_site, url_identity
+from ..rules import (RULESET_VERSION, SCORING_VERSION, get_rule, rule_result,
+                     merge_rule_results, rule_coverage, finding_penalty, recommendations_for)
 from .report_optimizer import (
     aggregate_issues,
     generate_specific_recommendations,
@@ -94,831 +104,776 @@ class CrawlProgress:
 
 
 class AnalysisCache:
-    """Simple in-memory cache for analysis results."""
-    
-    def __init__(self, ttl_seconds: int = 3600):
-        self.cache: Dict[str, Tuple[Dict, float]] = {}
+    """Bounded LRU cache of immutable snapshots, keyed by analysis inputs."""
+
+    def __init__(self, ttl_seconds: int = 3600, max_bytes: int = 100 * 1024 * 1024):
+        self.cache = OrderedDict()
         self.ttl = ttl_seconds
-    
-    def get(self, url: str) -> Optional[Dict]:
-        """Get cached result if not expired."""
-        if url in self.cache:
-            result, timestamp = self.cache[url]
-            if time.time() - timestamp < self.ttl:
-                return result
-            else:
-                del self.cache[url]
-        return None
-    
-    def set(self, url: str, result: Dict) -> None:
-        """Cache a result."""
-        self.cache[url] = (result, time.time())
-    
+        self.max_bytes = max_bytes
+        self.size_bytes = 0
+
+    def get(self, key: str) -> Optional[Dict]:
+        entry = self.cache.get(key)
+        if entry is None:
+            return None
+        value, created, size = entry
+        if time.monotonic() - created >= self.ttl:
+            self.size_bytes -= size
+            del self.cache[key]
+            return None
+        self.cache.move_to_end(key)
+        return copy.deepcopy(value)
+
+    def set(self, key: str, result: Dict) -> None:
+        self.clear_expired()
+        size = len(json.dumps(result, ensure_ascii=False, allow_nan=False).encode('utf-8'))
+        if size > self.max_bytes:
+            return
+        previous = self.cache.pop(key, None)
+        if previous:
+            self.size_bytes -= previous[2]
+        while self.cache and self.size_bytes + size > self.max_bytes:
+            self.size_bytes -= self.cache.popitem(last=False)[1][2]
+        self.cache[key] = (copy.deepcopy(result), time.monotonic(), size)
+        self.size_bytes += size
+
     def clear_expired(self) -> None:
-        """Remove expired entries."""
-        current_time = time.time()
-        expired = [url for url, (_, timestamp) in self.cache.items() 
-                  if current_time - timestamp >= self.ttl]
-        for url in expired:
-            del self.cache[url]
+        for key in list(self.cache):
+            if time.monotonic() - self.cache[key][1] >= self.ttl:
+                self.size_bytes -= self.cache.pop(key)[2]
+
+    def clear(self) -> None:
+        self.cache.clear()
+        self.size_bytes = 0
 
 
 class SEOAnalyzer:
-    """Advanced SEO analyzer with parallel processing and intelligent coordination."""
-    
-    def __init__(self, config: Optional[Config] = None, mode: AnalysisMode = AnalysisMode.STANDARD):
-        """Initialize the SEO analyzer with configuration and mode."""
+    """Coordinate bounded fetches, explicit analysis outcomes, and complete reports."""
+
+    def __init__(self, config: Optional[Config] = None, mode: Optional[AnalysisMode] = None):
         self.config = config or Config()
-        self.mode = mode
+        self.config.require_valid()
+        self.mode = AnalysisMode(mode or self.config.analysis.analysis_mode)
+        if not self._enabled_analyzers():
+            raise ValueError('The selected mode has no enabled analyzers')
+        self.cache = AnalysisCache(self.config.crawler.cache_ttl,
+                                   self.config.crawler.cache_size_mb * 1024 * 1024)
         self.crawler = None
+        self._analysis_slots = None
+        self._analysis_loop = None
+        self._semaphore = None
+        self._start_time = None
+        self._reset_state()
+
+    def _reset_state(self) -> None:
         self.results = []
         self.broken_links: Set[str] = set()
         self.redirects: Dict[str, str] = {}
-        self.duplicate_content: Dict[str, List[str]] = defaultdict(list)
-        self.analysis_contexts: Dict[str, AnalysisContext] = {}
+        self.duplicate_content = defaultdict(list)
+        self.analysis_contexts = {}
         self.stats = AnalysisStats()
         self.progress = CrawlProgress()
-        self.cache = AnalysisCache(ttl_seconds=self.config.crawler.cache_ttl if hasattr(self.config.crawler, 'cache_ttl') else 3600)
-        self._semaphore = None
-        self._start_time = None
-        self._page_times: List[float] = []
-        
-        # Ensure backward compatibility with crawler config
-        if not hasattr(self.config.crawler, 'concurrent_requests'):
-            self.config.crawler.concurrent_requests = getattr(self.config.crawler, 'max_concurrent', 10)
-        
+        self._page_times = []
+        self.link_checks = []
+        self._crawl_complete = False
+        self._run_limits = []
+        self._discovery_errors = []
+        self._site_start_url = None
+
+    def _begin_run(self) -> None:
+        self.config.require_valid()
+        self._reset_state()
+        self._start_time = time.time()
+        self.stats.analysis_start = self._start_time
+        self._semaphore = asyncio.Semaphore(self.config.analysis.max_analysis_threads)
+
     def _get_page_priority(self, url: str, depth: int = 0) -> PagePriority:
-        """Determine page priority based on URL and depth."""
-        parsed = urlparse(url)
-        path = parsed.path.lower()
-        
-        # Homepage is always critical
-        if path in ['/', '', '/index.html', '/index.php']:
-            return PagePriority.CRITICAL
-        
-        # Key pages are high priority
-        key_paths = ['/about', '/contact', '/products', '/services', '/pricing', '/features']
-        if any(path.startswith(p) for p in key_paths):
-            return PagePriority.HIGH
-        
-        # Depth-based priority
-        if depth <= 1:
-            return PagePriority.HIGH
-        elif depth <= 2:
+        try:
+            path = urlparse(url).path
+        except ValueError:
             return PagePriority.MEDIUM
-        else:
-            return PagePriority.LOW
-    
+        if path in ('', '/', '/index.html', '/index.php'):
+            return PagePriority.CRITICAL
+        return PagePriority.HIGH if depth <= 1 else PagePriority.MEDIUM if depth <= 2 else PagePriority.LOW
+
     def _should_skip_analysis(self, url: str) -> bool:
-        """Check if URL should be skipped from analysis."""
-        # Skip certain file types
-        skip_extensions = {'.pdf', '.doc', '.xls', '.zip', '.mp4', '.mp3', '.jpg', '.png', '.gif'}
-        parsed = urlparse(url)
-        path_lower = parsed.path.lower()
-        
-        return any(path_lower.endswith(ext) for ext in skip_extensions)
-    
+        try:
+            return urlparse(url).path.lower().endswith(
+                ('.pdf', '.doc', '.xls', '.zip', '.mp4', '.mp3', '.jpg', '.png', '.gif'))
+        except ValueError:
+            return False
+
     def _calculate_content_hash(self, content: str) -> str:
-        """Calculate hash of content for duplicate detection."""
-        # Normalize content for comparison
-        normalized = ' '.join(content.lower().split())
-        return hashlib.md5(normalized.encode()).hexdigest()[:16]
-    
-    async def analyze_page(self, page_data: Dict[str, Any], context: Optional[AnalysisContext] = None) -> Dict[str, Any]:
-        """Analyze a single page with enhanced error handling and caching."""
+        return hashlib.sha256(' '.join(content.split()).encode('utf-8')).hexdigest()
+
+    def _enabled_analyzers(self) -> List[str]:
+        names = self.config.analysis.enabled_analyzers
+        return [name for name in names if self.mode != AnalysisMode.QUICK or name in ('seo', 'technical')]
+
+    async def analyze_page(self, page_data: FetchResult,
+                           context: Optional[AnalysisContext] = None) -> PageResult:
+        page_data = normalize_fetch_result(page_data, '$.fetch')
         url = page_data['url']
-        
-        # Check cache first
-        if self.mode != AnalysisMode.DEEP:
-            cached = self.cache.get(url)
-            if cached:
-                logger.debug(f"Using cached analysis for {url}")
-                self.stats.successful_analyses += 1
-                return cached
-        
-        # Create context if not provided
-        if not context:
-            context = AnalysisContext(url=url)
-        
-        # Handle errors
-        if 'error' in page_data:
-            self.stats.failed_analyses += 1
-            return {
-                'url': url,
-                'error': page_data.get('error'),
-                'status_code': page_data.get('status_code', 0),
-                'context': {
-                    'depth': context.depth,
-                    'priority': context.priority.value
-                }
-            }
-        
-        soup = page_data.get('soup')
-        if not soup:
-            self.stats.failed_analyses += 1
-            return {
-                'url': url,
-                'error': 'No content to analyze',
-                'status_code': page_data.get('status_code', 0)
-            }
-        
-        # Skip non-HTML content
-        if self._should_skip_analysis(url):
-            self.stats.skipped_pages += 1
-            return {
-                'url': url,
-                'skipped': True,
-                'reason': 'Non-HTML content'
-            }
-        
-        # Track broken links and redirects
-        status_code = page_data.get('status_code', 200)
-        if status_code >= 400:
-            self.broken_links.add(url)
-        elif 300 <= status_code < 400:
-            redirect_url = page_data.get('redirect_url')
-            if redirect_url:
-                self.redirects[url] = redirect_url
-        
-        # Check for duplicate content
-        content_text = soup.get_text(strip=True)
-        content_hash = self._calculate_content_hash(content_text[:5000])  # First 5000 chars
-        self.duplicate_content[content_hash].append(url)
-        
-        # Initialize results
-        results = {
-            'url': url,
-            'status_code': status_code,
-            'load_time': page_data.get('load_time', 0),
+        context = context or AnalysisContext(url=url, depth=page_data.get('depth', 0),
+                                            parent_url=page_data.get('parent_url'))
+        status = page_data.get('status_code', 0)
+        result = {
+            'schema_version': SCHEMA_VERSION, 'url': url,
+            'requested_url': page_data.get('requested_url', page_data.get('redirected_from') or url),
+            'status_code': status, 'load_time': page_data.get('load_time'),
             'content_length': page_data.get('content_length', 0),
             'timestamp': page_data.get('timestamp', time.time()),
-            'context': {
-                'depth': context.depth,
-                'priority': context.priority.value,
-                'parent_url': context.parent_url
-            },
-            'content_hash': content_hash
+            'timings': page_data.get('timings', {}),
+            'redirect_chain': copy.deepcopy(page_data.get('redirect_chain', [])),
+            'truncated': bool(page_data.get('truncated', False)),
+            'context': {'depth': context.depth, 'priority': context.priority.value,
+                        'parent_url': context.parent_url},
+            'overall_score': None, 'issues': [], 'issue_counts': self._count_issues([]),
+            'recommendations': [], 'status': 'complete'
         }
-        
-        try:
-            start_time = time.time()
-            
-            # Run analyzers based on mode
-            if self.mode == AnalysisMode.QUICK:
-                # Quick mode: Only essential analyzers
-                tasks = [
-                    self._run_analyzer_safe('seo', analyze_seo, soup, url),
-                    self._run_analyzer_safe('technical', analyze_technical, soup, url, 
-                                           headers=page_data.get('headers'), 
-                                           status_code=status_code)
-                ]
-            elif self.mode == AnalysisMode.DEEP:
-                # Deep mode: All analyzers with extra parameters
-                tasks = [
-                    self._run_analyzer_safe('seo', analyze_seo, soup, url),
-                    self._run_analyzer_safe('content', analyze_content, soup, url, 
-                                           target_keywords=self.config.analysis.target_keywords),
-                    self._run_analyzer_safe('technical', analyze_technical, soup, url,
-                                           headers=page_data.get('headers'), 
-                                           status_code=status_code),
-                    self._run_analyzer_safe('performance', analyze_performance, soup, url,
-                                           load_time=page_data.get('load_time', 0), 
-                                           content_length=page_data.get('content_length', 0)),
-                    self._run_analyzer_safe('links', analyze_links, soup, url, 
-                                           broken_links=self.broken_links)
-                ]
-            else:  # STANDARD mode
-                # Standard mode: All analyzers with normal parameters
-                tasks = [
-                    self._run_analyzer_safe('seo', analyze_seo, soup, url),
-                    self._run_analyzer_safe('content', analyze_content, soup, url,
-                                           target_keywords=self.config.analysis.target_keywords),
-                    self._run_analyzer_safe('technical', analyze_technical, soup, url,
-                                           headers=page_data.get('headers'), 
-                                           status_code=status_code),
-                    self._run_analyzer_safe('performance', analyze_performance, soup, url,
-                                           load_time=page_data.get('load_time', 0),
-                                           content_length=page_data.get('content_length', 0)),
-                    self._run_analyzer_safe('links', analyze_links, soup, url,
-                                           broken_links=self.broken_links if self.config.analysis.check_external_links else None)
-                ]
-            
-            # Run analyzers in parallel
-            analyzer_results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Process results
-            for analyzer_name, result in analyzer_results:
-                if isinstance(result, Exception):
-                    logger.error(f"Analyzer {analyzer_name} failed for {url}: {result}")
-                    results[analyzer_name] = {'score': 0, 'error': str(result)}
-                else:
-                    results[analyzer_name] = result
-            
-            # Calculate weighted overall score
-            results['overall_score'] = self._calculate_weighted_score(results)
-            
-            # Aggregate all issues with deduplication
-            results['issues'] = self._aggregate_page_issues(results)
-            
-            # Issue counts
-            results['issue_counts'] = self._count_issues(results['issues'])
-            self.stats.total_issues += results['issue_counts']['total']
-            self.stats.critical_issues += results['issue_counts']['critical']
-            self.stats.warnings += results['issue_counts']['warning']
-            self.stats.notices += results['issue_counts']['notice']
-            
-            # Generate intelligent recommendations
-            results['recommendations'] = self._generate_page_recommendations(results)
-            
-            # Track analysis time
-            analysis_time = time.time() - start_time
-            results['analysis_time'] = analysis_time
-            self._page_times.append(analysis_time)
-            
-            # Cache successful result
-            self.cache.set(url, results)
-            
-            # Update stats
-            self.stats.successful_analyses += 1
-            
-        except Exception as e:
-            logger.error(f"Analysis error for {url}: {e}")
-            results['error'] = f"Analysis error: {str(e)}"
-            results['overall_score'] = 0
-            results['issues'] = []
-            self.stats.failed_analyses += 1
-        
-        return results
-    
-    async def _run_analyzer(self, name: str, analyzer_func: callable, *args) -> Tuple[str, Dict]:
-        """Run an analyzer with error handling (deprecated, use _run_analyzer_safe)."""
-        try:
-            # Filter out None arguments for compatibility
-            filtered_args = [arg for arg in args if arg is not None]
-            result = analyzer_func(*filtered_args)
-            return (name, result)
-        except Exception as e:
-            logger.error(f"Analyzer {name} failed: {e}", exc_info=True)
-            return (name, {'score': 0, 'error': str(e), 'issues': []})
-    
-    async def _run_analyzer_safe(self, name: str, analyzer_func: callable, *args, **kwargs) -> Tuple[str, Dict]:
-        """Run an analyzer with safe parameter handling."""
-        try:
-            # Call analyzer with positional and keyword arguments
-            result = analyzer_func(*args, **kwargs)
-            return (name, result)
-        except TypeError as e:
-            # Try calling with only positional arguments for backward compatibility
-            try:
-                result = analyzer_func(*args)
-                return (name, result)
-            except Exception as e2:
-                logger.error(f"Analyzer {name} failed with both calling methods: {e}, {e2}")
-                return (name, {'score': 0, 'error': str(e), 'issues': []})
-        except Exception as e:
-            logger.error(f"Analyzer {name} failed: {e}")
-            return (name, {'score': 0, 'error': str(e), 'issues': []})
-    
-    def _calculate_weighted_score(self, results: Dict[str, Any]) -> float:
-        """Calculate weighted overall score with dynamic weighting."""
-        # Dynamic weights based on analysis mode
-        if self.mode == AnalysisMode.QUICK:
-            weights = {
-                'seo': 0.60,
-                'technical': 0.40
-            }
-        elif self.mode == AnalysisMode.DEEP:
-            weights = {
-                'seo': 0.25,
-                'content': 0.25,
-                'technical': 0.20,
-                'performance': 0.20,
-                'links': 0.10
-            }
-        else:  # STANDARD
-            weights = {
-                'seo': 0.30,
-                'content': 0.25,
-                'technical': 0.20,
-                'performance': 0.15,
-                'links': 0.10
-            }
-        
-        total_score = 0
-        total_weight = 0
-        
-        for analyzer, weight in weights.items():
-            if analyzer in results and 'score' in results[analyzer]:
-                score = results[analyzer]['score']
-                # Apply penalty for critical issues
-                if analyzer in results and 'issues' in results[analyzer]:
-                    critical_count = sum(1 for i in results[analyzer]['issues'] 
-                                       if i.get('severity') == 'critical')
-                    score *= (1 - critical_count * 0.1)  # 10% penalty per critical issue
-                
-                total_score += score * weight
-                total_weight += weight
-        
-        return total_score / total_weight if total_weight > 0 else 0
-    
-    def _aggregate_page_issues(self, results: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Aggregate and deduplicate issues from all analyzers."""
-        all_issues = []
-        seen_issues = set()
-        
-        for analyzer in ['seo', 'content', 'technical', 'performance', 'links']:
-            if analyzer in results and 'issues' in results[analyzer]:
-                for issue in results[analyzer]['issues']:
-                    # Create unique key for deduplication
-                    issue_key = f"{issue.get('category', '')}:{issue.get('message', '')}"
-                    
-                    if issue_key not in seen_issues:
-                        seen_issues.add(issue_key)
-                        # Add analyzer source
-                        issue['source'] = analyzer
-                        all_issues.append(issue)
-        
-        # Sort by severity (critical > warning > notice)
-        severity_order = {'critical': 0, 'warning': 1, 'notice': 2}
-        all_issues.sort(key=lambda x: severity_order.get(x.get('severity', 'notice'), 3))
-        
-        return all_issues
-    
-    def _count_issues(self, issues: List[Dict[str, Any]]) -> Dict[str, int]:
-        """Count issues by severity."""
-        counts = {
-            'critical': 0,
-            'warning': 0,
-            'notice': 0,
-            'total': len(issues)
-        }
-        
-        for issue in issues:
-            severity = issue.get('severity', 'notice')
-            if severity in counts:
-                counts[severity] += 1
-        
-        return counts
-    
-    def _generate_page_recommendations(self, results: Dict[str, Any]) -> List[Dict[str, str]]:
-        """Generate intelligent, prioritized recommendations."""
-        recommendations = []
-        issues = results.get('issues', [])
-        
-        # Group issues by category
-        issues_by_category = defaultdict(list)
-        for issue in issues:
-            category = issue.get('category', 'General')
-            issues_by_category[category].append(issue)
-        
-        # Priority 1: Critical SEO issues
-        critical_seo = [i for i in issues if i.get('severity') == 'critical' and 
-                        i.get('source') == 'seo']
-        
-        if critical_seo:
-            for issue in critical_seo[:2]:  # Top 2 critical SEO issues
-                rec = {
-                    'priority': 'critical',
-                    'category': 'SEO',
-                    'recommendation': issue.get('fix', 'Fix critical SEO issue'),
-                    'impact': issue.get('impact', 'High impact on search visibility'),
-                    'effort': 'low'  # Most critical issues are quick fixes
-                }
-                recommendations.append(rec)
-        
-        # Priority 2: Performance issues affecting Core Web Vitals
-        if 'performance' in results:
-            perf_data = results['performance'].get('data', {})
-            
-            if perf_data.get('lcp', 0) > 2.5:
-                recommendations.append({
-                    'priority': 'high',
-                    'category': 'Performance',
-                    'recommendation': 'Optimize Largest Contentful Paint (LCP)',
-                    'impact': 'Improves Core Web Vitals and search rankings',
-                    'effort': 'medium'
-                })
-            
-            if perf_data.get('cls', 0) > 0.1:
-                recommendations.append({
-                    'priority': 'high',
-                    'category': 'Performance',
-                    'recommendation': 'Fix Cumulative Layout Shift (CLS)',
-                    'impact': 'Better user experience and Core Web Vitals',
-                    'effort': 'low'
-                })
-        
-        # Priority 3: Content optimization
-        if 'content' in results:
-            content_data = results['content'].get('data', {})
-            
-            if content_data.get('word_count', 0) < 300:
-                recommendations.append({
-                    'priority': 'high',
-                    'category': 'Content',
-                    'recommendation': f"Expand content from {content_data.get('word_count', 0)} to at least 300 words",
-                    'impact': 'Improves content relevance and ranking potential',
-                    'effort': 'medium'
-                })
-            
-            if content_data.get('keyword_density', {}).get('primary', 0) < 0.5:
-                recommendations.append({
-                    'priority': 'medium',
-                    'category': 'Content',
-                    'recommendation': 'Increase primary keyword usage naturally',
-                    'impact': 'Better keyword relevance',
-                    'effort': 'low'
-                })
-        
-        # Priority 4: Technical improvements
-        if 'technical' in results:
-            tech_data = results['technical'].get('data', {})
-            
-            if not tech_data.get('https'):
-                recommendations.append({
-                    'priority': 'critical',
-                    'category': 'Security',
-                    'recommendation': 'Enable HTTPS with SSL certificate',
-                    'impact': 'Required for security and SEO',
-                    'effort': 'medium'
-                })
-            
-            if tech_data.get('mobile', {}).get('readiness') == 'desktop_only':
-                recommendations.append({
-                    'priority': 'critical',
-                    'category': 'Mobile',
-                    'recommendation': 'Implement responsive design',
-                    'impact': 'Required for mobile-first indexing',
-                    'effort': 'high'
-                })
-        
-        # Sort by priority
-        priority_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
-        recommendations.sort(key=lambda x: priority_order.get(x['priority'], 4))
-        
-        return recommendations[:10]  # Return top 10 recommendations
-    
-    def _update_progress(self) -> None:
-        """Update crawl progress statistics."""
-        if self._start_time:
-            elapsed = time.time() - self._start_time
-            if elapsed > 0 and self.progress.pages_analyzed > 0:
-                self.progress.speed_pages_per_sec = self.progress.pages_analyzed / elapsed
-                
-                if self.progress.pages_remaining > 0 and self.progress.speed_pages_per_sec > 0:
-                    self.progress.eta_seconds = self.progress.pages_remaining / self.progress.speed_pages_per_sec
-    
-    async def analyze_url(self, url: str) -> Dict[str, Any]:
-        """Analyze a single URL with full context."""
-        self._start_time = time.time()
-        self.stats.analysis_start = self._start_time
-        
-        async with Crawler(self.config.crawler.__dict__) as crawler:
-            self.crawler = crawler
-            
-            # Fetch page
-            page_data = await crawler.fetch_page(url)
-            
-            if not page_data:
-                self.stats.failed_analyses += 1
-                return {'url': url, 'error': 'Failed to fetch page'}
-            
-            # Create context
-            context = AnalysisContext(
-                url=url,
-                priority=self._get_page_priority(url)
-            )
-            self.analysis_contexts[url] = context
-            
-            # Analyze
-            result = await self.analyze_page(page_data, context)
-            
-            # Update stats
-            self.stats.analysis_end = time.time()
-            self.stats.total_pages = 1
-            
+        if status >= 400:
+            self.broken_links.add(url)
+        if result['requested_url'] != url:
+            self.redirects[result['requested_url']] = url
+        if page_data.get('error') and (not page_data.get('skipped') or status >= 400):
+            result.update(status='error', error=str(page_data['error']))
+            self._record_analysis(result)
             return result
-    
-    async def crawl_site(self, start_url: str) -> AsyncIterator[Dict[str, Any]]:
-        """Crawl and analyze a website with intelligent prioritization."""
-        self._start_time = time.time()
-        self.stats.analysis_start = self._start_time
-        
-        # Use semaphore for parallel analysis control
-        self._semaphore = asyncio.Semaphore(self.config.crawler.concurrent_requests // 2)
-        
-        async with Crawler(self.config.crawler.__dict__) as crawler:
-            self.crawler = crawler
-            
-            # Start crawling
-            crawl_task = asyncio.create_task(
-                crawler.crawl_site(start_url, self.config.crawler.max_pages)
-            )
-            
-            # Track processed pages
-            processed = 0
-            analysis_tasks = []
-            completed_urls = set()
-            
-            while not crawl_task.done() or processed < len(crawler.results) or analysis_tasks:
-                # Process new crawled pages
-                while processed < len(crawler.results):
-                    page_data = crawler.results[processed]
-                    processed += 1
-                    
-                    url = page_data['url']
-                    if url in completed_urls:
-                        continue
-                    
-                    # Create context
-                    context = AnalysisContext(
-                        url=url,
-                        depth=page_data.get('depth', 0),
-                        priority=self._get_page_priority(url, page_data.get('depth', 0))
-                    )
-                    self.analysis_contexts[url] = context
-                    
-                    # Update progress
-                    self.progress.pages_crawled = processed
-                    self.progress.pages_queued = len(crawler.results)
-                    self.progress.current_url = url
-                    self.progress.current_depth = context.depth
-                    self._update_progress()
-                    
-                    # Start analysis task with semaphore
-                    task = asyncio.create_task(
-                        self._analyze_with_semaphore(page_data, context)
-                    )
-                    analysis_tasks.append(task)
-                
-                # Check for completed analysis tasks
-                if analysis_tasks:
-                    done, pending = await asyncio.wait(
-                        analysis_tasks, 
-                        timeout=0.1,
-                        return_when=asyncio.FIRST_COMPLETED
-                    )
-                    
-                    for task in done:
-                        try:
-                            result = await task
-                            if result:
-                                completed_urls.add(result['url'])
-                                self.results.append(result)
-                                self.progress.pages_analyzed += 1
-                                self._update_progress()
-                                yield result
-                        except Exception as e:
-                            logger.error(f"Analysis task failed: {e}")
-                        
-                        analysis_tasks.remove(task)
-                    
-                    # Brief sleep to prevent busy waiting
-                    if not done:
-                        await asyncio.sleep(0.01)
-                else:
-                    # Sleep when no tasks are pending
-                    await asyncio.sleep(0.01)
-            
-            # Wait for remaining analysis tasks
-            if analysis_tasks:
-                remaining_results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
-                for result in remaining_results:
-                    if isinstance(result, Exception):
-                        logger.error(f"Final analysis task failed: {result}")
-                    elif result:
-                        self.results.append(result)
-                        self.progress.pages_analyzed += 1
-                        yield result
-            
-            # Ensure crawl completes
-            await crawl_task
-            
-            # Final stats update
-            self.stats.analysis_end = time.time()
-            self.stats.total_pages = len(self.results)
+        if page_data.get('skipped') or self._should_skip_analysis(url):
+            result.update(status='skipped', skipped=True,
+                          reason=page_data.get('reason') or page_data.get('error') or 'Non-HTML content')
+            self._record_analysis(result)
+            return result
+        soup = page_data.get('soup')
+        if soup is None:
+            result.update(status='error', error='No HTML content to analyze')
+            self._record_analysis(result)
+            return result
+
+        facts = extract_page_facts(soup, url, headers=page_data['headers'])
+        html = facts.html
+        content_hash = self._calculate_content_hash(facts.text)
+        result['content_hash'] = content_hash
+        result['page_facts'] = facts.to_dict()
+        signature = json.dumps({'url': url, 'html': html, 'headers': page_data['headers'],
+                                'status': status, 'load_time': result['load_time'],
+                                'content_length': result['content_length'], 'truncated': result['truncated'],
+                                'mode': self.mode.value, 'analysis': self.config.to_dict()['analysis'],
+                                'schema': SCHEMA_VERSION, 'ruleset': RULESET_VERSION,
+                                'scoring': SCORING_VERSION, 'facts': FACTS_VERSION}, sort_keys=True, allow_nan=False)
+        cache_key = hashlib.sha256(signature.encode('utf-8')).hexdigest()
+        cached = self.cache.get(cache_key) if self.config.crawler.cache_enabled and self.mode != AnalysisMode.DEEP else None
+        if cached is not None:
+            cached.update({key: result[key] for key in ('context', 'timestamp', 'requested_url', 'redirect_chain', 'timings')})
+            cached.update(cached=True, analysis_time=0.0)
+            self._record_analysis(cached)
+            return cached
+
+        functions = {'seo': analyze_seo, 'content': analyze_content, 'technical': analyze_technical,
+                     'performance': analyze_performance, 'links': analyze_links}
+        options = {
+            'seo': {'headers': page_data['headers']},
+            'content': {'target_keywords': self.config.analysis.target_keywords},
+            'technical': {'headers': page_data['headers'], 'status_code': status},
+            'performance': {'load_time': result['load_time'], 'content_length': result['content_length']},
+            # Target status is resolved after all available fetches, not in completion order.
+            'links': {'broken_links': None},
+        }
+        started = time.perf_counter()
+        names = self._enabled_analyzers()
+        outputs = await asyncio.gather(*[
+            self._run_analyzer_safe(name, functions[name], soup, url, facts=facts, **options.get(name, {}))
+            for name in names])
+        result.update(outputs)
+        errors = {name: result[name]['error'] for name in names if result[name].get('error')}
+        partial_analyzers = [name for name in names if result[name].get('status') == 'partial']
+        result['coverage'] = {'enabled_analyzers': names,
+                              'completed_analyzers': [name for name in names if name not in errors],
+                              'failed_analyzers': list(errors),
+                              'partial_analyzers': partial_analyzers,
+                              'ratio': (len(names) - len(errors)) / len(names) if names else 0,
+                              'content_complete': not result['truncated'],
+                              'measurement_source': 'static_html'}
+        result['analyzer_errors'] = errors
+        if errors or partial_analyzers or result['truncated']:
+            result['status'] = 'partial'
+        if len(errors) == len(names):
+            result.update(status='error', error='All enabled analyzers failed')
+        self._apply_rule_scoring(result)
+        result['overall_score'] = self._calculate_weighted_score(result)
+        result['issues'] = self._aggregate_page_issues(result)
+        result['issue_counts'] = self._count_issues(result['issues'])
+        result['recommendations'] = self._generate_page_recommendations(result)
+        result['analysis_time'] = time.perf_counter() - started
+        self._record_analysis(result)
+        if self.config.crawler.cache_enabled and not errors and not partial_analyzers:
+            self.cache.set(cache_key, result)
+        return result
+
+    async def _run_analyzer_safe(self, name, analyzer_func, *args, **kwargs):
+        try:
+            if self.config.analysis.parallel_analysis:
+                loop = asyncio.get_running_loop()
+                if self._analysis_loop is not loop:
+                    self._analysis_loop = loop
+                    self._analysis_slots = asyncio.Semaphore(self.config.analysis.max_analysis_threads)
+                slots = self._analysis_slots
+                await slots.acquire()
+                try:
+                    future = loop.run_in_executor(None, partial(analyzer_func, *args, **kwargs))
+                except Exception:
+                    slots.release()
+                    raise
+                # Cancelling the await cannot stop a running thread. Keep its
+                # reservation until the work really finishes.
+                def finished(completed):
+                    slots.release()
+                    if not completed.cancelled():
+                        completed.exception()  # Retrieve failures even if the awaiting task was cancelled.
+                future.add_done_callback(finished)
+                value = await asyncio.shield(future)
+            else:
+                value = analyzer_func(*args, **kwargs)
+            validate_analyzer_result(value, '$.' + name)
+            if value.get('error'):
+                raise ValueError(str(value['error']))
+            if 'rule_results' in value:
+                if not isinstance(value['rule_results'], list):
+                    raise ValueError('Analyzer rule_results must be a list')
+                merge_rule_results(value['rule_results'])
+                value['rule_coverage'] = rule_coverage(value['rule_results'])
+            value['status'] = ('partial' if value.get('status') == 'partial' or
+                               value.get('rule_coverage', {}).get('has_errors') else 'complete')
+            return name, value
+        except Exception as exc:
+            logger.error('Analyzer %s failed: %s', name, exc)
+            return name, {'status': 'error', 'score': None, 'error': str(exc), 'issues': [], 'data': {}}
+
+    async def _run_analyzer(self, name, analyzer_func, *args):
+        return await self._run_analyzer_safe(name, analyzer_func, *args)
+
+    @staticmethod
+    def _is_score(value):
+        return type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 100
+
+    def _calculate_weighted_score(self, results) -> Optional[float]:
+        weighted, total = 0.0, 0.0
+        for name, weight in self.config.analysis.score_weights.items():
+            category = results.get(name, {})
+            score = category.get('score')
+            if not category.get('error') and self._is_score(score):
+                weighted += score * weight
+                total += weight
+        return round(weighted / total, 2) if total else None
+
+    def _apply_rule_scoring(self, result):
+        """Attribute each unique rule to one available category before weighting."""
+        available = [name for name in ANALYZER_NAMES if isinstance(result.get(name), dict)
+                     and not result[name].get('error') and 'rule_results' in result[name]]
+        if not available:
+            return  # Previously exported payloads retain their original scoring semantics.
+        evaluations = []
+        for name in available:
+            for original in result[name]['rule_results']:
+                evaluation = copy.deepcopy(original)
+                evaluation['reported_by'] = sorted(set(evaluation.get('reported_by', [])) | {name})
+                evaluations.append(evaluation)
+        merged = merge_rule_results(evaluations)
+        penalties = {name: 0 for name in available}
+        ledger = []
+        for evaluation in merged:
+            definition = get_rule(evaluation['rule_id'])
+            candidates = [name for name in available if name in evaluation.get('reported_by', [])]
+            owner = definition.owner if definition.owner in available else (candidates[0] if candidates else None)
+            penalty = finding_penalty(evaluation)
+            evaluation.update(score_owner=owner, penalty=penalty)
+            if owner is not None and penalty:
+                penalties[owner] += penalty
+                ledger.append({'rule_id': definition.rule_id, 'owner': definition.owner,
+                               'score_owner': owner, 'penalty': penalty,
+                               'reported_by': evaluation.get('reported_by', [])})
+        for name in available:
+            result[name]['score'] = max(0, 100 - penalties[name])
+            result[name]['score_scope'] = 'unique_rules_assigned_to_category'
+            result[name]['recommendations'] = recommendations_for(result[name].get('issues', []))
+            data = result[name].get('data', {})
+            if 'recommendations' in data:
+                data['recommendations'] = list(result[name]['recommendations'])
+            score = result[name]['score']
+            if name == 'seo' and isinstance(data.get('scores'), dict):
+                data['scores']['total'] = score
+            elif name == 'content' and isinstance(data.get('quality_assessment'), dict):
+                data['quality_assessment']['score'] = score
+                data['quality_assessment']['quality_level'] = (
+                    'excellent' if score >= 90 else 'good' if score >= 75 else
+                    'average' if score >= 60 else 'poor' if score >= 40 else 'very_poor')
+            elif name == 'performance':
+                grade = 'A' if score >= 90 else 'B' if score >= 80 else 'C' if score >= 70 else 'D' if score >= 60 else 'F'
+                result[name]['grade'] = data['grade'] = grade
+        result['rule_results'] = merged
+        result['rule_coverage'] = rule_coverage(merged)
+        result.setdefault('coverage', {})['rules'] = result['rule_coverage']
+        result['scoring'] = {
+            'version': SCORING_VERSION, 'ruleset_version': RULESET_VERSION,
+            'policy': 'One 15/7/3 deduction per failed applicable critical/warning/notice rule; category scores floor at zero.',
+            'ownership': 'Use the canonical owner when available; otherwise the first reporting analyzer in the fixed analyzer order.',
+            'weights': dict(self.config.analysis.score_weights), 'deductions': ledger,
+            'scope': 'Static checklist policy; unknown and inapplicable outcomes do not count as passed checks.',
+        }
+
+    def _aggregate_page_issues(self, results):
+        if 'rule_results' in results:
+            return sorted([copy.deepcopy(item) for item in results['rule_results']
+                           if item['status'] in ('fail', 'informational')],
+                          key=lambda item: {'critical': 0, 'warning': 1, 'notice': 2}[item['severity']])
+        issues, seen = [], set()
+        for name in ANALYZER_NAMES:
+            for original in results.get(name, {}).get('issues', []):
+                issue = copy.deepcopy(original)
+                key = issue.get('rule_id') or (issue.get('category'), issue.get('message'))
+                if key in seen:
+                    continue
+                seen.add(key)
+                issue.setdefault('source', name)
+                issue.setdefault('status', 'fail')
+                issues.append(issue)
+        return sorted(issues, key=lambda issue: {'critical': 0, 'warning': 1, 'notice': 2}.get(issue.get('severity'), 3))
+
+    @staticmethod
+    def _count_issues(issues):
+        counts = Counter(issue.get('severity', 'notice') for issue in issues)
+        return {**{name: counts[name] for name in ('critical', 'warning', 'notice')}, 'total': len(issues)}
+
+    def _generate_page_recommendations(self, results):
+        recommendations, seen = [], set()
+        for issue in results.get('issues', []):
+            rule_id = issue.get('rule_id')
+            text = get_rule(rule_id).recommendation if 'rule_version' in issue else issue.get('fix')
+            key = rule_id or text
+            if not text or key in seen:
+                continue
+            seen.add(key)
+            recommendations.append({'priority': issue.get('severity', 'notice'),
+                                    'category': issue.get('category', 'General'),
+                                    'recommendation': text, 'rule_id': issue.get('rule_id')})
+        return recommendations
+
+    def _record_analysis(self, result):
+        validate_page_result(result, strict=True)
+        if result.get('error'):
+            self.stats.failed_analyses += 1
+            self.progress.errors.append(result['error'])
+        elif result.get('skipped'):
+            self.stats.skipped_pages += 1
+        else:
+            self.stats.successful_analyses += 1
+        counts = result.get('issue_counts', {})
+        self.stats.total_issues += counts.get('total', 0)
+        self.stats.critical_issues += counts.get('critical', 0)
+        self.stats.warnings += counts.get('warning', 0)
+        self.stats.notices += counts.get('notice', 0)
+        self._page_times.append(result.get('analysis_time', 0))
+        if result.get('content_hash'):
+            self.duplicate_content[result['content_hash']].append(result['url'])
+        self.progress.pages_analyzed += 1
+        self.progress.current_url = result['url']
+        self._update_progress()
+
+    def _update_progress(self):
+        if self._start_time:
+            elapsed = max(time.time() - self._start_time, 0.000001)
+            self.progress.speed_pages_per_sec = self.progress.pages_analyzed / elapsed
+        memory = psutil.Process().memory_info().rss / 1024 / 1024
+        self.stats.memory_peak_mb = max(self.stats.memory_peak_mb, memory)
+        if memory > self.config.max_memory_mb:
+            raise MemoryError(f'Process memory exceeded configured {self.config.max_memory_mb} MB limit')
+
+    async def analyze_url(self, url: str) -> PageResult:
+        self._begin_run()
+        try:
+            async with Crawler(self.config.crawler.as_dict()) as crawler:
+                self.crawler = crawler
+                raw = await crawler.fetch_page(url)
+                result = await self.analyze_page(raw or {'url': url, 'error': 'No fetch result'})
+                self.results.append(result)
+            await self._complete_run()
+            return result
+        finally:
             self._calculate_final_stats()
-    
-    async def _analyze_with_semaphore(self, page_data: Dict[str, Any], context: AnalysisContext) -> Optional[Dict[str, Any]]:
-        """Analyze a page with semaphore control."""
-        async with self._semaphore:
+
+    async def analyze_urls(self, urls: List[str]) -> AsyncIterator[PageResult]:
+        self._begin_run()
+        try:
+            async with Crawler(self.config.crawler.as_dict()) as crawler:
+                self.crawler = crawler
+                iterator = self._analyze_url_list(crawler, urls)
+                try:
+                    async for result in iterator:
+                        yield result
+                finally:
+                    await iterator.aclose()
+            await self._complete_run()
+        finally:
+            self._calculate_final_stats()
+
+    async def _analyze_url_list(self, crawler, urls):
+        urls = list(dict.fromkeys(self._url_identity(url) for url in urls))
+        if len(urls) > self.config.crawler.max_pages:
+            self._run_limits.append('max_pages')
+        urls = urls[:self.config.crawler.max_pages]
+        limit = self.config.crawler.effective_concurrency
+        async def fetch_analyze(url):
+            raw = await crawler.fetch_page(url)
+            return await self.analyze_page(raw or {'url': url, 'error': 'No fetch result'})
+        for start in range(0, len(urls), limit):
+            tasks = [asyncio.create_task(fetch_analyze(url)) for url in urls[start:start + limit]]
             try:
-                return await self.analyze_page(page_data, context)
-            except Exception as e:
-                logger.error(f"Analysis failed for {page_data.get('url')}: {e}")
-                return None
-    
-    def _calculate_final_stats(self) -> None:
-        """Calculate final statistics."""
+                for task in asyncio.as_completed(tasks):
+                    result = await task
+                    self.results.append(result)
+                    yield result
+                    if result.get('error') and not self.config.continue_on_error:
+                        raise RuntimeError(result['error'])
+            finally:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def analyze_sitemap(self, sitemap_url: str) -> List[PageResult]:
+        self._begin_run()
+        try:
+            async with Crawler(self.config.crawler.as_dict()) as discovery:
+                urls = await discovery.parse_sitemap(sitemap_url, self.config.crawler.max_pages)
+                self._run_limits.extend(discovery.limit_reasons)
+                self._discovery_errors.extend(copy.deepcopy(discovery.discovery_errors))
+                if not urls:
+                    self.results.append(await self.analyze_page({
+                        'url': sitemap_url, 'error': 'Sitemap contains no eligible URLs',
+                    }))
+                    self.crawler = discovery
+                    await self._complete_run()
+                    return self.results
+            async with Crawler(self.config.crawler.as_dict()) as crawler:
+                self.crawler = crawler
+                async for _ in self._analyze_url_list(crawler, urls):
+                    pass
+            await self._complete_run()
+            return self.results
+        finally:
+            self._calculate_final_stats()
+
+    async def crawl_site(self, start_url: str) -> AsyncIterator[PageResult]:
+        self._begin_run()
+        self._site_start_url = start_url
+        tasks = set()
+        try:
+            async with Crawler(self.config.crawler.as_dict()) as crawler:
+                self.crawler = crawler
+                producer = asyncio.create_task(crawler.crawl_site(start_url, self.config.crawler.max_pages))
+                processed = 0
+                async def analyze(raw):
+                    context = AnalysisContext(url=raw['url'], depth=raw.get('depth', 0),
+                                              priority=self._get_page_priority(raw['url'], raw.get('depth', 0)),
+                                              parent_url=raw.get('parent_url'))
+                    try:
+                        return await self._analyze_with_semaphore(raw, context)
+                    finally:
+                        raw.pop('soup', None)
+                        raw.pop('html', None)
+                try:
+                    while not producer.done() or processed < len(crawler.results) or tasks:
+                        if producer.done():
+                            await producer
+                        while processed < len(crawler.results) and len(tasks) < self.config.analysis.max_analysis_threads:
+                            raw = crawler.results[processed]
+                            processed += 1
+                            self.progress.pages_crawled = processed
+                            tasks.add(asyncio.create_task(analyze(raw)))
+                        if tasks:
+                            done, _ = await asyncio.wait(tasks, timeout=0.05, return_when=asyncio.FIRST_COMPLETED)
+                            for task in done:
+                                tasks.remove(task)
+                                result = await task
+                                self.results.append(result)
+                                yield result
+                                if result.get('error') and not self.config.continue_on_error:
+                                    raise RuntimeError(result['error'])
+                        else:
+                            await asyncio.sleep(0.005)
+                    await producer
+                finally:
+                    for task in [producer] + list(tasks):
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(producer, *tasks, return_exceptions=True)
+            await self._complete_run()
+        finally:
+            self._calculate_final_stats()
+
+    async def _analyze_with_semaphore(self, page_data, context):
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(self.config.analysis.max_analysis_threads)
+        async with self._semaphore:
+            return await self.analyze_page(page_data, context)
+
+    async def _complete_run(self):
+        self._run_limits = sorted(set(self._run_limits) | set(getattr(self.crawler, 'limit_reasons', [])))
+        for error in getattr(self.crawler, 'discovery_errors', []):
+            if error not in self._discovery_errors:
+                self._discovery_errors.append(copy.deepcopy(error))
+        self._crawl_complete = not (self._run_limits or self._discovery_errors)
+        if self.config.analysis.check_broken_links and self.config.analysis.check_external_links:
+            await self._check_external_links()
+        self._resolve_site_links(self.results)
+
+    async def _check_external_links(self):
+        targets = []
+        for page in self.results:
+            links = page.get('links', {}).get('data', {}).get('external_links', [])
+            targets.extend(link['url'] for link in links[:self.config.analysis.max_external_links_per_page]
+                           if urlparse(link.get('url', '')).scheme in ('http', 'https'))
+        targets = list(dict.fromkeys(self._url_identity(url) for url in targets))[:self.config.crawler.max_pages]
+        if not targets:
+            return
+        settings = self.config.crawler.as_dict()
+        settings.update(timeout=self.config.analysis.external_link_timeout, use_sitemap=False)
+        async with Crawler(settings) as checker:
+            for start in range(0, len(targets), self.config.crawler.effective_concurrency):
+                tasks = [asyncio.create_task(checker.fetch_page(url)) for url in
+                         targets[start:start + self.config.crawler.effective_concurrency]]
+                try:
+                    results = await asyncio.gather(*tasks)
+                finally:
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                for result in results:
+                    if result:
+                        self.link_checks.append({key: result[key] for key in
+                                                 ('url', 'requested_url', 'status_code', 'error') if key in result})
+
+    @staticmethod
+    def _url_identity(url):
+        return (resolve_url(url, url) or url).split('#', 1)[0]
+
+    def _observed_statuses(self, pages):
+        observations = defaultdict(set)
+        for page in pages:
+            status = page.get('status_code') or 0
+            observed_urls = [page.get('url'), page.get('requested_url')]
+            observed_urls.extend(hop.get('url') for hop in page.get('redirect_chain', []))
+            for url in observed_urls:
+                if url:
+                    observations[self._url_identity(url)].add(status)
+        # Repeated, contradictory observations cannot establish one outcome.
+        return {url: next(iter(statuses)) if len(statuses) == 1 else 0
+                for url, statuses in observations.items()}
+
+    def _resolve_site_links(self, pages, link_checks=None):
+        if not self.config.analysis.check_broken_links:
+            return
+        observations = self._observed_statuses(list(pages) + (self.link_checks if link_checks is None else link_checks))
+        for page in pages:
+            analyzer = page.get('links')
+            if not analyzer or analyzer.get('error'):
+                continue
+            data = analyzer.setdefault('data', {})
+            links = []
+            if self.config.analysis.check_internal_links:
+                links.extend(data.get('internal_links', []))
+            if self.config.analysis.check_external_links:
+                links.extend(data.get('external_links', []))
+            targets = list(dict.fromkeys(self._url_identity(link['url']) for link in links
+                                       if urlparse(link.get('url', '')).scheme in ('http', 'https')))
+            broken = [url for url in targets if observations.get(url, 0) >= 400]
+            checked = [url for url in targets if observations.get(url, 0) >= 100]
+            data['link_health'] = {'checked': len(checked), 'unchecked': len(targets) - len(checked),
+                                   'broken': len(broken), 'source': 'observed_http_status',
+                                   'status': 'complete' if len(checked) == len(targets) else 'partial'}
+            data['broken_links'] = broken
+            data['link_health_status'] = data['link_health']['status']
+            if ('rule_results' not in analyzer or
+                    page.get('scoring', {}).get('version') != SCORING_VERSION or
+                    page.get('scoring', {}).get('ruleset_version') != RULESET_VERSION):
+                data['link_health']['scoring_status'] = 'Legacy scores and findings retained; link observations updated separately.'
+                continue
+            analyzer['issues'] = [issue for issue in analyzer.get('issues', [])
+                                  if issue.get('rule_id') != 'links.broken']
+            outcome = 'fail' if broken else 'unknown' if len(checked) < len(targets) else 'pass'
+            link_result = rule_result('links.broken',
+                                      {'http_statuses': {url: observations[url] for url in checked},
+                                       'unchecked': [url for url in targets if url not in checked]},
+                                      message=f'{len(broken)} broken link targets found', category='Links',
+                                      status=outcome, source='observed_http_status',
+                                      applicable=bool(targets),
+                                      reason=('No eligible link targets are selected for checking.' if not targets else
+                                              'Some link targets have no HTTP observation.' if outcome == 'unknown' else ''),
+                                      details={'broken_links': broken})
+            link_result['reported_by'] = ['links']
+            analyzer['rule_results'] = [item for item in analyzer.get('rule_results', [])
+                                        if item.get('rule_id') != 'links.broken'] + [link_result]
+            analyzer['rule_coverage'] = rule_coverage(analyzer['rule_results'])
+            if broken:
+                analyzer['issues'].append(link_result)
+            self._apply_rule_scoring(page)
+            page['overall_score'] = self._calculate_weighted_score(page)
+            page['issues'] = self._aggregate_page_issues(page)
+            page['issue_counts'] = self._count_issues(page['issues'])
+            page['recommendations'] = self._generate_page_recommendations(page)
+
+    def _calculate_final_stats(self):
+        self.stats.analysis_end = time.time()
+        self.stats.total_pages = len(self.results)
         if self._page_times:
             self.stats.avg_analysis_time = sum(self._page_times) / len(self._page_times)
-        
-        if self.results:
-            scores = [r.get('overall_score', 0) for r in self.results if 'error' not in r]
-            if scores:
-                self.stats.avg_page_score = sum(scores) / len(scores)
-        
-        # Memory peak
-        process = psutil.Process()
-        self.stats.memory_peak_mb = process.memory_info().rss / 1024 / 1024
-    
-    def generate_site_report(self, page_results: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-        """Generate comprehensive site report with advanced analytics."""
-        if page_results is None:
-            page_results = self.results
-        
-        if not page_results:
-            return {'error': 'No pages to analyze'}
-        
-        # Separate successful and failed pages
-        successful_pages = [p for p in page_results if 'error' not in p and not p.get('skipped')]
-        failed_pages = [p for p in page_results if 'error' in p]
-        skipped_pages = [p for p in page_results if p.get('skipped')]
-        
-        # Calculate aggregate scores by category
-        category_scores = defaultdict(list)
-        for page in successful_pages:
-            for category in ['seo', 'content', 'technical', 'performance', 'links']:
-                if category in page and 'score' in page[category]:
-                    category_scores[category].append(page[category]['score'])
-        
-        # Aggregate all issues
-        all_issues = []
-        for page in successful_pages:
-            page_issues = page.get('issues', [])
-            for issue in page_issues:
-                issue['url'] = page['url']
-            all_issues.extend(page_issues)
-        
-        # Aggregate and deduplicate issues
-        aggregated_issues, aggregation_stats = aggregate_issues(all_issues)
-        
-        # Find duplicate content
-        duplicate_groups = []
-        for content_hash, urls in self.duplicate_content.items():
-            if len(urls) > 1:
-                duplicate_groups.append({
-                    'hash': content_hash,
-                    'urls': urls,
-                    'count': len(urls)
-                })
-        
-        # Compile comprehensive report
+        scores = [page['overall_score'] for page in self.results if self._is_score(page.get('overall_score'))]
+        self.stats.avg_page_score = sum(scores) / len(scores) if scores else 0
+        counts = self._count_issues([issue for page in self.results for issue in page.get('issues', [])])
+        self.stats.total_issues, self.stats.critical_issues = counts['total'], counts['critical']
+        self.stats.warnings, self.stats.notices = counts['warning'], counts['notice']
+
+    def generate_batch_report(self, page_results=None):
+        return self.generate_site_report(page_results)
+
+    def generate_site_report(self, page_results=None) -> SiteReport:
+        supplied = self.results if page_results is None else page_results
+        if not isinstance(supplied, list):
+            raise ContractError('$.pages', 'must be a list of page results')
+        for index, page in enumerate(supplied):
+            validate_page_result(page, path=f'$.pages[{index}]')
+            if not isinstance(page.get('url'), str) or not page['url'].strip():
+                raise ContractError(f'$.pages[{index}].url', 'must identify the page being aggregated')
+            if 'issues' in page and not isinstance(page['issues'], list):
+                raise ContractError(f'$.pages[{index}].issues', 'aggregation requires issue records, not summary counts')
+        # Only the current run's actual result objects carry its crawl context.
+        # Imported or independently analyzed pages must not inherit old checks,
+        # entry URLs, limits, or timing from this analyzer instance.
+        current_run = (page_results is None or supplied is self.results or
+                       bool(self.results) and Counter(map(id, supplied)) == Counter(map(id, self.results)))
+        link_checks = self.link_checks if current_run else []
+        crawl_complete = self._crawl_complete if current_run else False
+        run_limits = copy.deepcopy(self._run_limits) if current_run else []
+        discovery_errors = copy.deepcopy(self._discovery_errors) if current_run else []
+        pages = copy.deepcopy(supplied)
+        if not pages:
+            return {'schema_version': SCHEMA_VERSION, 'status': 'error', 'error': 'No pages to analyze'}
+        self._resolve_site_links(pages, link_checks)
+        site_analysis = analyze_site(pages, start_url=self._site_start_url if current_run else None,
+                                     crawl_complete=crawl_complete)
+        site_pages = {row['url']: row for row in site_analysis['pages']}
+        for page in pages:
+            if url_identity(page['url']) in site_pages:
+                page['site_analysis'] = copy.deepcopy(site_pages[url_identity(page['url'])])
+        usable = [page for page in pages if not page.get('error') and not page.get('skipped')]
+        failed = [page for page in pages if page.get('error')]
+        skipped = [page for page in pages if page.get('skipped')]
+        partial_pages = [page for page in usable if page.get('status') == 'partial']
+        categories = {}
+        for name in ANALYZER_NAMES:
+            scores = [page[name]['score'] for page in usable if name in page
+                      and not page[name].get('error') and self._is_score(page[name].get('score'))]
+            categories[name] = round(sum(scores) / len(scores), 2) if scores else None
+        scores = [page['overall_score'] for page in usable if self._is_score(page.get('overall_score'))]
+        overall = round(sum(scores) / len(scores), 2) if scores else None
+        issues = [{**copy.deepcopy(issue), 'url': page['url']} for page in usable for issue in page.get('issues', [])]
+        issues.extend(site_analysis['findings'])
+        aggregated, stats = aggregate_issues(issues)
+        counts = self._count_issues(issues)
+        duplicates = defaultdict(set)
+        redirect_targets = defaultdict(set)
+        for page in pages:
+            if self.config.analysis.check_content_uniqueness and page.get('content_hash'):
+                duplicates[page['content_hash']].add(page['url'])
+            if page.get('requested_url') and page['requested_url'] != page['url']:
+                redirect_targets[page['requested_url']].add(page['url'])
+        redirects = {url: next(iter(targets)) for url, targets in sorted(redirect_targets.items())
+                     if len(targets) == 1}
+        rule_counts = Counter()
+        for page in usable:
+            rule_counts.update(page.get('rule_coverage', {}).get('counts', {}))
+        assessed_rules = sum(rule_counts[status] for status in ('pass', 'fail', 'informational'))
+        attempted_rules = assessed_rules + rule_counts['unknown'] + rule_counts['error']
+        current_scoring = bool(usable) and all(
+            page.get('scoring', {}).get('version') == SCORING_VERSION and
+            page.get('scoring', {}).get('ruleset_version') == RULESET_VERSION for page in usable)
+        duplicate_groups = [{'hash': key, 'urls': sorted(urls), 'count': len(urls)}
+                            for key, urls in duplicates.items() if len(urls) > 1]
+        observations = self._observed_statuses(pages + link_checks)
+        broken = sorted({page['url'] for page in pages + link_checks
+                         if observations.get(self._url_identity(page['url']), 0) >= 400})
         report = {
-            'summary': {
-                'total_pages': len(page_results),
-                'successful_pages': len(successful_pages),
-                'failed_pages': len(failed_pages),
-                'skipped_pages': len(skipped_pages),
-                'analysis_mode': self.mode.value,
-                'analysis_timestamp': time.time(),
-                'analysis_duration': self.stats.analysis_end - self.stats.analysis_start if self.stats.analysis_end else 0
-            },
-            
-            'scores': {
-                'overall': sum(p.get('overall_score', 0) for p in successful_pages) / len(successful_pages) if successful_pages else 0,
-                'categories': {
-                    category: sum(scores) / len(scores) if scores else 0
-                    for category, scores in category_scores.items()
-                }
-            },
-            
-            'issues': {
-                'aggregated': aggregated_issues,
-                'stats': aggregation_stats,
-                'counts': {
-                    'critical': self.stats.critical_issues,
-                    'warning': self.stats.warnings,
-                    'notice': self.stats.notices,
-                    'total': self.stats.total_issues,
-                    'unique': len(aggregated_issues)
-                },
-                'top_issues': aggregated_issues[:10] if aggregated_issues else []
-            },
-            
-            'technical_health': {
-                'broken_links': list(self.broken_links)[:50],  # Limit to 50
-                'broken_links_count': len(self.broken_links),
-                'redirects': dict(list(self.redirects.items())[:50]),  # Limit to 50
-                'redirects_count': len(self.redirects),
-                'duplicate_content': duplicate_groups[:20],  # Top 20 duplicate groups
-                'duplicate_content_count': len(duplicate_groups)
-            },
-            
-            'performance_metrics': generate_performance_metrics(successful_pages),
-            
-            'crawl_stats': {
-                'pages_per_second': self.progress.speed_pages_per_sec,
-                'avg_analysis_time': self.stats.avg_analysis_time,
-                'memory_peak_mb': self.stats.memory_peak_mb,
-                'cache_hits': len([1 for p in successful_pages if p.get('cached')]),
-                'depth_distribution': Counter(p.get('context', {}).get('depth', 0) for p in successful_pages)
-            },
-            
-            'recommendations': {
-                'specific': generate_specific_recommendations({
-                    'overall_score': report['scores']['overall'] if 'scores' in locals() else 0,
-                    'category_scores': category_scores,
-                    'aggregated_issues': aggregated_issues,
-                    'issue_counts': self.stats.__dict__
-                }),
-                'executive': create_executive_summary({
-                    'overall_score': report['scores']['overall'] if 'scores' in locals() else 0,
-                    'issue_counts': {
-                        'critical': self.stats.critical_issues,
-                        'warning': self.stats.warnings,
-                        'notice': self.stats.notices
-                    },
-                    'summary': {
-                        'total_pages': len(page_results),
-                        'successful_pages': len(successful_pages)
-                    }
-                })
-            },
-            
-            'pages': {
-                'summary': [
-                    {
-                        'url': p.get('url'),
-                        'score': p.get('overall_score', 0),
-                        'status_code': p.get('status_code'),
-                        'load_time': p.get('load_time', 0),
-                        'issues': p.get('issue_counts', {}),
-                        'priority': p.get('context', {}).get('priority'),
-                        'depth': p.get('context', {}).get('depth')
-                    } for p in successful_pages[:100]  # Limit to 100
-                ],
-                'detailed': successful_pages[:50] if len(successful_pages) <= 50 else [
-                    p for p in successful_pages if p.get('overall_score', 100) < 70
-                ][:50],  # Pages with issues
-                'failed': [
-                    {'url': p.get('url'), 'error': p.get('error'), 'status_code': p.get('status_code', 0)}
-                    for p in failed_pages[:20]
-                ]
-            },
-            
-            'metadata': {
-                'analyzer_version': '2.0.0',
-                'config': {
-                    'max_pages': self.config.crawler.max_pages,
-                    'analysis_mode': self.mode.value,
-                    'concurrent_requests': self.config.crawler.concurrent_requests
-                }
-            }
+            'schema_version': SCHEMA_VERSION,
+            'site_analysis': site_analysis,
+            'status': 'error' if not usable else 'partial' if (
+                failed or partial_pages or run_limits or discovery_errors) else 'complete',
+            'summary': {'total_pages': len(pages), 'successful_pages': len(usable) - len(partial_pages),
+                        'partial_pages': len(partial_pages), 'failed_pages': len(failed), 'skipped_pages': len(skipped),
+                        'analysis_mode': self.mode.value, 'analysis_timestamp': time.time(),
+                        'analysis_duration': max(0, self.stats.analysis_end - self.stats.analysis_start)
+                        if current_run and self.stats.analysis_end else 0,
+                        'crawl_complete': crawl_complete,
+                        'limits_reached': run_limits,
+                        'discovery_errors': discovery_errors,
+                        'scope_note': 'Results describe fetched pages; unvisited targets remain unchecked.'},
+            'scores': {'overall': overall, 'categories': categories, 'source': 'static_rule_heuristics',
+                       'scoring_versions': sorted({page['scoring']['version'] for page in usable if page.get('scoring')})},
+            'rule_coverage': {'counts': dict(rule_counts), 'assessed': assessed_rules,
+                              'total': sum(rule_counts.values()),
+                              'ratio': assessed_rules / attempted_rules if attempted_rules else None,
+                              'scope': 'Counts are unique rule evaluations per page, not a complete site inventory.'},
+            'scoring': {'version': SCORING_VERSION if current_scoring else 'legacy_or_mixed',
+                        'ruleset_version': RULESET_VERSION if current_scoring else None,
+                        'policy': ('Average page scores; each page deducts each failed applicable rule once in its assigned category.'
+                                   if current_scoring else 'Average recorded page scores; legacy or mixed inputs retain their original scoring semantics.'),
+                        'weights': dict(self.config.analysis.score_weights)},
+            'issues': {'aggregated': aggregated, 'stats': stats, 'counts': {**counts, 'unique': len(aggregated)},
+                       'top_issues': aggregated[:10]},
+            'technical_health': {'broken_links': broken, 'broken_links_count': len(broken),
+                                 'redirects': redirects, 'redirects_count': len(redirects),
+                                 'duplicate_content': duplicate_groups, 'duplicate_content_count': len(duplicate_groups),
+                                 'link_checks': copy.deepcopy(link_checks)},
+            'performance_metrics': generate_performance_metrics(pages),
+            'crawl_stats': {'pages_per_second': self.progress.speed_pages_per_sec if current_run else 0,
+                            'avg_analysis_time': self.stats.avg_analysis_time if current_run else 0,
+                            'memory_peak_mb': self.stats.memory_peak_mb if current_run else 0,
+                            'cache_hits': sum(bool(page.get('cached')) for page in pages),
+                            'depth_distribution': dict(Counter(page.get('context', {}).get('depth', 0) for page in pages))},
+            'pages': {'summary': [{'url': page['url'], 'score': page.get('overall_score'),
+                                   'status': page.get('status', 'complete'), 'status_code': page.get('status_code'),
+                                   'load_time': page.get('load_time'), 'issues': page.get('issue_counts', {}),
+                                   'priority': page.get('context', {}).get('priority'),
+                                   'depth': page.get('context', {}).get('depth')} for page in usable],
+                      'detailed': usable, 'failed': failed, 'skipped': skipped},
+            'metadata': {'analyzer_version': self.config.version, 'schema_version': SCHEMA_VERSION,
+                         'config': {'max_pages': self.config.crawler.max_pages, 'analysis_mode': self.mode.value,
+                                    'concurrent_requests': self.config.crawler.effective_concurrency,
+                                    'enabled_analyzers': self._enabled_analyzers()}},
         }
-        
+        recommendations = generate_specific_recommendations(report)
+        report['recommendations'] = {'specific': recommendations}
+        report['recommendations']['executive'] = create_executive_summary(report)
+        validate_site_report(report, strict=True)
         return report
-    
-    def get_real_time_stats(self) -> Dict[str, Any]:
-        """Get real-time statistics for monitoring."""
-        process = psutil.Process()
-        
-        return {
-            'progress': {
-                'pages_queued': self.progress.pages_queued,
-                'pages_crawled': self.progress.pages_crawled,
-                'pages_analyzed': self.progress.pages_analyzed,
-                'current_url': self.progress.current_url,
-                'current_depth': self.progress.current_depth,
-                'speed': self.progress.speed_pages_per_sec,
-                'eta_seconds': self.progress.eta_seconds
-            },
-            'stats': {
-                'successful': self.stats.successful_analyses,
-                'failed': self.stats.failed_analyses,
-                'skipped': self.stats.skipped_pages,
-                'issues_found': self.stats.total_issues,
-                'avg_score': self.stats.avg_page_score,
-                'avg_time': self.stats.avg_analysis_time
-            },
-            'resources': {
-                'memory_mb': process.memory_info().rss / 1024 / 1024,
-                'cpu_percent': process.cpu_percent(),
-                'threads': process.num_threads(),
-                'cache_size': len(self.cache.cache)
-            },
-            'health': {
-                'broken_links': len(self.broken_links),
-                'redirects': len(self.redirects),
-                'duplicate_content': len([g for g in self.duplicate_content.values() if len(g) > 1]),
-                'errors': self.progress.errors[-10:]  # Last 10 errors
-            }
-        }
-    
-    def get_crawl_statistics(self) -> Dict[str, Any]:
-        """Get current crawl statistics (backward compatibility)."""
-        return self.get_real_time_stats()
-    
-    def cleanup(self) -> None:
-        """Cleanup resources and clear caches."""
-        self.cache.clear_expired()
-        self.results.clear()
-        self.broken_links.clear()
-        self.redirects.clear()
-        self.duplicate_content.clear()
-        self.analysis_contexts.clear()
-        self._page_times.clear()
-        
-        # Force garbage collection
-        import gc
-        gc.collect()
+
+    def get_real_time_stats(self):
+        return {'progress': {'pages_crawled': self.progress.pages_crawled,
+                             'pages_analyzed': self.progress.pages_analyzed, 'current_url': self.progress.current_url,
+                             'speed': self.progress.speed_pages_per_sec},
+                'stats': {'successful': self.stats.successful_analyses, 'failed': self.stats.failed_analyses,
+                          'skipped': self.stats.skipped_pages, 'issues_found': self.stats.total_issues,
+                          'avg_score': self.stats.avg_page_score, 'avg_time': self.stats.avg_analysis_time},
+                'resources': {'memory_mb': psutil.Process().memory_info().rss / 1024 / 1024,
+                              'cache_size': len(self.cache.cache)},
+                'health': {'broken_links': len(self.broken_links), 'redirects': len(self.redirects),
+                           'errors': self.progress.errors[-10:]}}
+
+    def get_crawl_statistics(self):
+        stats = self.get_real_time_stats()
+        return {**stats, 'pages_per_second': self.progress.speed_pages_per_sec,
+                'memory_usage': stats['resources']['memory_mb']}
+
+    def cleanup(self):
+        self.cache.clear()
+        self._reset_state()
