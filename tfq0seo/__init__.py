@@ -1,6 +1,6 @@
 """TFQ0SEO -  SEO analysis tool with reports."""
 
-__version__ = "3.0.0"
+__version__ = "3.0.1"
 __author__ = "TFQ0 SEO Team"
 
 from .core.app import SEOAnalyzer
