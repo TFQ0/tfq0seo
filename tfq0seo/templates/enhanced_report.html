@@ -477,6 +477,7 @@
         <!-- Overview Tab -->
         <div class="tab-panel active" id="overview">
             {{ rule_overview(scoring_policies, scoring_versions, rule_coverage) }}
+            {% include "site_analysis.html" %}
             <div class="score-grid">
                 <div class="score-card">
                     <div class="score-card-header">

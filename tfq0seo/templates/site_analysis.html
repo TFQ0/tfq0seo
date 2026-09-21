@@ -1,0 +1,34 @@
+{% if data.get('site_analysis', {}).get('version') %}
+<section class="rule-assessment" aria-label="Site-wide analysis">
+    <h2>Site-wide analysis</h2>
+    {% set site = data.site_analysis %}
+    <p>{{ site.scope }}</p>
+    <p>{{ site.coverage.pages_with_facts }} of {{ site.coverage.inventory_pages }} observed URLs have page facts.
+        {{ site.coverage.note }}</p>
+    <p>{{ site.links.edge_count }} distinct internal link pairs;
+        {{ site.links.unfetched_targets|length }} targets not in the fetched inventory;
+        {{ site.links.components|length }} connected groups in the observed graph.</p>
+    <p>{{ site.links.depth_method }}</p>
+    {% if site.links.roots %}<p>Entry pages: {{ site.links.roots|join(', ') }} ({{ site.links.root_source }})</p>
+    {% else %}<p>No entry page is known; reachability and depth are unavailable.</p>{% endif %}
+    <details>
+        <summary>Canonical and internal-link observations for every URL</summary>
+        <div style="overflow:auto;max-height:32rem">
+            <table>
+                <thead><tr><th>URL</th><th>Canonical status</th><th>Canonical target(s)</th><th>Terminal</th>
+                    <th>Hops</th><th>Incoming</th><th>Outgoing</th><th>Link depth</th></tr></thead>
+                <tbody>{% for page in site.pages %}<tr>
+                    <td>{% if page.url|safe_url %}<a href="{{ page.url|safe_url }}" rel="noopener noreferrer">{{ page.url }}</a>{% else %}{{ page.url }}{% endif %}</td>
+                    <td>{{ page.canonical_status }}</td><td>{{ page.canonical_targets|join(', ') }}</td>
+                    <td>{{ page.canonical_terminal or 'Unverified' }}</td>
+                    {% for key in ['canonical_hops', 'incoming_links', 'outgoing_links', 'link_depth'] %}
+                    <td>{{ page[key] if page[key] is not none else 'Unverified' }}</td>{% endfor %}
+                </tr>{% endfor %}</tbody>
+            </table>
+        </div>
+    </details>
+    {% if site.canonicals.cycles %}<details><summary>Canonical cycles</summary>
+        {% for cycle in site.canonicals.cycles %}<p>Cycle {{ cycle.id }}: {{ cycle.urls|join(' → ') }}</p>{% endfor %}
+    </details>{% endif %}
+</section>
+{% endif %}

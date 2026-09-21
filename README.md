@@ -112,12 +112,14 @@ cache size/TTL. Analysis supports weighted category scores and bounded optional
 external link checks. `Config.SUPPORTED_FIELDS` lists the active component
 settings in [config.py](tfq0seo/core/config.py).
 
-Unknown keys, invalid types, conflicting aliases, and unsupported non-default
-legacy settings fail validation. Legacy dataclass fields remain readable for
-compatibility; their presence does not imply an implemented feature. JavaScript
-execution, HTTP/2 selection, background monitoring, webhooks, email delivery,
-PDF export, and `dry_run` are not implemented. Remove unused legacy overrides
-instead of relying on settings that previously had no effect.
+Unknown keys, invalid types, conflicting aliases, and retired configuration
+fields fail validation. Active dataclasses and saved configurations expose
+supported settings only. JavaScript execution, HTTP/2 selection, background
+monitoring, webhooks, email delivery, PDF export, and `dry_run` remain
+unimplemented. Use the explicit `Config.migrate_dict()` migration for older
+configuration files; it removes only retired values matching their historical
+defaults and rejects unsupported requested behavior. See the
+[configuration migration guide](docs/configuration-migration.md) before upgrading.
 
 ## Python API
 
@@ -174,10 +176,49 @@ defined in [models.py](tfq0seo/core/models.py).
 - JSON-LD checks inspect local syntax/shape. Language/readability checks are
   conservative and may be unavailable. They do not validate eligibility for
   search-engine features or infer authority and link velocity.
+  Readability never downloads dictionaries at runtime. If the installed
+  textstat backend needs unavailable local NLTK `corpora/cmudict` data, estimates
+  remain `null`, with an explicit unavailable status and missing-resource reason.
 
 HTML escapes page-supplied text and restricts clickable URLs to HTTP(S). CSV and
 XLSX neutralize formula-like text. The enhanced HTML report uses optional
 Chart.js from a CDN for charts; its page table remains usable without it.
+
+## Site-wide canonical and link analysis
+
+Completed site reports include `site_analysis`, derived from the supplied page
+inventory without additional network requests. Canonical observations include
+eligible HTML declarations and HTTP `Link` headers. HTML targets use the
+document base; header targets use the response URL. Declarations outside the
+HTML head, alternate qualifiers, and other header anchor contexts remain
+recorded as ineligible. Malformed headers, missing facts, and incomplete HTML
+retain uncertainty.
+
+The report identifies conflicting targets, canonical chains and cycles,
+observed redirects, HTTP errors at declared targets, and observed `noindex`
+directives at targets. A self-reference is not a cycle. Unfetched and
+unavailable destinations are unverified. Chain records store the immediate
+target, terminal, hop count, and cycle identifier; shared cycles are stored
+once, avoiding repeated full paths in large reports.
+
+The internal-link graph retains distinct source/target pairs, nofollow hints,
+incoming/outgoing counts, connected groups, and shortest observed link depth.
+Redirect aliases resolve to observed final URLs; query strings remain distinct.
+Depth starts at the crawl's entry URL, or observed homepages when aggregating a
+batch. Without an entry page, depth and reachability remain unavailable. A page
+with no observed incoming links is a candidate for investigation, not proof of
+an orphan page. Self links do not count as incoming links, and nofollow hints
+do not remove edges from this observational graph.
+
+Site findings have registered `site.*` rule IDs, evidence, references, and zero
+penalty. They appear in site issues and recommendations without changing page
+scores or rewriting historical page evidence. Page rule coverage remains
+separate from graph coverage. HTML includes the complete observations table;
+CSV/XLSX page rows include canonical and link metrics; JSON retains the graph
+and cycle records. These checks do not determine a search engine's selected
+canonical or a page's actual index status. The supporting guidance is
+[Google's canonical documentation](https://developers.google.com/search/docs/crawling-indexing/consolidate-duplicate-urls)
+and [link guidance](https://developers.google.com/search/docs/crawling-indexing/links-crawlable).
 
 ## Shared facts and result contracts
 
@@ -294,6 +335,8 @@ python -I tests/wheel_smoke.py
 
 # Reproducible offline analysis/report workload; no HTTP requests:
 python -m tfq0seo.benchmark --pages 500 --output benchmark.json
+# Compare varied fixtures and retain repeated measurements and environment:
+python -m tfq0seo.benchmark --suite --pages 500 2000 --repetitions 3 --timeout-seconds 600 --output scale.json
 ```
 
 Tests cover analyzers, configuration precedence, crawl scope/robots/retries,
@@ -306,7 +349,12 @@ the analysis cache disabled. It reports complete/partial/failed/skipped counts,
 successful-page throughput, elapsed time, and sampled process RSS. A sampled
 maximum can miss short memory peaks. Results depend on the machine and fixture;
 they are not browser-performance measurements or a production-site capacity
-guarantee. Network benchmark functions remain explicit opt-in Python APIs.
+guarantee. Basic, content-heavy, link-dense, and mixed scenarios retain every
+raw measurement, workload/source fingerprints, full effective configuration,
+dependency versions, and per-case summaries. See the
+[scale validation guide and recorded measurements](docs/scale-validation.md)
+for workload definitions, resource limits, and measured results. Network
+benchmark functions remain explicit opt-in Python APIs.
 
 GitHub Actions runs regression tests and distribution checks across Python 3.8,
 3.12, and 3.14, with Windows and Linux jobs and base/optional dependencies. The
@@ -363,6 +411,4 @@ publisher, compare the repository owner, repository name, workflow filename,
 and environment against the values above before retrying. PyPI does not allow
 an uploaded distribution filename to be reused, so retries after a successful
 upload require checking what was already published.
-
-
 

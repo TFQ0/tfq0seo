@@ -98,6 +98,197 @@ def normalized_headers(headers: Any) -> Dict[str, str]:
     return {str(key).lower(): ', '.join(header_values(headers, str(key))) for key in headers}
 
 
+_HTTP_TOKEN = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
+_URI_CHARACTERS = re.compile(r"[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]*")
+_CANONICAL_QUALIFIERS = {'hreflang', 'lang', 'media', 'type'}
+
+
+def _valid_uri_reference(value: str, allow_iri: bool = False) -> bool:
+    """Reject malformed references before the deliberately permissive URL resolver."""
+    if re.search(r'%(?![0-9A-Fa-f]{2})', value) or value.count('#') > 1:
+        return False
+    if allow_iri:
+        if any(character.isspace() or ord(character) < 32 or ord(character) == 127
+               or character in '<>"{}|\\^`' for character in value):
+            return False
+    elif not _URI_CHARACTERS.fullmatch(value):
+        return False
+    try:
+        parsed = urlsplit(value)
+        if parsed.netloc:
+            parsed.port  # Validate any authority's port spelling and range.
+    except ValueError:
+        return False
+    if (parsed.scheme.lower() in ('http', 'https') or (not parsed.scheme and parsed.netloc)) and not resolve_url(
+            value, 'https://canonical-context.invalid/'):
+        return False
+    return bool(parsed.scheme or ':' not in parsed.path.split('/', 1)[0])
+
+
+def _canonical_target(href: Any, base_url: str, *, html: bool = False) -> Optional[str]:
+    if not isinstance(href, str):
+        return None
+    value = href.strip() if html else href
+    if (html and not value) or not _valid_uri_reference(value, allow_iri=html):
+        return None
+    resolved = resolve_url(value, base_url)
+    return resolved if resolved and urlsplit(resolved).scheme in ('http', 'https') else None
+
+
+def _split_link_values(value: str) -> List[str]:
+    """Split the HTTP list without splitting commas in targets or quoted strings.
+
+    Unbalanced delimiters keep the remainder together, so it cannot accidentally
+    become a valid canonical declaration after a malformed quoted parameter.
+    """
+    values, start = [], 0
+    in_target = in_quote = escaped = False
+    for index, character in enumerate(value):
+        if in_target:
+            if character == '>':
+                in_target = False
+        elif in_quote:
+            if escaped:
+                escaped = False
+            elif character == '\\':
+                escaped = True
+            elif character == '"':
+                in_quote = False
+        elif character == '<':
+            in_target = True
+        elif character == '"':
+            in_quote = True
+        elif character == ',':
+            if value[start:index].strip(' \t'):
+                values.append(value[start:index].strip(' \t'))
+            start = index + 1
+    if value[start:].strip(' \t'):
+        values.append(value[start:].strip(' \t'))
+    return values
+
+
+def _parse_link_value(value: str):
+    """Parse RFC 8288 link parameters; return safe partial evidence on failure."""
+    parameters = []
+    if not value.startswith('<') or '>' not in value:
+        return None, parameters, 'Malformed HTTP Link target syntax.'
+    end = value.index('>')
+    href, position = value[1:end], end + 1
+    while position < len(value):
+        if value[position] in ' \t':
+            position += 1
+            continue
+        if value[position] != ';':
+            return href, parameters, 'Malformed HTTP Link parameter separator.'
+        position += 1
+        while position < len(value) and value[position] in ' \t':
+            position += 1
+        match = _HTTP_TOKEN.match(value, position)
+        if not match:
+            return href, parameters, 'Malformed HTTP Link parameter name.'
+        name, position = match.group().lower(), match.end()
+        while position < len(value) and value[position] in ' \t':
+            position += 1
+        parameter = None
+        if position < len(value) and value[position] == '=':
+            position += 1
+            while position < len(value) and value[position] in ' \t':
+                position += 1
+            if position < len(value) and value[position] == '"':
+                position += 1
+                characters = []
+                closed = False
+                while position < len(value):
+                    character = value[position]
+                    position += 1
+                    if character == '"':
+                        closed = True
+                        break
+                    if character == '\\':
+                        if position == len(value):
+                            break
+                        character = value[position]
+                        position += 1
+                    if (ord(character) < 32 and character != '\t') or ord(character) == 127 or ord(character) > 255:
+                        return href, parameters, 'Invalid character in HTTP Link quoted parameter.'
+                    characters.append(character)
+                if not closed:
+                    return href, parameters, 'Unterminated HTTP Link quoted parameter.'
+                parameter = ''.join(characters)
+            else:
+                match = _HTTP_TOKEN.match(value, position)
+                if not match:
+                    return href, parameters, 'Malformed HTTP Link parameter value.'
+                parameter, position = match.group(), match.end()
+        parameters.append((name, parameter))
+    if not _valid_uri_reference(href):
+        return href, parameters, 'Malformed HTTP Link URI reference.'
+    return href, parameters, ''
+
+
+def canonical_facts(link_tags: List[Dict[str, Any]], page_url: str,
+                    base_url: str, headers: Any = None) -> Dict[str, Any]:
+    """Observe canonical declarations without treating parse failures as absence.
+
+    HTTP Link syntax and context follow RFC 8288 sections 3.1-3.3. Eligibility
+    also applies Google Search's head placement and alternate-attribute rules:
+    https://developers.google.com/search/docs/crawling-indexing/consolidate-duplicate-urls
+    No raw header or unrelated parameter values are retained in these facts.
+    """
+    declarations, parse_errors = [], 0
+    for link in link_tags:
+        attrs = {name.lower(): value for name, value in link['attrs'].items()}
+        rel = attrs.get('rel') or []
+        rel = rel.split() if isinstance(rel, str) else rel
+        if 'canonical' not in [token.lower() for token in rel]:
+            continue
+        href = attrs.get('href')
+        href = href if isinstance(href, str) else None
+        target = _canonical_target(href, base_url, html=True)
+        reasons = []
+        if not link.get('in_head', False):
+            reasons.append('HTML canonical declaration is outside the head.')
+        if _CANONICAL_QUALIFIERS.intersection(attrs):
+            reasons.append('Canonical declaration has alternate-version attributes.')
+        if target is None:
+            reasons.append('Canonical target is missing or is not a valid HTTP(S) URL.')
+        declarations.append({'href': href, 'url': target, 'source': 'html',
+                             'eligible': not reasons, 'reason': ' '.join(reasons)})
+
+    response_url = _canonical_target(page_url, page_url)
+    for field_value in header_values(headers, 'Link'):
+        for value in _split_link_values(field_value):
+            href, parameters, error = _parse_link_value(value)
+            rel_values = [parameter for name, parameter in parameters if name == 'rel']
+            anchors = [parameter for name, parameter in parameters if name == 'anchor']
+            if len(rel_values) != 1 or not (rel_values[0] or '').strip():
+                error = error or 'HTTP Link requires one nonempty rel parameter.'
+            elif any(not (re.fullmatch(r'[a-z][a-z0-9.-]*', token, re.I) or
+                          (_valid_uri_reference(token) and urlsplit(token).scheme))
+                     for token in rel_values[0].split()):
+                error = error or 'Malformed HTTP Link relation type.'
+            if len(anchors) > 1 or (anchors and (anchors[0] is None or not _valid_uri_reference(anchors[0]))):
+                error = error or 'HTTP Link anchor context is malformed or repeated.'
+            if error:
+                parse_errors += 1
+            # Keep recognizable canonical evidence from malformed parameters,
+            # but never use any part of that link-value as an eligible edge.
+            if not any('canonical' in (parameter or '').lower().split() for parameter in rel_values):
+                continue
+            target = _canonical_target(href, page_url)
+            reasons = [error] if error else []
+            if anchors and not error and _canonical_target(anchors[0], page_url) != response_url:
+                reasons.append('HTTP Link anchor identifies a different context.')
+            if _CANONICAL_QUALIFIERS.intersection(name for name, _ in parameters):
+                reasons.append('Canonical declaration has alternate-version attributes.')
+            if target is None:
+                reasons.append('Canonical target is not a valid HTTP(S) URL.')
+            declarations.append({'href': href, 'url': target, 'source': 'http_link',
+                                 'eligible': not reasons, 'reason': ' '.join(reasons)})
+    return {'declarations': declarations, 'headers_checked': headers is not None,
+            'parse_errors': parse_errors}
+
+
 _VALUE_DIRECTIVES = {'max-snippet', 'max-image-preview', 'max-video-preview', 'unavailable_after'}
 _FLAG_DIRECTIVES = {'all', 'none', 'index', 'noindex', 'follow', 'nofollow', 'nosnippet',
                     'noarchive', 'notranslate', 'noimageindex', 'indexifembedded'}

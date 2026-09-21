@@ -7,7 +7,7 @@ import math
 import re
 import copy
 from dataclasses import dataclass, field, asdict, fields
-from typing import Dict, Optional, List, Any, Union, get_args, get_origin, get_type_hints
+from typing import Dict, Optional, List, Any, Union, Tuple, get_args, get_origin, get_type_hints
 from enum import Enum
 from pathlib import Path
 
@@ -28,9 +28,6 @@ class OutputFormat(Enum):
     JSON = "json"
     CSV = "csv"
     XLSX = "xlsx"
-    PDF = "pdf"
-    MARKDOWN = "markdown"
-    XML = "xml"
 
 
 class LogLevel(Enum):
@@ -48,48 +45,35 @@ class CrawlerConfig:
     PROFILE_FIELDS = ('max_concurrent', 'concurrent_requests', 'max_pages', 'max_depth',
                       'timeout', 'max_retries', 'cache_enabled', 'use_connection_pooling',
                       'adaptive_delay')
-    # Concurrency settings
+    # Concurrency and request timeouts
     max_concurrent: int = 20
     concurrent_requests: Optional[int] = None  # Legacy alias; max_concurrent is canonical.
     max_connections_per_host: int = 5
-    semaphore_limit: int = 30
-    
-    # Timeout settings
     timeout: int = 30
     connect_timeout: int = 10
     read_timeout: int = 30
-    total_timeout: int = 300
-    
-    # User agent and headers
+
+    # Request headers and redirects
     user_agent: str = "tfq0seo/3.0.0 (+https://github.com/TFQ0/tfq0seo)"
     custom_headers: Dict[str, str] = field(default_factory=dict)
-    rotate_user_agents: bool = False
-    user_agent_list: List[str] = field(default_factory=list)
-    
-    # Redirect handling
     follow_redirects: bool = True
     max_redirects: int = 10
-    redirect_cache_ttl: int = 3600
-    
-    # Crawl limits
+
+    # Crawl limits and rate limiting
     max_pages: int = 500
     max_depth: int = 5
     max_page_size: int = 10485760  # 10MB
     max_crawl_time: int = 3600  # 1 hour
-    
-    # Rate limiting
     delay_between_requests: float = 0.0
     adaptive_delay: bool = True
     min_delay: float = 0.0
     max_delay: float = 5.0
     rate_limit_per_second: Optional[float] = None
-    
-    # Robots.txt handling
+
+    # Robots and URL filtering
     respect_robots_txt: bool = True
     robots_cache_ttl: int = 86400  # 24 hours
     crawl_delay_factor: float = 1.0  # Multiplier for robots.txt delay
-    
-    # URL filtering
     allowed_domains: List[str] = field(default_factory=list)
     allowed_schemes: List[str] = field(default_factory=lambda: ['http', 'https'])
     excluded_patterns: List[str] = field(default_factory=lambda: [
@@ -97,41 +81,32 @@ class CrawlerConfig:
         r'/wp-admin', r'/admin', r'/login',
         r'\?.*session', r'\?.*utm_'
     ])
-    include_query_strings: bool = True
-    normalize_urls: bool = True
-    
-    # Content handling
-    parse_javascript: bool = False
-    execute_javascript: bool = False
-    wait_for_javascript: float = 0.0
+
+    # Response storage, retries, and cache
     store_html: bool = False
-    compress_stored_html: bool = True
-    
-    # Retry settings
     max_retries: int = 3
     retry_on_status: List[int] = field(default_factory=lambda: [429, 500, 502, 503, 504])
     retry_backoff_factor: float = 2.0
-    
-    # Cache settings
     cache_enabled: bool = True
     cache_ttl: int = 3600
     cache_size_mb: int = 100
-    
-    # Advanced features
+
+    # Discovery and connections
     use_sitemap: bool = True
     discover_sitemaps: bool = True
-    prioritize_sitemap_urls: bool = True
-    use_http2: bool = False
     use_connection_pooling: bool = True
     dns_cache_ttl: int = 300
     verify_ssl: bool = True
     proxy: Optional[str] = None
-    
+
     @property
     def effective_concurrency(self) -> int:
         return self.concurrent_requests if self.concurrent_requests is not None else self.max_concurrent
 
     def as_dict(self) -> Dict[str, Any]:
+        errors = _unexpected_field_issues(self, 'crawler')
+        if errors:
+            raise ValueError('; '.join(errors))
         values = asdict(self)
         values['max_concurrent'] = self.effective_concurrency
         values.pop('concurrent_requests', None)
@@ -155,16 +130,13 @@ class CrawlerConfig:
             issues.append('max_delay must be at least min_delay')
         if not self.allowed_schemes or set(self.allowed_schemes) - {'http', 'https'}:
             issues.append('allowed_schemes must contain only http and/or https')
-        for pattern in self.excluded_patterns:
+        for index, pattern in enumerate(self.excluded_patterns):
             try:
                 re.compile(pattern)
             except re.error:
-                issues.append(f"Invalid excluded pattern: {pattern}")
+                issues.append(f'excluded_patterns[{index}] is not a valid regular expression')
         if any(code < 400 or code > 599 for code in self.retry_on_status):
             issues.append('retry_on_status must contain HTTP error status codes')
-        for name in ('parse_javascript', 'execute_javascript', 'use_http2'):
-            if getattr(self, name):
-                issues.append(f"{name} is not supported by the static HTTP crawler")
         return issues
 
     def apply_profile(self, profile: ConfigProfile) -> None:
@@ -203,78 +175,22 @@ class CrawlerConfig:
 @dataclass
 class AnalysisConfig:
     """Advanced analysis configuration."""
-    # Analysis scope
     enabled_analyzers: List[str] = field(default_factory=lambda: [
         'seo', 'content', 'technical', 'performance', 'links'
     ])
     analysis_mode: str = "standard"  # quick, standard, deep
     parallel_analysis: bool = True
     max_analysis_threads: int = 4
-    
-    # Link analysis
+
+    # Link and content analysis
     check_external_links: bool = False
     check_internal_links: bool = True
-    validate_anchors: bool = True
     check_broken_links: bool = True
     max_external_links_per_page: int = 100
     external_link_timeout: int = 10
-    
-    # Image analysis
-    check_images: bool = True
-    check_image_optimization: bool = True
-    check_alt_text: bool = True
-    check_image_dimensions: bool = True
-    max_image_size_kb: int = 500
-    
-    # Content analysis
-    min_content_length: int = 100
-    max_content_length: int = 100000
-    optimal_content_length: int = 1500
-    check_readability: bool = True
-    target_reading_level: int = 8  # Grade level
-    check_keyword_density: bool = True
     target_keywords: List[str] = field(default_factory=list)
-    keyword_variations: bool = True
     check_content_uniqueness: bool = True
-    min_unique_content_ratio: float = 0.7
-    
-    # SEO analysis
-    check_meta_tags: bool = True
-    check_structured_data: bool = True
-    validate_structured_data: bool = True
-    check_open_graph: bool = True
-    check_twitter_cards: bool = True
-    check_canonical_urls: bool = True
-    check_hreflang: bool = True
-    check_sitemaps: bool = True
-    check_robots_txt: bool = True
-    
-    # Technical analysis
-    check_https: bool = True
-    check_security_headers: bool = True
-    check_mixed_content: bool = True
-    check_mobile_friendly: bool = True
-    check_page_speed: bool = True
-    check_core_web_vitals: bool = True
-    check_compression: bool = True
-    check_caching: bool = True
-    check_minification: bool = True
-    check_http2: bool = True
-    
-    # Performance thresholds
-    max_page_load_time: float = 3.0
-    max_ttfb: float = 0.8
-    max_fcp: float = 1.8
-    max_lcp: float = 2.5
-    max_fid: float = 100
-    max_cls: float = 0.1
-    max_page_size_mb: float = 3.0
-    
-    # Accessibility
-    check_accessibility: bool = True
-    wcag_level: str = "AA"  # A, AA, AAA
-    
-    # Scoring weights
+
     score_weights: Dict[str, float] = field(default_factory=lambda: {
         'seo': 0.30,
         'content': 0.25,
@@ -282,7 +198,7 @@ class AnalysisConfig:
         'performance': 0.15,
         'links': 0.10
     })
-    
+
     def validate(self) -> List[str]:
         issues = []
         known = {'seo', 'content', 'technical', 'performance', 'links'}
@@ -308,62 +224,12 @@ class AnalysisConfig:
 @dataclass
 class ExportConfig:
     """Advanced export configuration."""
-    # Output formats
     formats: List[str] = field(default_factory=lambda: ['html'])
     primary_format: str = 'html'
-    
-    # HTML settings
     html_template: str = "optimized"  # report, enhanced, optimized
-    include_inline_css: bool = True
-    include_inline_js: bool = True
-    minify_html: bool = True
-    html_theme: str = "light"  # light, dark, auto
-    include_charts: bool = True
-    charts_library: str = "chartjs"  # chartjs, d3, highcharts
-    
-    # Data inclusion
-    include_raw_data: bool = False
-    include_page_content: bool = False
-    include_screenshots: bool = False
-    include_har_files: bool = False
-    data_sampling_rate: float = 1.0  # For large datasets
-    max_issues_per_page: int = 100
-    max_pages_in_report: int = 1000
-    
-    # File settings
     output_directory: str = "./reports"
     filename_pattern: str = "{domain}_{timestamp}_{format}"
-    create_subdirectories: bool = True
-    compress_output: bool = False
-    compression_format: str = "zip"  # zip, tar, gz
-    
-    # Export options
-    split_large_reports: bool = True
-    split_threshold_mb: int = 50
-    generate_summary: bool = True
-    generate_executive_report: bool = True
-    
-    # Email settings
-    send_email: bool = False
-    email_recipients: List[str] = field(default_factory=list)
-    email_subject_template: str = "SEO Report for {domain}"
-    smtp_server: Optional[str] = None
-    smtp_port: int = 587
-    smtp_username: Optional[str] = None
-    smtp_password: Optional[str] = None
-    
-    # Cloud storage
-    upload_to_cloud: bool = False
-    cloud_provider: Optional[str] = None  # s3, gcs, azure
-    cloud_bucket: Optional[str] = None
-    cloud_path_prefix: Optional[str] = None
-    
-    # API export
-    send_to_api: bool = False
-    api_endpoint: Optional[str] = None
-    api_key: Optional[str] = None
-    api_method: str = "POST"
-    
+
     def validate(self) -> List[str]:
         issues = []
         if not self.formats or set(self.formats) - {'html', 'json', 'csv', 'xlsx'}:
@@ -372,50 +238,7 @@ class ExportConfig:
             issues.append('primary_format must be present in formats')
         if self.html_template not in {'report', 'enhanced', 'optimized'}:
             issues.append('Unknown html_template')
-        for name in ('send_email', 'upload_to_cloud', 'send_to_api', 'include_screenshots', 'include_har_files'):
-            if getattr(self, name):
-                issues.append(f"{name} is not implemented")
         return issues
-
-
-@dataclass
-class MonitoringConfig:
-    """Configuration for monitoring and alerting."""
-    enabled: bool = False
-    
-    # Metrics collection
-    collect_metrics: bool = True
-    metrics_interval: int = 60  # seconds
-    metrics_retention_days: int = 30
-    
-    # Alerting
-    enable_alerts: bool = False
-    alert_thresholds: Dict[str, float] = field(default_factory=lambda: {
-        'error_rate': 0.05,  # 5% error rate
-        'avg_response_time': 5.0,  # 5 seconds
-        'memory_usage_mb': 500,
-        'broken_links_ratio': 0.10
-    })
-    
-    # Logging
-    log_level: str = "info"
-    log_to_file: bool = True
-    log_file_path: str = "./logs/tfq0seo.log"
-    log_rotation: str = "daily"  # daily, size, time
-    log_retention_days: int = 7
-    log_format: str = "json"  # json, text
-    
-    # Progress tracking
-    show_progress: bool = True
-    progress_update_interval: float = 1.0
-    detailed_progress: bool = False
-    
-    # Webhooks
-    webhook_enabled: bool = False
-    webhook_url: Optional[str] = None
-    webhook_events: List[str] = field(default_factory=lambda: [
-        'analysis_complete', 'error', 'threshold_exceeded'
-    ])
 
 
 def _matches_type(value: Any, expected: Any) -> bool:
@@ -430,7 +253,10 @@ def _matches_type(value: Any, expected: Any) -> bool:
         return isinstance(value, dict) and all(
             _matches_type(k, args[0]) and _matches_type(v, args[1]) for k, v in value.items())
     if expected is float:
-        return type(value) in (int, float) and math.isfinite(value)
+        try:
+            return type(value) in (int, float) and math.isfinite(value)
+        except OverflowError:
+            return False
     if expected in (bool, int):
         return type(value) is expected
     return isinstance(value, expected)
@@ -443,48 +269,211 @@ def _type_issues(obj: Any) -> List[str]:
             if not _matches_type(getattr(obj, item.name), annotations[item.name])]
 
 
+# Retired settings are migration metadata only, never active configuration fields.
+# These historical defaults let explicit migration distinguish inert saved values
+# from unsupported behavior that a caller deliberately requested.
+_RETIRED_DEFAULTS = {
+    'crawler': {
+        'semaphore_limit': 30,
+        'total_timeout': 300,
+        'rotate_user_agents': False,
+        'user_agent_list': [],
+        'redirect_cache_ttl': 3600,
+        'include_query_strings': True,
+        'normalize_urls': True,
+        'parse_javascript': False,
+        'execute_javascript': False,
+        'wait_for_javascript': 0.0,
+        'compress_stored_html': True,
+        'prioritize_sitemap_urls': True,
+        'use_http2': False,
+    },
+    'analysis': {
+        'validate_anchors': True,
+        'check_images': True,
+        'check_image_optimization': True,
+        'check_alt_text': True,
+        'check_image_dimensions': True,
+        'max_image_size_kb': 500,
+        'min_content_length': 100,
+        'max_content_length': 100000,
+        'optimal_content_length': 1500,
+        'check_readability': True,
+        'target_reading_level': 8,
+        'check_keyword_density': True,
+        'keyword_variations': True,
+        'min_unique_content_ratio': 0.7,
+        'check_meta_tags': True,
+        'check_structured_data': True,
+        'validate_structured_data': True,
+        'check_open_graph': True,
+        'check_twitter_cards': True,
+        'check_canonical_urls': True,
+        'check_hreflang': True,
+        'check_sitemaps': True,
+        'check_robots_txt': True,
+        'check_https': True,
+        'check_security_headers': True,
+        'check_mixed_content': True,
+        'check_mobile_friendly': True,
+        'check_page_speed': True,
+        'check_core_web_vitals': True,
+        'check_compression': True,
+        'check_caching': True,
+        'check_minification': True,
+        'check_http2': True,
+        'max_page_load_time': 3.0,
+        'max_ttfb': 0.8,
+        'max_fcp': 1.8,
+        'max_lcp': 2.5,
+        'max_fid': 100.0,
+        'max_cls': 0.1,
+        'max_page_size_mb': 3.0,
+        'check_accessibility': True,
+        'wcag_level': 'AA',
+    },
+    'export': {
+        'include_inline_css': True,
+        'include_inline_js': True,
+        'minify_html': True,
+        'html_theme': 'light',
+        'include_charts': True,
+        'charts_library': 'chartjs',
+        'include_raw_data': False,
+        'include_page_content': False,
+        'include_screenshots': False,
+        'include_har_files': False,
+        'data_sampling_rate': 1.0,
+        'max_issues_per_page': 100,
+        'max_pages_in_report': 1000,
+        'create_subdirectories': True,
+        'compress_output': False,
+        'compression_format': 'zip',
+        'split_large_reports': True,
+        'split_threshold_mb': 50,
+        'generate_summary': True,
+        'generate_executive_report': True,
+        'send_email': False,
+        'email_recipients': [],
+        'email_subject_template': 'SEO Report for {domain}',
+        'smtp_server': None,
+        'smtp_port': 587,
+        'smtp_username': None,
+        'smtp_password': None,
+        'upload_to_cloud': False,
+        'cloud_provider': None,
+        'cloud_bucket': None,
+        'cloud_path_prefix': None,
+        'send_to_api': False,
+        'api_endpoint': None,
+        'api_key': None,
+        'api_method': 'POST',
+    },
+    'monitoring': {
+        'enabled': False,
+        'collect_metrics': True,
+        'metrics_interval': 60,
+        'metrics_retention_days': 30,
+        'enable_alerts': False,
+        'alert_thresholds': {
+            'error_rate': 0.05, 'avg_response_time': 5.0,
+            'memory_usage_mb': 500.0, 'broken_links_ratio': 0.1,
+        },
+        'log_level': 'info',
+        'log_to_file': True,
+        'log_file_path': './logs/tfq0seo.log',
+        'log_rotation': 'daily',
+        'log_retention_days': 7,
+        'log_format': 'json',
+        'show_progress': True,
+        'progress_update_interval': 1.0,
+        'detailed_progress': False,
+        'webhook_enabled': False,
+        'webhook_url': None,
+        'webhook_events': ['analysis_complete', 'error', 'threshold_exceeded'],
+    },
+    'global': {
+        'dry_run': False,
+        'temp_directory': './temp',
+        'features': {},
+        'metadata': {},
+    },
+}
+
+_COMPONENT_TYPES = {'crawler': CrawlerConfig, 'analysis': AnalysisConfig, 'export': ExportConfig}
+_CRAWLER_ALIASES = {
+    'concurrent_requests': 'max_concurrent', 'max_content_length': 'max_page_size',
+    'retry_attempts': 'max_retries', 'adaptive_throttle': 'adaptive_delay',
+    'follow_sitemap': 'use_sitemap',
+}
+
+
+def _key_issues(keys, allowed, section: str) -> List[str]:
+    """Describe keys, never supplied values (which may contain credentials)."""
+    if any(not isinstance(key, str) for key in keys):
+        return [f'{section} configuration keys must be strings']
+    prefix = '' if section == 'global' else section + '.'
+    retired = set(_RETIRED_DEFAULTS.get(section, {}))
+    if section == 'global':
+        retired.add('monitoring')
+    issues = []
+    for key in sorted(set(keys) - set(allowed)):
+        if key in retired:
+            issues.append(f'{prefix}{key} was retired in 3.0.0; use Config.migrate_dict() for legacy defaults '
+                          'or remove this unsupported setting after reviewing docs/configuration-migration.md')
+        else:
+            issues.append(f'Unknown {section} configuration key: {key}')
+    return issues
+
+
+def _unexpected_field_issues(obj: Any, section: str) -> List[str]:
+    allowed = {item.name for item in fields(obj)}
+    # Config tracks explicit overrides privately; component settings have no private state.
+    if section == 'global':
+        allowed.add('_explicit_values')
+    return _key_issues(vars(obj), allowed, section)
+
+
+def _same_legacy_default(value: Any, default: Any) -> bool:
+    """Use historical configuration types; bool and numeric equality are distinct."""
+    if isinstance(default, dict):
+        return (isinstance(value, dict) and value.keys() == default.keys() and
+                all(_same_legacy_default(value[key], item) for key, item in default.items()))
+    if isinstance(default, list):
+        return (isinstance(value, list) and len(value) == len(default) and
+                all(_same_legacy_default(item, expected) for item, expected in zip(value, default)))
+    if type(default) is float:
+        return _matches_type(value, float) and value == default
+    return type(value) is type(default) and value == default
+
+
 @dataclass
 class Config:
     """Resolve profiles first, then explicit overrides; reject invalid input."""
     crawler: Optional[CrawlerConfig] = None
     analysis: Optional[AnalysisConfig] = None
     export: Optional[ExportConfig] = None
-    monitoring: Optional[MonitoringConfig] = None
     profile: ConfigProfile = ConfigProfile.STANDARD
     version: str = '3.0.0'
-    debug: bool = False
-    dry_run: bool = False
+    debug: bool = False  # Profile metadata only; configure Python logging separately.
     continue_on_error: bool = True
     max_memory_mb: int = 1024
-    temp_directory: str = './temp'
-    features: Dict[str, bool] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
 
-    # Legacy fields remain readable for compatibility. Changing an inert field
-    # must fail explicitly instead of silently promising unsupported behavior.
     SUPPORTED_FIELDS = {
-        'crawler': set(('max_concurrent concurrent_requests max_connections_per_host timeout connect_timeout '
-                        'read_timeout user_agent custom_headers follow_redirects max_redirects max_pages max_depth '
-                        'max_page_size max_crawl_time delay_between_requests adaptive_delay min_delay max_delay '
-                        'rate_limit_per_second respect_robots_txt robots_cache_ttl crawl_delay_factor allowed_domains '
-                        'allowed_schemes excluded_patterns store_html max_retries retry_on_status retry_backoff_factor '
-                        'cache_enabled cache_ttl cache_size_mb use_sitemap discover_sitemaps dns_cache_ttl verify_ssl '
-                        'proxy use_connection_pooling').split()),
-        'analysis': set(('enabled_analyzers analysis_mode parallel_analysis max_analysis_threads target_keywords '
-                         'check_broken_links check_internal_links check_external_links max_external_links_per_page '
-                         'external_link_timeout check_content_uniqueness score_weights').split()),
-        'export': {'formats', 'primary_format', 'html_template', 'output_directory', 'filename_pattern'},
-        'monitoring': set(),
+        name: frozenset(item.name for item in fields(component))
+        for name, component in _COMPONENT_TYPES.items()
     }
 
     def __post_init__(self):
-        supplied = {name: getattr(self, name) for name in ('crawler', 'analysis', 'export', 'monitoring')}
+        supplied = {name: getattr(self, name) for name in _COMPONENT_TYPES}
         supplied_debug = self.debug
         self.crawler = CrawlerConfig()
         self.analysis = AnalysisConfig()
         self.export = ExportConfig()
-        self.monitoring = MonitoringConfig()
-        self.profile = ConfigProfile(self.profile)
+        try:
+            self.profile = ConfigProfile(self.profile)
+        except (ValueError, TypeError):
+            raise ValueError('profile must be quick, standard, deep, enterprise, dev, or custom') from None
         self.apply_profile(self.profile)
         if self.profile != ConfigProfile.DEVELOPMENT:
             self.debug = supplied_debug
@@ -509,24 +498,24 @@ class Config:
         if not isinstance(data, dict):
             raise ValueError('Configuration must be an object')
         data = cls._canonical_overrides(data)
-        unknown = set(data) - {item.name for item in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown configuration keys: {', '.join(sorted(unknown))}")
-        config = cls(profile=ConfigProfile(data.get('profile', 'standard')))
-        for section in ('crawler', 'analysis', 'export', 'monitoring'):
+        errors = _key_issues(data, {item.name for item in fields(cls)}, 'global')
+        if errors:
+            raise ValueError('; '.join(errors))
+        config = cls(profile=data.get('profile', 'standard'))
+        for section in _COMPONENT_TYPES:
             values = data.get(section, {})
             if not isinstance(values, dict):
                 raise ValueError(f'{section} must be an object')
             values = dict(values)
             target = getattr(config, section)
             allowed = {item.name for item in fields(target)}
-            unknown = set(values) - allowed
-            if unknown:
-                raise ValueError(f"Unknown {section} keys: {', '.join(sorted(unknown))}")
+            errors = _key_issues(values, allowed, section)
+            if errors:
+                raise ValueError('; '.join(errors))
             for name, value in values.items():
                 setattr(target, name, value)
         for name, value in data.items():
-            if name not in ('crawler', 'analysis', 'export', 'monitoring', 'profile'):
+            if name not in _COMPONENT_TYPES and name != 'profile':
                 setattr(config, name, value)
         config._explicit_values = copy.deepcopy(data)
         config.require_valid()
@@ -537,18 +526,69 @@ class Config:
         data = copy.deepcopy(data)
         values = data.get('crawler')
         if isinstance(values, dict):
-            aliases = {'concurrent_requests': 'max_concurrent', 'max_content_length': 'max_page_size',
-                       'retry_attempts': 'max_retries', 'adaptive_throttle': 'adaptive_delay',
-                       'follow_sitemap': 'use_sitemap'}
-            for alias, name in aliases.items():
+            annotations = get_type_hints(CrawlerConfig)
+            for alias, name in _CRAWLER_ALIASES.items():
                 if alias in values:
                     value = values.pop(alias)
                     if value is None and alias == 'concurrent_requests':
                         continue
+                    if not _matches_type(value, annotations[name]):
+                        raise ValueError(f'crawler.{alias} has an invalid type or non-finite value')
+                    if name in values and not _matches_type(values[name], annotations[name]):
+                        raise ValueError(f'crawler.{name} has an invalid type or non-finite value')
                     if name in values and values[name] != value:
                         raise ValueError(f'Conflicting crawler settings: {alias} and {name}')
                     values[name] = value
         return data
+
+    @classmethod
+    def migrate_dict(cls, data: Dict) -> Tuple[Dict[str, Any], List[str]]:
+        """Explicitly remove retired historical defaults and canonicalize aliases.
+
+        Return validated, sparse overrides and value-free migration warnings.
+        Unsupported non-default values, malformed input, and unknown keys fail;
+        the original mapping remains untouched and no files or networks are used.
+        """
+        if not isinstance(data, dict):
+            raise ValueError('Configuration must be an object')
+        canonical = cls._canonical_overrides(data)
+        allowed_global = {item.name for item in fields(cls)} | set(_RETIRED_DEFAULTS['global']) | {'monitoring'}
+        errors = _key_issues(canonical, allowed_global, 'global')
+        warnings = []
+        for section in ('crawler', 'analysis', 'export', 'monitoring', 'global'):
+            if section != 'global' and section not in canonical:
+                continue
+            values = canonical if section == 'global' else canonical[section]
+            if not isinstance(values, dict):
+                errors.append(f'{section} must be an object')
+                continue
+            defaults = _RETIRED_DEFAULTS[section]
+            if section != 'global':
+                errors.extend(_key_issues(values, set(cls.SUPPORTED_FIELDS.get(section, ())) | set(defaults), section))
+            for name, default in defaults.items():
+                if name not in values:
+                    continue
+                path = name if section == 'global' else section + '.' + name
+                if not _same_legacy_default(values[name], default):
+                    errors.append(f'{path} cannot be migrated automatically: it requests an unsupported non-default '
+                                  'value or has an invalid type; review docs/configuration-migration.md and remove it explicitly')
+                else:
+                    del values[name]
+                    warnings.append(f'Removed retired setting {path} at its historical default.')
+            if section == 'monitoring' and not values:
+                del canonical[section]
+                warnings.append('Removed the retired monitoring section.')
+        if errors:
+            raise ValueError('; '.join(errors))
+        for alias, target in _CRAWLER_ALIASES.items():
+            if isinstance(data.get('crawler'), dict) and alias in data['crawler']:
+                warnings.append(f'Canonicalized crawler.{alias} to crawler.{target}.'
+                                if data['crawler'][alias] is not None else
+                                f'Removed empty crawler.{alias} alias; crawler.{target} is unchanged.')
+        if isinstance(canonical.get('profile'), ConfigProfile):
+            canonical['profile'] = canonical['profile'].value
+        cls.from_dict(canonical)  # Check active types, constraints, and profile overrides without expanding them.
+        return canonical, warnings
 
     @classmethod
     def from_env(cls, prefix: str = 'TFQ0SEO_') -> 'Config':
@@ -565,8 +605,11 @@ class Config:
                             if key.startswith(s + '_')), None)
             if section:
                 name = key[len(section) + 1:]
-                annotation = get_type_hints({'crawler': CrawlerConfig, 'analysis': AnalysisConfig,
-                                            'export': ExportConfig, 'monitoring': MonitoringConfig}[section]).get(name)
+                canonical_name = _CRAWLER_ALIASES.get(name, name) if section == 'crawler' else name
+                annotation = (get_type_hints(_COMPONENT_TYPES[section]).get(canonical_name)
+                              if section in _COMPONENT_TYPES else None)
+                if section == 'crawler' and name == 'concurrent_requests':
+                    annotation = Optional[int]
                 data.setdefault(section, {})[name] = cls._parse_env_value(value, annotation)
             else:
                 data[key] = cls._parse_env_value(value, get_type_hints(cls).get(key))
@@ -632,31 +675,19 @@ class Config:
 
     def validate(self) -> Dict[str, List[str]]:
         issues = {}
-        for name in ('crawler', 'analysis', 'export', 'monitoring'):
+        for name, expected in _COMPONENT_TYPES.items():
             obj = getattr(self, name)
-            expected = {'crawler': CrawlerConfig, 'analysis': AnalysisConfig,
-                        'export': ExportConfig, 'monitoring': MonitoringConfig}[name]
             if not isinstance(obj, expected):
                 issues[name] = [f'{name} must be a {expected.__name__}']
                 continue
-            errors = _type_issues(obj)
+            errors = _type_issues(obj) + _unexpected_field_issues(obj, name)
             if not errors and hasattr(obj, 'validate'):
                 errors.extend(obj.validate())
-            defaults = expected()
-            for item in fields(obj):
-                if item.name not in self.SUPPORTED_FIELDS[name] and getattr(obj, item.name) != getattr(defaults, item.name):
-                    errors.append(f'{item.name} is not supported; use the documented component settings')
             if errors:
                 issues[name] = errors
-        global_errors = _type_issues(self)
+        global_errors = _type_issues(self) + _unexpected_field_issues(self, 'global')
         if type(self.max_memory_mb) is int and self.max_memory_mb <= 0:
             global_errors.append('max_memory_mb must be positive')
-        if self.dry_run:
-            global_errors.append('dry_run is not implemented; no network request was started')
-        if isinstance(self.monitoring, MonitoringConfig) and (self.monitoring.enabled or self.monitoring.webhook_enabled):
-            global_errors.append('Background monitoring and webhooks are not implemented')
-        if self.features:
-            global_errors.append('Legacy feature flags are unsupported; use explicit component settings')
         if global_errors:
             issues['global'] = global_errors
         return issues
@@ -668,6 +699,7 @@ class Config:
                                        for message in messages))
 
     def to_dict(self) -> Dict:
+        self.require_valid()
         data = asdict(self)
         data['profile'] = self.profile.value
         data['crawler'] = self.crawler.as_dict()

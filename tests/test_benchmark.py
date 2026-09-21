@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import socket
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -144,4 +145,179 @@ def test_invalid_fixture_size_is_rejected(pages):
         asyncio.run(benchmark.benchmark_offline(pages))
     with pytest.raises(SystemExit) as failure:
         benchmark.main(['--pages', str(pages)])
+    assert failure.value.code == 2
+
+
+@pytest.mark.parametrize('scenario', benchmark.SCENARIOS)
+def test_varied_fixtures_are_reproducible_complete_and_offline(monkeypatch, scenario):
+    attempts = []
+
+    def no_dns(*args, **kwargs):
+        attempts.append(args)
+        raise AssertionError('Offline fixtures must not resolve network addresses')
+
+    async def no_fetch(*args, **kwargs):
+        attempts.append(args)
+        raise AssertionError('Offline fixtures must not fetch any resources')
+
+    monkeypatch.setattr(socket, 'getaddrinfo', no_dns)
+    monkeypatch.setattr('tfq0seo.core.app.Crawler.fetch_page', no_fetch)
+    first = asyncio.run(benchmark.benchmark_offline(3, scenario))
+    second = asyncio.run(benchmark.benchmark_offline(3, scenario))
+    assert attempts == []
+    assert first['status'] == second['status'] == 'complete'
+    assert first['fixture'] == second['fixture']
+    assert len(first['fixture']['sha256']) == 64
+    assert first['fixture']['generated_pages'] == 3
+    assert first['fixture']['pages_with_word_count'] == 3
+    assert sum(first['readability']['status_counts'].values()) == 3
+    assert first['report_completeness'] == {
+        'expected_pages': 3, 'retained_rows': 3, 'unique_urls': 3, 'missing_urls': 0,
+        'unexpected_urls': 0, 'duplicate_rows': 0, 'complete': True,
+    }
+    assert first['analysis_duration_seconds'] > 0
+    assert first['report_duration_seconds'] > 0
+    assert first['config']['crawler']['cache_enabled'] is False
+    assert first['config']['crawler']['max_pages'] == 3
+    assert first['site_analysis']['node_count'] == 3
+    if scenario == 'content-heavy':
+        assert first['fixture']['image_elements'] == 24
+        assert first['fixture']['html_bytes'] > 20000
+        assert first['fixture']['analyzed_word_count'] > 3000
+    elif scenario == 'link-dense':
+        assert first['fixture']['href_references'] == 117
+    elif scenario == 'mixed':
+        assert first['fixture']['variants'] == {'basic': 1, 'content-heavy': 1, 'link-dense': 1}
+
+
+def test_report_duplicate_urls_fail_even_when_row_count_matches(monkeypatch):
+    class Analyzer:
+        def __init__(self, config):
+            pass
+
+        async def analyze_page(self, page):
+            return {'url': page['url'], 'status': 'complete', 'overall_score': 90}
+
+        def generate_site_report(self, pages):
+            return {'status': 'complete', 'pages': {'detailed': [pages[0], pages[0]]}}
+
+    monkeypatch.setattr(benchmark, 'SEOAnalyzer', Analyzer)
+    result = asyncio.run(benchmark.benchmark_offline(2))
+    assert result['successful_pages'] == result['report_pages'] == 2
+    assert result['status'] == 'failed'
+    assert result['report_completeness']['duplicate_rows'] == 1
+    assert result['report_completeness']['missing_urls'] == 1
+    assert 'expected fixture URLs' in result['errors'][0]
+
+
+def test_offline_timeout_preserves_observed_results_and_reports_failure(monkeypatch):
+    class Analyzer:
+        def __init__(self, config):
+            self.calls = 0
+
+        async def analyze_page(self, page):
+            self.calls += 1
+            if self.calls > 1:
+                await asyncio.sleep(1)
+            return {'url': page['url'], 'status': 'complete', 'overall_score': 90}
+
+    monkeypatch.setattr(benchmark, 'SEOAnalyzer', Analyzer)
+    result = asyncio.run(benchmark.benchmark_offline(3, timeout_seconds=0.05))
+    assert result['status'] == 'failed'
+    assert result['timed_out'] is True
+    assert result['successful_pages'] == result['observed_results'] == 1
+    assert result['missing_results'] == 2
+    assert result['report_completeness'] is None
+    assert 'deadline' in result['errors'][0]
+
+
+def test_suite_records_repeat_order_and_excludes_incomplete_runs_from_metrics(tmp_path, monkeypatch):
+    calls = []
+
+    async def offline(page_count, scenario='basic', timeout_seconds=None):
+        calls.append((page_count, scenario, timeout_seconds))
+        return {'status': 'partial' if len(calls) == 2 else 'complete', 'successful_pages': page_count,
+                'duration_seconds': 100 if len(calls) == 2 else 2, 'pages_per_second': page_count / 2}
+
+    monkeypatch.setattr(benchmark, 'benchmark_offline', offline)
+    result = asyncio.run(benchmark.run_all_benchmarks(
+        output_file=str(tmp_path / 'suite.json'), scenarios=['mixed', 'basic'], page_counts=[3, 5],
+        repetitions=2, timeout_seconds=10))
+    assert calls == [(size, scenario, 10) for size in (3, 5) for scenario in ('mixed', 'basic') for _ in range(2)]
+    assert result['status'] == 'partial'
+    assert [run['run_order'] for run in result['benchmarks']] == list(range(1, 9))
+    assert [run['repetition'] for run in result['benchmarks']] == [1, 2] * 4
+    summary = result['summaries'][0]
+    assert summary['runs'] == 2 and summary['complete_runs'] == summary['partial_runs'] == 1
+    assert summary['metrics']['duration_seconds'] == {'median': 2, 'min': 2, 'max': 2}
+    assert result['suite']['repetitions'] == 2
+    assert 'Same process' in result['suite']['isolation']
+
+
+def test_environment_records_dependency_versions_and_implementation(monkeypatch):
+    def installed(name):
+        if name == 'openpyxl':
+            raise benchmark.importlib_metadata.PackageNotFoundError(name)
+        return 'fixture-version'
+
+    monkeypatch.setattr(benchmark.importlib_metadata, 'version', installed)
+    environment = benchmark._environment()
+    assert set(environment['direct_dependencies']) == set(benchmark.DIRECT_DEPENDENCIES)
+    assert all(value == 'fixture-version' for value in environment['direct_dependencies'].values())
+    assert environment['optional_dependencies']['openpyxl'] is None
+    assert environment['schema_version'] == benchmark.SCHEMA_VERSION
+    assert environment['ruleset_version'] == benchmark.RULESET_VERSION
+    assert environment['facts_version'] == benchmark.FACTS_VERSION
+    assert environment['package_version'] == benchmark.__version__
+    assert environment['os']['system'] and environment['architecture']
+    assert environment['cpu_count'] > 0
+    assert environment['source_fingerprint']['file_count'] > 0
+    assert len(environment['source_fingerprint']['digest']) == 64
+    json.dumps(environment, allow_nan=False)
+
+
+def test_changed_source_during_suite_invalidates_comparison(tmp_path, monkeypatch):
+    fingerprints = iter([{'digest': 'before'}, {'digest': 'after'}])
+    monkeypatch.setattr(benchmark, '_source_fingerprint', lambda: next(fingerprints))
+    monkeypatch.setattr(benchmark, 'benchmark_offline', AsyncMock(return_value={'status': 'complete'}))
+    result = asyncio.run(benchmark.run_all_benchmarks(1, str(tmp_path / 'changed.json')))
+    assert result['source_unchanged_during_suite'] is False
+    assert result['status'] == 'failed'
+
+
+def test_cli_accepts_scenarios_sizes_repetitions_and_deadline(tmp_path, monkeypatch):
+    run = AsyncMock(return_value={'status': 'complete'})
+    monkeypatch.setattr(benchmark, 'run_all_benchmarks', run)
+    path = str(tmp_path / 'suite.json')
+    assert benchmark.main(['--suite', '--pages', '500', '2000', '--repetitions', '3',
+                           '--timeout-seconds', '600', '--output', path]) == 0
+    run.assert_awaited_once_with(500, path, page_counts=[500, 2000], scenarios=benchmark.SCENARIOS,
+                                repetitions=3, timeout_seconds=600)
+
+
+@pytest.mark.parametrize('options', [
+    {'scenario': 'missing'}, {'timeout_seconds': float('nan')}, {'timeout_seconds': float('inf')},
+    {'timeout_seconds': 0}, {'timeout_seconds': True},
+])
+def test_invalid_offline_options_are_rejected(options):
+    with pytest.raises(ValueError):
+        asyncio.run(benchmark.benchmark_offline(1, **options))
+
+
+@pytest.mark.parametrize('options', [
+    {'scenarios': []}, {'page_counts': []}, {'repetitions': 0}, {'repetitions': True},
+    {'scenarios': ['basic', 'basic']}, {'page_counts': [500, 500]},
+])
+def test_invalid_suite_options_are_rejected_before_running(options):
+    with pytest.raises(ValueError):
+        asyncio.run(benchmark.run_all_benchmarks(**options))
+
+
+@pytest.mark.parametrize('args', [
+    ['--suite', '--scenario', 'mixed'], ['--repetitions', '0'], ['--timeout-seconds', 'nan'],
+    ['--timeout-seconds', 'inf'], ['--timeout-seconds', '-1'],
+])
+def test_invalid_suite_cli_options_exit_two(args):
+    with pytest.raises(SystemExit) as failure:
+        benchmark.main(args)
     assert failure.value.code == 2

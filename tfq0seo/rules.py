@@ -15,7 +15,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 
-RULESET_VERSION = '2026.09.14'
+RULESET_VERSION = '2026.09.21'
 SCORING_VERSION = '2.0'
 ANALYZERS = ('seo', 'content', 'technical', 'performance', 'links')
 PENALTIES = MappingProxyType({'critical': 15, 'warning': 7, 'notice': 3})

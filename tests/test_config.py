@@ -155,6 +155,6 @@ def test_environment_uses_the_same_types_and_profiles(monkeypatch):
 
 def test_validation_has_no_filesystem_side_effects(tmp_path):
     cfg = Config()
-    cfg.temp_directory = str(tmp_path / 'unused')
+    cfg.export.output_directory = str(tmp_path / 'unused')
     assert cfg.validate() == {}
     assert not (tmp_path / 'unused').exists()

@@ -3,6 +3,7 @@
 import re
 import math
 import hashlib
+from zipfile import BadZipFile
 from typing import Dict, List, Any, Optional, Tuple, Set
 from collections import Counter, defaultdict
 from bs4 import BeautifulSoup, NavigableString, Tag
@@ -205,8 +206,35 @@ def analyze_content_structure(soup: BeautifulSoup, language: str = 'und',
     return structure
 
 
+_READABILITY_VALUES = (
+    'flesch_reading_ease', 'flesch_kincaid_grade', 'gunning_fog', 'smog_index',
+    'ari', 'coleman_liau', 'linsear_write', 'dale_chall', 'consensus_grade',
+    'reading_time_seconds', 'speaking_time_seconds', 'lexical_diversity',
+    'syllable_count', 'polysyllable_count', 'sentence_count', 'average_sentence_length',
+    'reading_level',
+)
+
+
+def _readability_resource_error() -> Optional[str]:
+    """Check local corpus availability before textstat's automatic download path.
+
+    Older textstat releases use packaged Pyphen/CMU dictionaries. Releases with
+    the backend package call nltk.download when corpora/cmudict is absent;
+    nltk.data.find itself only checks local paths and archives.
+    """
+    if getattr(textstat, 'backend', None) is None:
+        return None
+    try:
+        import nltk.data
+        nltk.data.find('corpora/cmudict')
+    except (ImportError, LookupError, OSError, BadZipFile):
+        return ('Readability is unavailable because the installed textstat backend requires '
+                'local NLTK corpora/cmudict data. Runtime resource downloads are disabled.')
+    return None
+
+
 def calculate_advanced_readability(text: str, language: str = 'en') -> Dict[str, Any]:
-    """Calculate comprehensive readability metrics."""
+    """Calculate readability estimates using installed, local resources only."""
     metrics = {}
     
     if language != 'en':
@@ -216,8 +244,18 @@ def calculate_advanced_readability(text: str, language: str = 'en') -> Dict[str,
         metrics['word_count'] = len(words)
         metrics['sentence_count'] = len([s for s in sentences if s.strip()])
         metrics['average_sentence_length'] = len(words) / max(1, len(sentences))
+        metrics.update(status='not_applicable', source='local_text_statistics',
+                       reason='English readability formulas are not applicable to this language.')
         return metrics
-    
+
+    metrics = dict.fromkeys(_READABILITY_VALUES)
+    metrics.update(status='unavailable', source='textstat', resource_policy='local_only')
+    resource_error = _readability_resource_error()
+    if resource_error:
+        metrics.update(error=resource_error, reason=resource_error,
+                       missing_resources=['nltk:corpora/cmudict'])
+        return metrics
+
     try:
         # Standard readability scores
         metrics['flesch_reading_ease'] = round(textstat.flesch_reading_ease(text), 1)
@@ -265,9 +303,11 @@ def calculate_advanced_readability(text: str, language: str = 'en') -> Dict[str,
             metrics['reading_level'] = 'Difficult (College)'
         else:
             metrics['reading_level'] = 'Very Difficult (Graduate)'
-            
+
+        metrics.update(status='estimate', missing_resources=[])
     except Exception as e:
-        metrics['error'] = str(e)
+        metrics.update(dict.fromkeys(_READABILITY_VALUES))
+        metrics.update(error=str(e), reason='The local readability calculation could not be completed.')
     
     return metrics
 
@@ -530,8 +570,10 @@ def analyze_content(soup: BeautifulSoup, url: str, target_keywords: Optional[Lis
     ):
         collector.check(rule_id, failed,
             evidence={'metric': label, 'value': value, 'threshold': threshold, 'language': language,
-                      'word_count': word_count, 'error': readability.get('error')},
-            applicable=readability_applies, reason='Requires English text with at least 100 words and a readability estimate.',
+                      'word_count': word_count, 'error': readability.get('error'),
+                      'measurement_status': readability.get('status'), 'source': readability.get('source')},
+            applicable=readability_applies, reason=(readability.get('reason') if readability_applies and value is None
+                else None) or 'Requires English text with at least 100 words and a readability estimate.',
             category='Content', confidence='low', message=f'{label}: {value}; review suitability for the intended audience')
     
     # Content structure analysis
@@ -669,7 +711,7 @@ def analyze_content(soup: BeautifulSoup, url: str, target_keywords: Optional[Lis
         data['quality_assessment']['strengths'].append('Good vocabulary diversity')
     
     # Identify weaknesses
-    if 'readability' in data and data['readability'].get('flesch_reading_ease', 60) < 40:
+    if fre is not None and fre < 40:
         data['quality_assessment']['weaknesses'].append('Difficult to read')
     if heading_data['issues']:
         data['quality_assessment']['weaknesses'].append('H1 issues')

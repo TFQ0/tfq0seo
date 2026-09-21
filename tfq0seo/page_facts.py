@@ -9,7 +9,7 @@ from typing import Any, Dict, Mapping, Optional
 
 from bs4 import BeautifulSoup, Doctype
 
-FACTS_VERSION = '1.0'
+FACTS_VERSION = '1.1'
 
 
 def _freeze(value):
@@ -96,7 +96,7 @@ class PageFacts:
 
     def __post_init__(self):
         required = {'headers', 'robots', 'headings', 'meta', 'link_tags', 'images',
-                    'scripts', 'anchors', 'tag_counts', 'paragraphs', 'title'}
+                    'scripts', 'anchors', 'tag_counts', 'paragraphs', 'title', 'canonical'}
         if not isinstance(self._snapshot, Mapping) or not required <= self._snapshot.keys():
             raise ValueError('PageFacts requires the complete snapshot produced by extract_page_facts')
         if any(not isinstance(value, str) for value in
@@ -134,6 +134,10 @@ class PageFacts:
     @property
     def link_tags(self):
         return _thaw(self._snapshot['link_tags'])
+
+    @property
+    def canonical(self):
+        return _thaw(self._snapshot['canonical'])
 
     @property
     def images(self):
@@ -201,7 +205,7 @@ def _attrs(element):
 def extract_page_facts(soup: BeautifulSoup, url: str, headers: Any = None,
                        user_agent: str = 'googlebot') -> PageFacts:
     """Extract shared observations once per page; retain declaration order and absence."""
-    from .analyzers.common import document_base_url, heading_facts, parse_robots
+    from .analyzers.common import canonical_facts, document_base_url, heading_facts, parse_robots
     from .urls import classify_url, resolve_url
 
     if not isinstance(soup, BeautifulSoup) or not isinstance(url, str) or not isinstance(user_agent, str):
@@ -237,7 +241,7 @@ def extract_page_facts(soup: BeautifulSoup, url: str, headers: Any = None,
             record = {'attrs': attrs, 'index': index}
             if tag in ('meta', 'link', 'script'):
                 record['text'] = element.get_text()
-            if tag == 'script':
+            if tag in ('script', 'link'):
                 record['in_head'] = element.find_parent('head') is not None
             snapshot[{'meta': 'meta', 'link': 'link_tags', 'img': 'images', 'script': 'scripts'}[tag]].append(record)
         if tag == 'a' and element.has_attr('href'):
@@ -271,6 +275,7 @@ def extract_page_facts(soup: BeautifulSoup, url: str, headers: Any = None,
             })
     snapshot['headings'] = heading_facts(soup)
     snapshot['robots'] = parse_robots(soup, snapshot['headers'], user_agent)
+    snapshot['canonical'] = canonical_facts(snapshot['link_tags'], url, base_url, snapshot['headers'])
     return PageFacts(url=url, base_url=base_url, html=html, text=soup.get_text(' ', strip=True),
                      content_text=extract_content_text(soup, html=html), language=language,
                      is_xml=bool(soup.is_xml), doctype=tuple(str(node) for node in soup.contents if isinstance(node, Doctype)),

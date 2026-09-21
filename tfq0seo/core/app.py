@@ -22,6 +22,7 @@ from .models import (ANALYZER_NAMES, SCHEMA_VERSION, FetchResult, PageResult, Si
 from .report_contracts import validate_page_result, validate_site_report
 from ..page_facts import FACTS_VERSION, extract_page_facts
 from ..urls import resolve_url
+from ..site_analysis import analyze_site, url_identity
 from ..rules import (RULESET_VERSION, SCORING_VERSION, get_rule, rule_result,
                      merge_rule_results, rule_coverage, finding_penalty, recommendations_for)
 from .report_optimizer import (
@@ -177,6 +178,7 @@ class SEOAnalyzer:
         self._crawl_complete = False
         self._run_limits = []
         self._discovery_errors = []
+        self._site_start_url = None
 
     def _begin_run(self) -> None:
         self.config.require_valid()
@@ -563,6 +565,7 @@ class SEOAnalyzer:
 
     async def crawl_site(self, start_url: str) -> AsyncIterator[PageResult]:
         self._begin_run()
+        self._site_start_url = start_url
         tasks = set()
         try:
             async with Crawler(self.config.crawler.as_dict()) as crawler:
@@ -655,17 +658,23 @@ class SEOAnalyzer:
     def _url_identity(url):
         return (resolve_url(url, url) or url).split('#', 1)[0]
 
-    def _resolve_site_links(self, pages):
-        if not self.config.analysis.check_broken_links:
-            return
-        observations = {}
-        for page in list(pages) + self.link_checks:
+    def _observed_statuses(self, pages):
+        observations = defaultdict(set)
+        for page in pages:
             status = page.get('status_code') or 0
             observed_urls = [page.get('url'), page.get('requested_url')]
             observed_urls.extend(hop.get('url') for hop in page.get('redirect_chain', []))
             for url in observed_urls:
                 if url:
-                    observations[self._url_identity(url)] = status
+                    observations[self._url_identity(url)].add(status)
+        # Repeated, contradictory observations cannot establish one outcome.
+        return {url: next(iter(statuses)) if len(statuses) == 1 else 0
+                for url, statuses in observations.items()}
+
+    def _resolve_site_links(self, pages, link_checks=None):
+        if not self.config.analysis.check_broken_links:
+            return
+        observations = self._observed_statuses(list(pages) + (self.link_checks if link_checks is None else link_checks))
         for page in pages:
             analyzer = page.get('links')
             if not analyzer or analyzer.get('error'):
@@ -738,10 +747,25 @@ class SEOAnalyzer:
                 raise ContractError(f'$.pages[{index}].url', 'must identify the page being aggregated')
             if 'issues' in page and not isinstance(page['issues'], list):
                 raise ContractError(f'$.pages[{index}].issues', 'aggregation requires issue records, not summary counts')
+        # Only the current run's actual result objects carry its crawl context.
+        # Imported or independently analyzed pages must not inherit old checks,
+        # entry URLs, limits, or timing from this analyzer instance.
+        current_run = (page_results is None or supplied is self.results or
+                       bool(self.results) and Counter(map(id, supplied)) == Counter(map(id, self.results)))
+        link_checks = self.link_checks if current_run else []
+        crawl_complete = self._crawl_complete if current_run else False
+        run_limits = copy.deepcopy(self._run_limits) if current_run else []
+        discovery_errors = copy.deepcopy(self._discovery_errors) if current_run else []
         pages = copy.deepcopy(supplied)
         if not pages:
             return {'schema_version': SCHEMA_VERSION, 'status': 'error', 'error': 'No pages to analyze'}
-        self._resolve_site_links(pages)
+        self._resolve_site_links(pages, link_checks)
+        site_analysis = analyze_site(pages, start_url=self._site_start_url if current_run else None,
+                                     crawl_complete=crawl_complete)
+        site_pages = {row['url']: row for row in site_analysis['pages']}
+        for page in pages:
+            if url_identity(page['url']) in site_pages:
+                page['site_analysis'] = copy.deepcopy(site_pages[url_identity(page['url'])])
         usable = [page for page in pages if not page.get('error') and not page.get('skipped')]
         failed = [page for page in pages if page.get('error')]
         skipped = [page for page in pages if page.get('skipped')]
@@ -754,15 +778,18 @@ class SEOAnalyzer:
         scores = [page['overall_score'] for page in usable if self._is_score(page.get('overall_score'))]
         overall = round(sum(scores) / len(scores), 2) if scores else None
         issues = [{**copy.deepcopy(issue), 'url': page['url']} for page in usable for issue in page.get('issues', [])]
+        issues.extend(site_analysis['findings'])
         aggregated, stats = aggregate_issues(issues)
         counts = self._count_issues(issues)
         duplicates = defaultdict(set)
-        redirects = {}
+        redirect_targets = defaultdict(set)
         for page in pages:
             if self.config.analysis.check_content_uniqueness and page.get('content_hash'):
                 duplicates[page['content_hash']].add(page['url'])
             if page.get('requested_url') and page['requested_url'] != page['url']:
-                redirects[page['requested_url']] = page['url']
+                redirect_targets[page['requested_url']].add(page['url'])
+        redirects = {url: next(iter(targets)) for url, targets in sorted(redirect_targets.items())
+                     if len(targets) == 1}
         rule_counts = Counter()
         for page in usable:
             rule_counts.update(page.get('rule_coverage', {}).get('counts', {}))
@@ -773,19 +800,22 @@ class SEOAnalyzer:
             page.get('scoring', {}).get('ruleset_version') == RULESET_VERSION for page in usable)
         duplicate_groups = [{'hash': key, 'urls': sorted(urls), 'count': len(urls)}
                             for key, urls in duplicates.items() if len(urls) > 1]
-        broken = sorted({page['url'] for page in list(pages) + self.link_checks if (page.get('status_code') or 0) >= 400})
+        observations = self._observed_statuses(pages + link_checks)
+        broken = sorted({page['url'] for page in pages + link_checks
+                         if observations.get(self._url_identity(page['url']), 0) >= 400})
         report = {
             'schema_version': SCHEMA_VERSION,
+            'site_analysis': site_analysis,
             'status': 'error' if not usable else 'partial' if (
-                failed or partial_pages or self._run_limits or self._discovery_errors) else 'complete',
+                failed or partial_pages or run_limits or discovery_errors) else 'complete',
             'summary': {'total_pages': len(pages), 'successful_pages': len(usable) - len(partial_pages),
                         'partial_pages': len(partial_pages), 'failed_pages': len(failed), 'skipped_pages': len(skipped),
                         'analysis_mode': self.mode.value, 'analysis_timestamp': time.time(),
                         'analysis_duration': max(0, self.stats.analysis_end - self.stats.analysis_start)
-                        if self.stats.analysis_end else 0,
-                        'crawl_complete': self._crawl_complete,
-                        'limits_reached': self._run_limits,
-                        'discovery_errors': self._discovery_errors,
+                        if current_run and self.stats.analysis_end else 0,
+                        'crawl_complete': crawl_complete,
+                        'limits_reached': run_limits,
+                        'discovery_errors': discovery_errors,
                         'scope_note': 'Results describe fetched pages; unvisited targets remain unchecked.'},
             'scores': {'overall': overall, 'categories': categories, 'source': 'static_rule_heuristics',
                        'scoring_versions': sorted({page['scoring']['version'] for page in usable if page.get('scoring')})},
@@ -803,11 +833,11 @@ class SEOAnalyzer:
             'technical_health': {'broken_links': broken, 'broken_links_count': len(broken),
                                  'redirects': redirects, 'redirects_count': len(redirects),
                                  'duplicate_content': duplicate_groups, 'duplicate_content_count': len(duplicate_groups),
-                                 'link_checks': copy.deepcopy(self.link_checks)},
+                                 'link_checks': copy.deepcopy(link_checks)},
             'performance_metrics': generate_performance_metrics(pages),
-            'crawl_stats': {'pages_per_second': self.progress.speed_pages_per_sec,
-                            'avg_analysis_time': self.stats.avg_analysis_time,
-                            'memory_peak_mb': self.stats.memory_peak_mb,
+            'crawl_stats': {'pages_per_second': self.progress.speed_pages_per_sec if current_run else 0,
+                            'avg_analysis_time': self.stats.avg_analysis_time if current_run else 0,
+                            'memory_peak_mb': self.stats.memory_peak_mb if current_run else 0,
                             'cache_hits': sum(bool(page.get('cached')) for page in pages),
                             'depth_distribution': dict(Counter(page.get('context', {}).get('depth', 0) for page in pages))},
             'pages': {'summary': [{'url': page['url'], 'score': page.get('overall_score'),

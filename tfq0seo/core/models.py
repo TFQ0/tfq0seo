@@ -142,6 +142,34 @@ class AnalyzerResult(TypedDict, total=False):
     recommendations: List[str]
 
 
+class SitePageObservation(TypedDict, total=False):
+    url: str
+    canonical_targets: List[str]
+    canonical_status: str
+    canonical_terminal: Optional[str]
+    canonical_hops: Optional[int]
+    canonical_cycle_id: Optional[int]
+    incoming_links: int
+    outgoing_links: Optional[int]
+    nofollow_links: Optional[int]
+    link_depth: Optional[int]
+    reachable: Optional[bool]
+    component: Optional[int]
+    facts_available: bool
+    content_complete: bool
+    canonical_headers_checked: bool
+
+
+class SiteAnalysis(TypedDict, total=False):
+    version: str
+    scope: str
+    coverage: Dict[str, Any]
+    canonicals: Dict[str, Any]
+    links: Dict[str, Any]
+    pages: List[SitePageObservation]
+    findings: List[RuleResult]
+
+
 class PageResult(TypedDict, total=False):
     schema_version: str
     url: str
@@ -158,6 +186,7 @@ class PageResult(TypedDict, total=False):
     rule_coverage: Dict[str, Any]
     scoring: Dict[str, Any]
     page_facts: Dict[str, Any]
+    site_analysis: SitePageObservation
     recommendations: List[Dict[str, Any]]
     load_time: Optional[float]
     timings: Dict[str, Optional[float]]
@@ -191,6 +220,7 @@ class SiteReport(TypedDict, total=False):
     metadata: Dict[str, Any]
     rule_coverage: Dict[str, Any]
     scoring: Dict[str, Any]
+    site_analysis: SiteAnalysis
 
 
 class ContractError(ValueError):

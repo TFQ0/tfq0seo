@@ -216,6 +216,12 @@ class ExportManager:
         performance = page_data.get('performance', {}).get('data', {})
         for key in ('total_resources', 'content_size_mb'):
             flat[key] = performance.get(key, performance.get('metrics', {}).get(key))
+        site = page_data.get('site_analysis', {})
+        for key in ('canonical_targets', 'canonical_status', 'canonical_terminal', 'canonical_hops',
+                    'canonical_cycle_id', 'incoming_links', 'outgoing_links', 'nofollow_links',
+                    'link_depth', 'reachable', 'component'):
+            if key in site:
+                flat[key] = site[key]
         return flat
 
     def export_xlsx(self, data: Dict[str, Any], output_file: Path) -> str:

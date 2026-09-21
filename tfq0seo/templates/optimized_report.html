@@ -512,6 +512,7 @@
         <!-- Overview Tab -->
         <div class="tab-panel active" id="overview">
             {{ rule_overview(scoring_policies, scoring_versions, rule_coverage) }}
+            {% include "site_analysis.html" %}
             {% if executive_summary.quick_wins %}
             <section class="quick-wins">
                 <h3>🎯 Quick Wins (High Impact, Low Effort)</h3>

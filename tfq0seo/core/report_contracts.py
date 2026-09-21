@@ -185,6 +185,104 @@ def _common(data, path):
                 lambda item, name: _records(item, name, _mapping), metrics_path)
 
 
+def _optional_count(value, path):
+    if value is not None:
+        _count(value, path)
+
+
+def _boolean(value, path):
+    if type(value) is not bool:
+        raise ContractError(path, 'must be a boolean')
+
+
+def _page_facts(value, path):
+    """Validate fields consumed during site aggregation, without inventing them."""
+    _mapping(value, path)
+    _fields(value, ('facts_version', 'url', 'base_url'), _text, path)
+    if 'robots' in value:
+        _mapping(value['robots'], path + '.robots')
+        _fields(value['robots'], ('noindex', 'nofollow'), _boolean, path + '.robots')
+    if 'anchors' in value:
+        _records(value['anchors'], path + '.anchors', _mapping)
+        for index, anchor in enumerate(value['anchors']):
+            anchor_path = f'{path}.anchors[{index}]'
+            _required(anchor, ('url', 'attrs'), anchor_path)
+            _fields(anchor, ('url',), lambda item, name: _text(item, name, nullable=True), anchor_path)
+            if 'attrs' in anchor:
+                _mapping(anchor['attrs'], anchor_path + '.attrs')
+                if 'rel' in anchor['attrs']:
+                    rel = anchor['attrs']['rel']
+                    if isinstance(rel, list):
+                        _records(rel, anchor_path + '.attrs.rel', _text)
+                    elif rel is not None:
+                        _text(rel, anchor_path + '.attrs.rel')
+    if 'canonical' in value:
+        canonical_path = path + '.canonical'
+        canonical = value['canonical']
+        _mapping(canonical, canonical_path)
+        _fields(canonical, ('headers_checked',), _boolean, canonical_path)
+        _fields(canonical, ('parse_errors',), _count, canonical_path)
+        if 'declarations' in canonical:
+            _records(canonical['declarations'], canonical_path + '.declarations', _mapping)
+            for index, declaration in enumerate(canonical['declarations']):
+                declaration_path = f'{canonical_path}.declarations[{index}]'
+                _required(declaration, ('url', 'eligible'), declaration_path)
+                _fields(declaration, ('url', 'href'), lambda item, name: _text(item, name, nullable=True), declaration_path)
+                _fields(declaration, ('eligible',), _boolean, declaration_path)
+                _fields(declaration, ('source', 'reason'), _text, declaration_path)
+
+
+def _site_page(value, path):
+    _mapping(value, path)
+    _required(value, ('url', 'canonical_targets', 'canonical_status', 'canonical_terminal', 'canonical_hops',
+                      'incoming_links', 'outgoing_links', 'link_depth'), path)
+    _fields(value, ('url', 'canonical_status'), _text, path)
+    _fields(value, ('canonical_terminal',), lambda item, name: _text(item, name, nullable=True), path)
+    _fields(value, ('canonical_targets',), lambda item, name: _records(item, name, _text), path)
+    _fields(value, ('incoming_links',), _count, path)
+    _fields(value, ('canonical_hops', 'canonical_cycle_id', 'outgoing_links', 'nofollow_links', 'link_depth', 'component'), _optional_count, path)
+    _fields(value, ('facts_available', 'content_complete', 'canonical_headers_checked'), _boolean, path)
+    if value.get('reachable') is not None:
+        _boolean(value['reachable'], path + '.reachable')
+
+
+def _site_analysis(value, path):
+    _mapping(value, path)
+    _required(value, ('version', 'scope', 'coverage', 'canonicals', 'links', 'pages', 'findings'), path)
+    _fields(value, ('version', 'scope'), _text, path)
+    _records(value['pages'], path + '.pages', _site_page)
+    _records(value['findings'], path + '.findings', _issue)
+    _mapping(value['coverage'], path + '.coverage')
+    _fields(value['coverage'], ('inventory_pages', 'pages_with_facts', 'complete_html_pages'), _count, path + '.coverage')
+    _fields(value['coverage'], ('crawl_complete',), _boolean, path + '.coverage')
+    _fields(value['coverage'], ('note',), _text, path + '.coverage')
+    _mapping(value['canonicals'], path + '.canonicals')
+    _fields(value['canonicals'], ('status_counts',), _counts, path + '.canonicals')
+    _fields(value['canonicals'], ('unchecked_targets',), lambda item, name: _records(item, name, _text), path + '.canonicals')
+    _mapping(value['links'], path + '.links')
+    links = value['links']
+    _required(links, ('node_count', 'edge_count', 'roots', 'components', 'unfetched_targets', 'edges', 'depth_method'), path + '.links')
+    _fields(links, ('node_count', 'edge_count'), _count, path + '.links')
+    _fields(links, ('root_source', 'depth_method'), _text, path + '.links')
+    _fields(links, ('roots', 'unfetched_targets'), lambda item, name: _records(item, name, _text), path + '.links')
+    for collection, collection_path in ((links['components'], path + '.links.components'),
+                                        (value['canonicals'].get('cycles', []), path + '.canonicals.cycles')):
+        _records(collection, collection_path, _mapping)
+        for index, group in enumerate(collection):
+            group_path = f'{collection_path}[{index}]'
+            _required(group, ('id', 'urls'), group_path)
+            _count(group['id'], group_path + '.id')
+            _records(group['urls'], group_path + '.urls', _text)
+    _records(links['edges'], path + '.links.edges', _mapping)
+    for index, edge in enumerate(links['edges']):
+        edge_path = f'{path}.links.edges[{index}]'
+        _required(edge, ('source', 'target', 'nofollow', 'target_observed'), edge_path)
+        _fields(edge, ('source', 'target'), _text, edge_path)
+        _fields(edge, ('nofollow', 'target_observed'), _boolean, edge_path)
+    if links['edge_count'] != len(links['edges']) or links['node_count'] != len(value['pages']):
+        raise ContractError(path + '.links', 'node and edge counts must match the recorded graph')
+
+
 def _page(data, path, strict=False):
     _mapping(data, path)
     if strict:
@@ -192,6 +290,8 @@ def _page(data, path, strict=False):
         if data['status'] not in ('complete', 'partial', 'error', 'skipped'):
             raise ContractError(path + '.status', 'must be complete, partial, error, or skipped')
     _common(data, path)
+    _fields(data, ('page_facts',), _page_facts, path)
+    _fields(data, ('site_analysis',), _site_page, path)
     for key in ('status_code', 'content_length'):
         if key in data and (strict or data[key] is not None):
             _count(data[key], path + '.' + key)
@@ -236,6 +336,7 @@ def _site(data, path, strict=False):
                 _mapping(data[key], path + '.' + key)
                 _required(data[key], required, path + '.' + key)
     _common(data, path)
+    _fields(data, ('site_analysis',), _site_analysis, path)
     if 'summary' in data:
         _fields(data['summary'], ('total_pages', 'successful_pages', 'partial_pages', 'failed_pages', 'skipped_pages'), _count, path + '.summary')
     if 'issues' in data:
