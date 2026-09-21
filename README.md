@@ -6,41 +6,215 @@ links. Reports distinguish failed analyses from unavailable measurements.
 
 ## Installation
 
-Python 3.8 or newer is supported. Install from this checkout to use these changes:
+Python 3.8 or newer is required. Install or upgrade the published package from
+PyPI:
 
 ```bash
-python -m pip install .
-# Optional lxml parser, Excel export, and pandas compatibility dependency:
+python -m pip install --upgrade tfq0seo
+```
+
+The base installation supports JSON, HTML, and CSV reports. For Excel (XLSX)
+export and the optional lxml parser, install the `full` extra instead:
+
+```bash
+python -m pip install --upgrade "tfq0seo[full]"
+```
+
+The `full` extra includes `openpyxl`, `lxml`, and the pandas compatibility
+dependency. Keep the quotes around the package name with extras.
+
+To isolate dependencies, optionally create and activate a virtual environment
+**before** running either install command:
+
+```bash
+python -m venv .venv
+```
+
+On Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+On macOS/Linux with Bash or Zsh:
+
+```bash
+source .venv/bin/activate
+```
+
+Verify the installation:
+
+```bash
+tfq0seo --version
+tfq0seo --help
+```
+
+If your shell cannot find `tfq0seo`, use `python -m tfq0seo.cli` in place of
+`tfq0seo` in any command below, using the same Python environment where you
+installed the package:
+
+```bash
+python -m tfq0seo.cli --help
+```
+
+This README describes the current source checkout, which can include improvements
+not yet published to PyPI. To use this checkout, run the following from the
+repository root; omit `[full]` if you only need the base dependencies:
+
+```bash
 python -m pip install ".[full]"
 ```
 
-`python -m pip install tfq0seo` installs the published release, which may differ
-from this checkout. JSON, HTML, and CSV work with the base installation. XLSX
-requires `openpyxl`, included in the `full` extra.
+## Quick start
+
+Replace `https://example.com` with your site's URL. Analyze one page and open
+the resulting `page.html` in a browser:
+
+```bash
+tfq0seo analyze https://example.com --format html --output page.html
+```
+
+For an initial site audit, start with a modest page budget and concurrency:
+
+```bash
+tfq0seo crawl https://example.com --depth 3 --max-pages 100 --concurrent 5 --format html --output site.html
+```
+
+Inspect the report's coverage and failed/skipped pages before interpreting its
+scores. Increase the limits when you need broader coverage. TFQ0SEO analyzes
+the HTML returned by the server; it does not render JavaScript.
 
 ## CLI
 
+Choose the command according to the URLs you want to analyze:
+
+| Command | Use it for |
+| --- | --- |
+| `analyze URL` | One page, such as a landing page or a page you just changed. |
+| `crawl URL` | Discovering and analyzing pages within a site's configured scope. |
+| `batch urls.txt` | A specific list of pages, such as product pages or a regression checklist. |
+| `sitemap URL` | Analyzing eligible URLs from an XML sitemap or sitemap index. |
+| `export` | Converting a saved JSON report to HTML, CSV, or XLSX without crawling again. |
+
+Use `--format` to select the report type and `--output` to select its destination;
+the filename extension does not select the format. `crawl`, `batch`, and
+`sitemap` require an output path. For a single page, explicit JSON output goes
+to stdout when `--output` is omitted:
+
 ```bash
-# Single page; JSON goes to stdout when --output is omitted.
 tfq0seo analyze https://example.com --format json
-
-# Site crawl with explicit scope limits.
-tfq0seo crawl https://example.com --depth 5 --max-pages 500 --concurrent 10 --format html --output report.html
-
-# UTF-8 file: one URL per line; blank lines and # comments are ignored.
-tfq0seo batch urls.txt --format json --output batch.json
-
-# XML sitemap or sitemap index.
-tfq0seo sitemap https://example.com/sitemap.xml --max-pages 500 --format json --output sitemap.json
-
-# Convert an existing page or site report.
-tfq0seo export --input batch.json --format xlsx --output batch.xlsx
 ```
 
-All commands accept `--config config.yaml` (JSON is also supported). Use
-`tfq0seo COMMAND --help` for command options. Incomplete analyses and request
-failures return a nonzero exit code; an explicitly requested report is written
-first so that failures remain inspectable.
+All commands accept `--config config.yaml` (JSON configuration is also
+supported). Profiles, keywords, timeouts, HTML templates, and external-link
+checks are configured in that file. For the available options:
+
+```bash
+tfq0seo crawl --help
+tfq0seo analyze --help
+tfq0seo batch --help
+tfq0seo sitemap --help
+tfq0seo export --help
+```
+
+Incomplete analyses and request failures return a nonzero exit code; an
+explicitly requested report is written first so that failures remain inspectable.
+A low SEO score alone does not cause a nonzero exit code. In scripts and CI,
+retain generated reports even when the analysis command fails.
+
+## Practical audit commands
+
+### Audit once, create several report formats
+
+Save the full JSON report as your reusable audit record, then create a browser
+report and spreadsheet exports from the same results:
+
+```bash
+tfq0seo crawl https://example.com --depth 5 --max-pages 500 --concurrent 5 --format json --output audit.json
+tfq0seo export --input audit.json --format html --output audit.html
+tfq0seo export --input audit.json --format csv --output audit.csv
+tfq0seo export --input audit.json --format xlsx --output audit.xlsx
+```
+
+The export commands do not fetch pages again. Install `tfq0seo[full]` for an
+actual XLSX workbook; without `openpyxl`, the exporter falls back to CSV. JSON
+preserves detailed evidence and graph data; CSV/XLSX provide page-oriented rows.
+
+### Check a selected set of important pages
+
+Save this as `urls.txt`, replacing the example URLs with your own. The file must
+be UTF-8, with one URL per line; blank lines and `#` comments are ignored:
+
+```text
+# Priority pages
+https://example.com/
+https://example.com/products/widget
+https://example.com/contact
+```
+
+```bash
+tfq0seo batch urls.txt --concurrent 5 --format json --output priority-pages.json
+tfq0seo export --input priority-pages.json --format html --output priority-pages.html
+```
+
+This analyzes the supplied URLs rather than discovering a site through links.
+For lists larger than the configured page budget, set `crawler.max_pages` in a
+configuration file and pass it with `--config`.
+
+### Audit URLs listed in a sitemap
+
+Use the sitemap workflow to include eligible listed pages that a link-based
+crawl might not discover:
+
+```bash
+tfq0seo sitemap https://example.com/sitemap.xml --max-pages 500 --format json --output sitemap-audit.json
+tfq0seo export --input sitemap-audit.json --format html --output sitemap-audit.html
+```
+
+Sitemap indexes are supported. Scope, robots rules, and resource limits still
+apply. Set `crawler.max_concurrent` in a configuration file to control this
+command's concurrency.
+
+### Run a deeper audit with keyword and external-link checks
+
+Save the following as `deep-audit.yaml`. It uses all five analyzers, bypasses
+the analysis cache, and sets explicit crawl limits. Replace the example keywords
+with phrases relevant to your content:
+
+```yaml
+profile: deep
+crawler:
+  max_pages: 1000
+  max_depth: 10
+  max_concurrent: 5
+  max_connections_per_host: 2
+  delay_between_requests: 0.5
+  max_crawl_time: 3600
+  respect_robots_txt: true
+analysis:
+  max_analysis_threads: 4
+  target_keywords: [technical SEO, site audit]
+  check_broken_links: true
+  check_internal_links: true
+  check_external_links: true
+  max_external_links_per_page: 20
+  external_link_timeout: 10
+export:
+  html_template: optimized
+```
+
+```bash
+tfq0seo crawl https://example.com --config deep-audit.yaml --format json --output deep-audit.json
+tfq0seo export --input deep-audit.json --config deep-audit.yaml --format html --output deep-audit.html
+```
+
+External-link checks make additional HTTP requests and can increase runtime;
+set `check_external_links: false` when they are unnecessary. The `deep` profile
+expands static analysis coverage through its crawl limits and cache policy; it
+does not enable browser rendering. Larger page budgets also need more memory
+for retained results and report creation.
+
+### Crawl scope and limits
 
 Crawling follows eligible HTTP(S) links in the starting site's hostname/port
 scope, including standard HTTP-to-HTTPS transitions. Redirect destinations are
@@ -50,11 +224,19 @@ fragments do not create separate crawl targets, and excluded patterns still
 apply. Page, depth, response-size, request, and site crawl-time limits bound work.
 Reaching a limit is reported; it is not proof that the entire site was analyzed.
 
+Robots path matching supports `*`, terminal `$`, percent-encoded paths, and
+case-sensitive longest-match precedence, with `Allow` winning ties. Matching
+user-agent groups are combined; `*` groups apply when no specific group matches.
+Sitemap discovery, robots caching, and crawl pacing retain their existing behavior.
+
 ## Configuration
 
 CLI precedence is: built-in/profile defaults, configuration file, `TFQ0SEO_`
 environment variables, then explicitly supplied command options. An omitted
 CLI option does not overwrite a configuration-file value.
+
+For a reusable standard audit, save this as `audit.yaml` and pass
+`--config audit.yaml` to an analysis or export command:
 
 ```yaml
 profile: standard
@@ -86,7 +268,7 @@ analysis:
 export:
   primary_format: html
   output_directory: ./reports
-  html_template: enhanced
+  html_template: optimized
   filename_pattern: "{domain}_{timestamp}_{format}"
 ```
 
@@ -112,11 +294,16 @@ cache size/TTL. Analysis supports weighted category scores and bounded optional
 external link checks. `Config.SUPPORTED_FIELDS` lists the active component
 settings in [config.py](https://github.com/TFQ0/tfq0seo/blob/main/tfq0seo/core/config.py).
 
+Site analysis bounds the fetch-to-analysis handoff to effective crawler
+concurrency plus `analysis.max_analysis_threads`. A slot remains occupied until
+analysis releases the parsed HTML. Slow analysis therefore pauses new fetches;
+`crawl_stats.result_buffer_capacity` and `result_buffer_peak` expose this bound.
+Standalone `Crawler.crawl_site()` still returns its collected fetch records.
+
 `max_memory_mb` is a sampled process-RSS guard checked during page-analysis
-progress, not a hard allocation limit. Synchronous report assembly can exceed
-it; the recorded 2,000-page workload peaked above the default 1,024 MiB value.
-Budget memory for the complete report and use an external process limit when
-a hard bound is required. See the scale validation results below.
+progress, not a hard allocation limit. Complete analyzed results and report
+snapshots still grow with site size, and synchronous report assembly can exceed
+the guard. Budget for the complete report; see the scale validation results below.
 
 Unknown keys, invalid types, conflicting aliases, and retired configuration
 fields fail validation. Active dataclasses and saved configurations expose
@@ -192,6 +379,22 @@ HTML escapes page-supplied text and restricts clickable URLs to HTTP(S). CSV and
 XLSX neutralize formula-like text. The enhanced HTML report uses optional
 Chart.js from a CDN for charts; its page table remains usable without it.
 
+The optimized site template keeps a short issue summary and adds **All findings**:
+search messages, rule IDs, categories, and affected URLs; filter by severity;
+and browse 20 findings per page. Details expose complete evidence on demand.
+This view runs locally in the report and requires JavaScript, without Chart.js
+or network access. JSON retains every finding as well.
+
+JSON, HTML, CSV, and XLSX exports write a temporary file beside the destination,
+close it successfully, and then atomically replace the destination. Rendering,
+serialization, write, and replacement failures preserve an existing report and
+remove the temporary file. JSON and HTML stream their output to reduce memory
+use. Atomic replacement does not promise durability through a power failure.
+
+Generated site reports remain independent of their input page records. Views
+within one report can share nested evidence to avoid redundant copies; treat
+report evidence as read-only or deep-copy a view before editing it independently.
+
 ## Site-wide canonical and link analysis
 
 Completed site reports include `site_analysis`, derived from the supplied page
@@ -252,170 +455,3 @@ seo = analyze_seo(soup, url, facts=facts)
 content = analyze_content(soup, url, facts=facts)
 ```
 
-Keep the source document unchanged while using its snapshot. A supplied
-snapshot must belong to the same document, URL, and explicit header/bot context.
-`headers=None` means unavailable; `{}` means an observed empty header mapping.
-Repeated response headers retain every value. Fetch timings can remain `null`
-and describe their existing network stages rather than browser measurements.
-
-Page results include an additive `page_facts` record with extraction version,
-provenance, hashes, counts, and shared observations. Its default export omits raw
-response-header values, full HTML/text, and script bodies. The extraction
-version also participates in cache identity.
-
-[models.py](https://github.com/TFQ0/tfq0seo/blob/main/tfq0seo/core/models.py) defines fetch, rule, analyzer, page, and site
-contracts and re-exports `PageFacts`. Malformed supplied fields raise
-`ContractError` with a field path before analysis or export. Invalid analyzer
-outputs become explicit analyzer errors with unavailable scores and are not
-cached. Rule validation checks evidence, provenance, applicability, and nested
-observations before merging or scoring.
-
-Report validation checks present fields without rewriting historical rule IDs,
-scores, or unknown extension fields. New producer envelopes receive stricter
-checks. Non-finite numbers and unsupported Python objects are rejected rather
-than silently converted to strings; invalid reports are rejected before opening
-an output file. JSON schema version `1.0` and existing report layouts remain
-supported. Validators are available in
-[report_contracts.py](https://github.com/TFQ0/tfq0seo/blob/main/tfq0seo/core/report_contracts.py).
-
-## Rules, applicability, and scoring
-
-The rule registry in [rules.py](https://github.com/TFQ0/tfq0seo/blob/main/tfq0seo/rules.py) contains immutable definitions
-registered by each analyzer. Every active rule has a stable ID, a category owner,
-severity, recommendation, applicability description, supporting reference URLs,
-and a review date. The reference supports the observation or guidance; numeric
-penalties are TFQ0SEO policy, not weights supplied by search engines.
-
-Each analyzer returns `rule_results` with structured evidence and explicit
-`pass`, `fail`, `informational`, `unknown`, `not_applicable`, or `error` outcomes.
-`issues` contains failed checks and informational observations. Unknown and
-inapplicable evaluations include a reason and remain visible in rule coverage;
-they are never silently counted as passes. Disabling an analyzer does not imply
-that its rules passed. A rule execution error makes the page partial and avoids
-caching that incomplete analysis.
-
-Scoring policy **2.0** deducts 15, 7, or 3 points for a failed, applicable,
-scored critical, warning, or notice rule. Each rule is deducted once per page,
-even when multiple analyzers observe it. Its registered owner receives the
-deduction; if that analyzer is unavailable, the first reporting analyzer in the
-fixed order `seo, content, technical, performance, links` receives it. Category
-scores start at 100 and floor at zero. The overall score uses the configured
-category weights, normalized across available categories. Zero weights are
-respected. Site scores average the available page scores.
-
-Page `scoring.deductions` records rule IDs, observers, category attribution, and
-penalties. Recommendations use the registry ID rather than matching message
-text. Duplicate findings retain all observations, and site issue groups retain
-evidence for every affected page. Diagnostic sub-scores inside analyzer data are
-not additive components of the overall score.
-
-Informational, unknown, inapplicable, and errored evaluations incur no penalty.
-For example, an observed `noindex` directive is reported without assuming it is
-unintentional. Optional social metadata, keyword-density targets, metadata
-length heuristics, and unmeasured browser effects are not universal failures.
-A high score therefore describes the scored observations and must be read
-alongside coverage; it does not establish that unavailable checks passed.
-
-JSON keeps schema version `1.0` with additive rule fields and records independent
-ruleset/scoring versions. Scores from policy 2.0 are not directly comparable to
-older reports. Cache identity includes both versions. Reference review dates
-record an actual review, not automatic proof that a document is still current.
-
-When extending an analyzer, register the definition, evaluate it with
-`RuleCollector.check`, supply the observed evidence and applicability, and derive
-findings/recommendations/scores through the shared helpers. Test positive,
-negative, unavailable, and inapplicable cases. Reuse shared IDs for the same
-underlying condition and increment the ruleset version when changing rule
-behavior; increment the scoring version when changing the deduction policy.
-
-## Development and verification
-
-```bash
-python -m venv .venv
-# Activate .venv using your shell's command, then:
-python -m pip install -e ".[test,full]" "setuptools>=61" build wheel twine
-python -m pytest
-
-python -m build --no-isolation
-python -m twine check dist/*
-# Install the generated .whl with --no-deps --force-reinstall, then:
-python -I tests/wheel_smoke.py
-
-# Reproducible offline analysis/report workload; no HTTP requests:
-python -m tfq0seo.benchmark --pages 500 --output benchmark.json
-# Compare varied fixtures and retain repeated measurements and environment:
-python -m tfq0seo.benchmark --suite --pages 500 2000 --repetitions 3 --timeout-seconds 600 --output scale.json
-```
-
-Tests cover analyzers, configuration precedence, crawl scope/robots/retries,
-timeouts and cancellation, report completeness, CLI failure handling, export
-safety, and a real 500-page crawl against a local HTTP fixture. Tests block
-non-loopback socket connections and do not depend on public websites.
-
-The benchmark measures fixture parsing, static analysis, and aggregation with
-the analysis cache disabled. It reports complete/partial/failed/skipped counts,
-successful-page throughput, elapsed time, and sampled process RSS. A sampled
-maximum can miss short memory peaks. Results depend on the machine and fixture;
-they are not browser-performance measurements or a production-site capacity
-guarantee. Basic, content-heavy, link-dense, and mixed scenarios retain every
-raw measurement, workload/source fingerprints, full effective configuration,
-dependency versions, and per-case summaries. See the
-[scale validation guide and recorded measurements](https://github.com/TFQ0/tfq0seo/blob/main/docs/scale-validation.md)
-for workload definitions, resource limits, and measured results. Network
-benchmark functions remain explicit opt-in Python APIs.
-
-GitHub Actions runs regression tests and distribution checks across Python 3.8,
-3.12, and 3.14, with Windows and Linux jobs and base/optional dependencies. The
-release workflow requires these checks and a release tag matching `v` plus the
-package version before publishing.
-
-## Publishing to PyPI
-
-Releases use [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
-through GitHub Actions. No PyPI API token or password is used by the workflow.
-Tests and the package build run without OIDC permission. The separate `deploy`
-job downloads the validated distributions and is the only job with
-`id-token: write`, which allows it to request a short-lived publishing identity.
-
-Complete this one-time setup before publishing a release:
-
-1. In the `TFQ0/tfq0seo` GitHub repository, open **Settings → Environments**
-   and create or verify the environment named `pypi`. Restrict its deployment
-   tags to `v*`; optionally require a reviewer if available for the repository.
-2. On PyPI, open **Your projects → tfq0seo → Manage → Publishing** and add a
-   GitHub publisher to the existing project with these exact values:
-
-   | PyPI field | Value |
-   | --- | --- |
-   | Owner | `TFQ0` |
-   | Repository name | `tfq0seo` |
-   | Workflow name | `tfq0seo-publish.yml` |
-   | Environment name | `pypi` |
-
-   The workflow field is the filename, without `.github/workflows/`, rather
-   than the display name `Publish to PyPI`. The environment must match the
-   workflow. See [PyPI's publisher setup guide](https://docs.pypi.org/trusted-publishers/adding-a-publisher/).
-3. Commit and push the release workflow and its reusable
-   `.github/workflows/tests.yml` together with the intended package changes.
-   Keep the registered workflow filename unchanged.
-
-For each release, update `tfq0seo/__init__.py` to a new, unused package version,
-commit it, then create and push a tag that is `v` followed by that version
-(for example, `v3.0.0`). Pushing a `v*` tag triggers the workflow; no package-name
-prefix or GitHub release is required. Branch pushes, other tag names, and tag
-deletions do not publish. The version check reads the built wheel's metadata
-without installing or hard-coding the package name. Approve the `pypi`
-deployment if a reviewer is required. Tests and distribution checks must pass
-before the upload starts.
-
-After the first successful Trusted Publishing release, revoke the old PyPI
-upload token and remove its GitHub Actions secret if it is no longer used by
-another workflow. Do not add `username` or `password` inputs to the publishing
-action; they would select credential-based authentication instead of OIDC.
-
-Local tests cannot exercise GitHub's OIDC exchange with PyPI. The first release
-run verifies the registered publisher end to end. If PyPI reports an invalid
-publisher, compare the repository owner, repository name, workflow filename,
-and environment against the values above before retrying. PyPI does not allow
-an uploaded distribution filename to be reused, so retries after a successful
-upload require checking what was already published.

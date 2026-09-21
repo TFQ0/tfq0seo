@@ -11,6 +11,58 @@ import pytest
 from tfq0seo import benchmark
 
 
+def test_pipeline_measures_real_loopback_crawl_and_all_exports(monkeypatch):
+    def no_dns(*args, **kwargs):
+        raise AssertionError('The pipeline must not resolve external hosts')
+
+    connect = socket.socket.connect
+
+    def loopback_only(sock, address):
+        if sock.family in (socket.AF_INET, socket.AF_INET6):
+            assert address[0] in ('127.0.0.1', '::1'), address
+        return connect(sock, address)
+
+    monkeypatch.setattr(socket, 'getaddrinfo', no_dns)
+    monkeypatch.setattr(socket.socket, 'connect', loopback_only)
+    result = asyncio.run(benchmark.benchmark_pipeline(3, 'mixed', timeout_seconds=30))
+    assert result['status'] == 'complete', result['errors']
+    assert result['http_requests'] == {'total': 4, 'robots': 1, 'pages': 3}
+    assert result['successful_pages'] == result['report_completeness']['retained_rows'] == 3
+    assert result['report_completeness']['complete']
+    assert result['result_buffer']['peak'] <= result['result_buffer']['capacity']
+    assert {item['format'] for item in result['exports']} == {'json', 'html', 'csv', 'xlsx'}
+    assert all(item['bytes'] > 0 and len(item['sha256']) == 64 for item in result['exports'])
+    assert result['export_duration_seconds'] > 0
+    assert result['memory_sampled_peak_mb'] >= result['memory_rss_start_mb']
+
+
+def test_pipeline_export_failure_is_reported(monkeypatch):
+    def fail(*args, **kwargs):
+        raise OSError('simulated export failure')
+    monkeypatch.setattr('tfq0seo.exporters.base.ExportManager.export', fail)
+    result = asyncio.run(benchmark.benchmark_pipeline(1))
+    assert result['status'] == 'failed'
+    assert result['report_completeness']['complete']
+    assert 'simulated export failure' in result['errors'][0]
+    assert result['exports'] == []
+
+
+def test_pipeline_deadline_records_failure_and_closes_crawl():
+    result = asyncio.run(benchmark.benchmark_pipeline(3, timeout_seconds=0.000001))
+    assert result['status'] == 'failed'
+    assert result['timed_out'] is True
+    assert result['exports'] == []
+
+
+def test_pipeline_cli_selection(tmp_path, monkeypatch):
+    run = AsyncMock(return_value={'status': 'complete'})
+    monkeypatch.setattr(benchmark, 'benchmark_pipeline', run)
+    path = tmp_path / 'pipeline.json'
+    assert benchmark.main(['--pipeline', '--pages', '2', '--output', str(path)]) == 0
+    run.assert_awaited_once_with(2, scenario='basic', timeout_seconds=None)
+    assert json.loads(path.read_text())['suite']['workload'] == 'pipeline'
+
+
 @pytest.mark.parametrize('result', [None, {}, {'url': 'https://example.test/', 'status': 'error', 'error': 'Timed out'}])
 def test_failed_single_analysis_never_becomes_successful_throughput(monkeypatch, result):
     analyzer = SimpleNamespace(analyze_url=AsyncMock(return_value=result))

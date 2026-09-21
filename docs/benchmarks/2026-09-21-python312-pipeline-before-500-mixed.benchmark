@@ -1,0 +1,333 @@
+{
+  "benchmark_schema_version": 2,
+  "status": "complete",
+  "benchmarks": [
+    {
+      "type": "pipeline",
+      "scenario": "mixed",
+      "requested_pages": 500,
+      "fixture_version": 1,
+      "network_access": "loopback HTTP only",
+      "config": {
+        "crawler": {
+          "max_concurrent": 20,
+          "max_connections_per_host": 5,
+          "timeout": 30,
+          "connect_timeout": 10,
+          "read_timeout": 30,
+          "user_agent": "tfq0seo/3.0.0 (+https://github.com/TFQ0/tfq0seo)",
+          "custom_headers": {},
+          "follow_redirects": true,
+          "max_redirects": 10,
+          "max_pages": 500,
+          "max_depth": 2,
+          "max_page_size": 10485760,
+          "max_crawl_time": 600,
+          "delay_between_requests": 0,
+          "adaptive_delay": false,
+          "min_delay": 0.0,
+          "max_delay": 5.0,
+          "rate_limit_per_second": null,
+          "respect_robots_txt": true,
+          "robots_cache_ttl": 86400,
+          "crawl_delay_factor": 1.0,
+          "allowed_domains": [],
+          "allowed_schemes": [
+            "http",
+            "https"
+          ],
+          "excluded_patterns": [
+            "/assets/"
+          ],
+          "store_html": false,
+          "max_retries": 3,
+          "retry_on_status": [
+            429,
+            500,
+            502,
+            503,
+            504
+          ],
+          "retry_backoff_factor": 2.0,
+          "cache_enabled": false,
+          "cache_ttl": 3600,
+          "cache_size_mb": 100,
+          "use_sitemap": false,
+          "discover_sitemaps": true,
+          "use_connection_pooling": true,
+          "dns_cache_ttl": 300,
+          "verify_ssl": true,
+          "proxy": null
+        },
+        "analysis": {
+          "enabled_analyzers": [
+            "seo",
+            "content",
+            "technical",
+            "performance",
+            "links"
+          ],
+          "analysis_mode": "standard",
+          "parallel_analysis": true,
+          "max_analysis_threads": 4,
+          "check_external_links": false,
+          "check_internal_links": true,
+          "check_broken_links": true,
+          "max_external_links_per_page": 100,
+          "external_link_timeout": 10,
+          "target_keywords": [],
+          "check_content_uniqueness": true,
+          "score_weights": {
+            "seo": 0.3,
+            "content": 0.25,
+            "technical": 0.2,
+            "performance": 0.15,
+            "links": 0.1
+          }
+        },
+        "export": {
+          "formats": [
+            "html"
+          ],
+          "primary_format": "html",
+          "html_template": "optimized",
+          "output_directory": "./reports",
+          "filename_pattern": "{domain}_{timestamp}_{format}"
+        },
+        "profile": "standard",
+        "version": "3.0.0",
+        "debug": false,
+        "continue_on_error": true,
+        "max_memory_mb": 1024
+      },
+      "timeout_seconds": 600.0,
+      "timed_out": false,
+      "timeout_scope": "Cooperative crawl deadline and checks between synchronous report/export stages.",
+      "workload": "Loopback HTTP including robots, bounded crawling, static analysis, report generation, atomic exports, and file hashing. No browser or remote requests.",
+      "exports": [
+        {
+          "format": "json",
+          "bytes": 185010142,
+          "sha256": "8585837c43f7fad3f50a0f70bd2ab5339bbb981c58a3b50086e9de3b7a08817c",
+          "duration_seconds": 32.70391209999798
+        },
+        {
+          "format": "html",
+          "bytes": 2303930,
+          "sha256": "31642cfc28038fe755803f73037f1d8ac4de670461c794a5e60d0d68286c2cd3",
+          "duration_seconds": 6.0134153999970295
+        },
+        {
+          "format": "csv",
+          "bytes": 151902,
+          "sha256": "b4b04f22e51c03dbb3f5ff4a271c9606189c7ea43c145a5a7bef288386310755",
+          "duration_seconds": 5.90327430004254
+        },
+        {
+          "format": "xlsx",
+          "bytes": 68017,
+          "sha256": "bbedd580cab6811edad1182edf2c3d533ebd006c9ed69cea9bf96748ed2fc59d",
+          "duration_seconds": 6.225402900017798
+        }
+      ],
+      "unavailable_exports": [],
+      "report_completeness": {
+        "expected_pages": 500,
+        "retained_rows": 500,
+        "unique_urls": 500,
+        "missing_urls": 0,
+        "unexpected_urls": 0,
+        "duplicate_rows": 0,
+        "complete": true
+      },
+      "readability": {
+        "status_counts": {
+          "unavailable": 334,
+          "not_requested": 166
+        },
+        "missing_resources": [
+          "nltk:corpora/cmudict"
+        ]
+      },
+      "fixture_sha256": "9b466c042ddc42877eac4deff3a002770353bd5b10bb9955707ea3dfab1783ae",
+      "fixture_transform": "Canonical origin replaced by loopback origin; seed fanout to all fixture pages. Hash uses benchmark.test before origin substitution.",
+      "analysis_duration_seconds": 46.35652129998198,
+      "http_requests": {
+        "total": 501,
+        "robots": 1,
+        "pages": 500
+      },
+      "result_buffer": {
+        "capacity": null,
+        "peak": null
+      },
+      "report_duration_seconds": 19.603760299971327,
+      "report_status": "complete",
+      "report_summary": {
+        "total_pages": 500,
+        "successful_pages": 500,
+        "partial_pages": 0,
+        "failed_pages": 0,
+        "skipped_pages": 0,
+        "analysis_mode": "standard",
+        "analysis_timestamp": 1789970223.7572083,
+        "analysis_duration": 46.346402645111084,
+        "crawl_complete": true,
+        "limits_reached": [],
+        "discovery_errors": [],
+        "scope_note": "Results describe fetched pages; unvisited targets remain unchecked."
+      },
+      "export_duration_seconds": 50.846004700055346,
+      "status": "complete",
+      "successful_pages": 500,
+      "partial_pages": 0,
+      "failed_pages": 0,
+      "skipped_pages": 0,
+      "observed_results": 500,
+      "missing_results": 0,
+      "pages_analyzed": 500,
+      "pages_per_second": 4.263995287036294,
+      "avg_time_per_page": 0.2345218352000229,
+      "duration_seconds": 117.26091760001145,
+      "clock": "perf_counter",
+      "memory_rss_start_mb": 84.285,
+      "memory_rss_end_mb": 404.109,
+      "memory_rss_delta_mb": 319.824,
+      "memory_sampled_peak_mb": 1398.805,
+      "memory_sample_count": 1587,
+      "memory_sampling_interval_seconds": 0.05,
+      "memory_measurement": "Sampled process RSS; allocations between samples may be missed.",
+      "memory_used_mb": 319.824,
+      "errors": [],
+      "timestamp": "2026-09-21T05:57:57.943724+00:00",
+      "repetition": 1,
+      "run_order": 1
+    }
+  ],
+  "summaries": [
+    {
+      "scenario": "mixed",
+      "requested_pages": 500,
+      "runs": 1,
+      "complete_runs": 1,
+      "partial_runs": 0,
+      "failed_runs": 0,
+      "metrics_scope": "Only complete runs; inspect raw outcomes for excluded failed or partial runs.",
+      "metrics": {
+        "duration_seconds": {
+          "median": 117.26091760001145,
+          "min": 117.26091760001145,
+          "max": 117.26091760001145
+        },
+        "analysis_duration_seconds": {
+          "median": 46.35652129998198,
+          "min": 46.35652129998198,
+          "max": 46.35652129998198
+        },
+        "report_duration_seconds": {
+          "median": 19.603760299971327,
+          "min": 19.603760299971327,
+          "max": 19.603760299971327
+        },
+        "export_duration_seconds": {
+          "median": 50.846004700055346,
+          "min": 50.846004700055346,
+          "max": 50.846004700055346
+        },
+        "pages_per_second": {
+          "median": 4.263995287036294,
+          "min": 4.263995287036294,
+          "max": 4.263995287036294
+        },
+        "memory_rss_delta_mb": {
+          "median": 319.824,
+          "min": 319.824,
+          "max": 319.824
+        },
+        "memory_sampled_peak_mb": {
+          "median": 1398.805,
+          "min": 1398.805,
+          "max": 1398.805
+        }
+      }
+    }
+  ],
+  "system_info": {
+    "os": {
+      "system": "Windows",
+      "release": "11",
+      "version": "10.0.26200"
+    },
+    "architecture": "AMD64",
+    "cpu_model": "AMD Ryzen 7 7735HS with Radeon Graphics",
+    "cpu_count": 16,
+    "physical_cpu_count": 8,
+    "memory_total_gb": 63.21,
+    "python_version": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+    "python_implementation": "CPython",
+    "package_version": "3.0.0",
+    "installed_distribution_version": "3.0.0",
+    "schema_version": "1.0",
+    "ruleset_version": "2026.09.21",
+    "scoring_version": "2.0",
+    "facts_version": "1.1",
+    "direct_dependencies": {
+      "aiohttp": "3.14.3",
+      "beautifulsoup4": "4.15.0",
+      "click": "8.5.0",
+      "jinja2": "3.1.6",
+      "rich": "15.0.0",
+      "textstat": "0.7.13",
+      "validators": "0.35.0",
+      "pyyaml": "6.0.3",
+      "python-dateutil": "2.9.0.post0",
+      "urllib3": "2.7.0",
+      "psutil": "7.2.2"
+    },
+    "optional_dependencies": {
+      "lxml": "6.1.3",
+      "openpyxl": "3.1.5",
+      "pandas": "3.0.5"
+    },
+    "readability_dependencies": {
+      "nltk": "3.10.3",
+      "pyphen": "0.18.1",
+      "cmudict": null
+    },
+    "source_fingerprint": {
+      "algorithm": "sha256",
+      "scope": "package Python and HTML template paths and bytes",
+      "file_count": 28,
+      "digest": "8c658c7a410533c8f171555a11aa782edafbc776cd47e65a10b7bc82e78ebbc9"
+    },
+    "timestamp": "2026-09-21T05:56:00.468005+00:00"
+  },
+  "source_unchanged_during_suite": true,
+  "errors": [],
+  "suite": {
+    "scenarios": [
+      "mixed"
+    ],
+    "page_counts": [
+      500
+    ],
+    "repetitions": 1,
+    "workload": "pipeline",
+    "timeout_seconds": 600.0,
+    "order": "Page counts, then scenarios, then repetitions, in supplied order.",
+    "isolation": "Same process; fresh analyzer per run, disabled page cache; library caches and allocator state may remain warm."
+  },
+  "network_guard": {
+    "policy": "Block non-loopback DNS and TCP connections",
+    "blocked_attempts": {
+      "dns": 0,
+      "external_connections": 0
+    }
+  },
+  "comparison": {
+    "implementation": "before",
+    "baseline_commit": "2d512e4d9c264cf628e9b9a5c94e770d4ef83198",
+    "baseline_harness": "Current benchmark.py copied into a git archive of the baseline, with absent buffer counters reported as null.",
+    "process_isolation": "Fresh Python process per case; no parallel test or benchmark process."
+  }
+}

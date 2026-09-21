@@ -576,12 +576,13 @@
                 
                 {% if aggregated_issues %}
                     <h4>Top Issues (Aggregated)</h4>
+                    <p><a href="#all-findings">Search all {{ issues|length }} findings</a></p>
                     {% for issue in aggregated_issues[:20] %}
                     <div class="aggregated-issue {{ issue.severity }}" onclick="this.classList.toggle('expanded')">
                         <div class="issue-header">
                             <div>
                                 <strong>[{{ issue.category }}]</strong> {{ issue.message }}
-                            {{ rule_finding(issue) }}
+                            {{ rule_finding(issue, page_limit=5) }}
                             </div>
                             <div class="issue-count-badge">
                                 {{ issue.count }} occurrence{% if issue.count > 1 %}s{% endif %}
@@ -612,6 +613,7 @@
                     </div>
                     {% endfor %}
                 {% endif %}
+                {% include 'findings.html' %}
             </section>
         </div>
         

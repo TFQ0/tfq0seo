@@ -10,7 +10,7 @@
 </style>
 {%- endmacro %}
 
-{% macro finding(issue) -%}
+{% macro finding(issue, page_limit=none) -%}
 {% if issue.get('rule_id') or issue.get('status') or issue.get('applicability') or issue.get('source') or issue.get('references') or issue.get('reviewed_on') or 'evidence' in issue %}
 <div class="rule-metadata" data-rule-id="{{ issue.get('rule_id', '') }}">
     {% if issue.get('rule_id') %}<p><strong>Rule:</strong> <code>{{ issue.rule_id }}</code></p>{% endif %}
@@ -38,7 +38,9 @@
     <details class="rule-evidence"><summary>Combined observations</summary><pre>{{ issue.observations|json_text }}</pre></details>
     {% endif %}
     {% if issue.get('evidence_by_page') %}
-    <details class="rule-evidence"><summary>Evidence by affected page</summary><pre>{{ issue.evidence_by_page|json_text }}</pre></details>
+    <details class="rule-evidence"><summary>Evidence by affected page</summary>
+    {% if page_limit and issue.evidence_by_page|length > page_limit %}<p>First {{ page_limit }} entries. Open the finding in All findings for the complete evidence.</p>{% endif %}
+    <pre>{{ (issue.evidence_by_page[:page_limit] if page_limit else issue.evidence_by_page)|json_text }}</pre></details>
     {% endif %}
 </div>
 {% endif %}

@@ -1,5 +1,99 @@
 # Offline scale validation
 
+## Complete crawl and export pipeline
+
+Use `--pipeline` to measure real HTTP requests against a temporary loopback
+server, followed by static analysis, report generation, and atomic JSON, HTML,
+CSV, and (when installed) XLSX exports:
+
+```sh
+python -m tfq0seo.benchmark --pipeline --scenario mixed --pages 500 2000 --repetitions 2 --timeout-seconds 600 --output pipeline.json
+```
+
+The server serves the existing deterministic fixtures. Their canonical origin
+is replaced by the loopback origin, and the seed links to every fixture page
+so crawl depth does not limit coverage. Asset paths and off-site destinations
+are excluded. Robots rules and normal HTTP collection remain enabled; there
+is no remote website or browser workload. A hash identifies the transformed
+fixtures using a stable origin before the random loopback port is substituted.
+
+Each fresh analyzer disables page caching and retains the standard 1,024 MiB
+progress guard. The handoff is bounded to effective fetch concurrency plus
+analysis threads. Metrics record that capacity and observed peak, request
+counts, page outcomes, exact retained-URL completeness, readability resource
+availability, report time, each export's time/size/SHA-256, and total sampled
+process RSS. Exports use temporary directories that are removed afterward.
+File hashing is included in total time, but file reparsing and browser loading
+are not. Regression tests check exported content; the findings controls are
+also verified in a browser.
+Missing XLSX support is explicitly listed in `unavailable_exports`.
+
+Pipeline and offline timings are different workloads and must not be compared
+as equivalent throughput. Both modes now fingerprint package Python and HTML
+templates, including the findings JavaScript. Older evidence below fingerprints
+Python only. The cooperative deadline covers the crawl and checks between
+report/export stages; synchronous work can overrun it. Use a supervisor for a
+hard deadline. Incomplete runs and export failures remain failures in the output.
+
+### Pipeline measurements, 21 September 2026
+
+Measured on the same Windows 11 machine described below, using Python 3.12.14
+and its full optional dependencies. Each case ran once in a fresh Python
+process, with no parallel tests or benchmarks. A supervisor imposed a
+900-second hard timeout; each run also used a 600-second cooperative deadline.
+Non-loopback DNS and TCP were blocked and counted.
+
+The baseline is an archive of commit
+`2d512e4d9c264cf628e9b9a5c94e770d4ef83198`, using the current benchmark harness
+to measure the original implementation. Absent buffer counters are recorded
+as `null`. The updated runs use this working tree's implementation. The
+500-page cases have identical effective configuration, fixture hashes, and
+readability availability. Source fingerprints remained stable within each run;
+the two updated runs share fingerprint
+`adc313afdf65ae80493ad5a9a83de0894e883ea505ba04d14266f8538b77d63c`.
+
+| Implementation | Mixed pages | Crawl + analysis (s) | Report (s) | Exports (s) | Total (s) | Peak sampled RSS (MiB) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Original | 500 | 46.36 | 19.60 | 50.85 | 117.26 | 1,398.81 |
+| Updated | 500 | 30.00 | 13.58 | 33.53 | 77.66 | 386.50 |
+| Updated | 2,000 | 120.98 | 54.90 | 129.61 | 307.31 | 1,297.77 |
+
+At 500 pages, observed peak RSS fell 72.37% and total duration fell 33.77%.
+These are single-run observations, not confidence intervals or capacity
+guarantees. The updated 2,000-page result measures more work than the older
+analysis-only benchmark below, so their elapsed times are not comparable.
+
+All three cases retained every expected URL exactly once, completed every page,
+and wrote JSON, HTML, CSV, and XLSX successfully. They made respectively 501,
+501, and 2,001 HTTP requests, including one robots request per case, with zero
+external network attempts, missing pages, partial/failed/skipped pages, or
+timeouts. Both updated runs reached, and stayed within, the 24-slot handoff
+capacity (10 fetch slots plus 14 analysis threads on this machine).
+
+The 2,000-page pipeline still peaked at approximately 1.27 GiB, above the
+1,024 MiB progress guard. Complete results and the independent report snapshot
+remain proportional to site size; bounded HTML buffering is not a hard process
+memory limit. Its complete JSON file was 706.82 MiB and HTML file 5.68 MiB.
+Streaming avoids retaining those entire serialized files in Python memory.
+The local NLTK `cmudict` resource remained absent, with unavailable readability
+estimates recorded explicitly, so those formulas were not measured.
+
+Raw evidence (JSON content):
+
+- [Original, 500 mixed pages](benchmarks/2026-09-21-python312-pipeline-before-500-mixed.benchmark)
+- [Updated, 500 mixed pages](benchmarks/2026-09-21-python312-pipeline-after-500-mixed.benchmark)
+- [Updated, 2,000 mixed pages](benchmarks/2026-09-21-python312-pipeline-after-2000-mixed.benchmark)
+
+Verification included a complete 914-test pass on Python 3.14, the Python 3.12
+suite plus the corrected crawler-stub regression, focused export-failure tests,
+wheel/sdist validation, and an isolated installed-wheel smoke test. Browser
+checks covered all three finding pages, the last page's disabled Next button,
+rule/URL search, severity filtering, clearing search, empty results, and inert
+untrusted evidence. Raw benchmark artifacts were validated for complete
+outcomes, stable source hashes, matching 500-page inputs, and all four exports.
+
+## Historical analysis-only workload
+
 `python -m tfq0seo.benchmark` runs the original 500-page basic fixture without HTTP requests. It measures fixture generation, HTML parsing, the configured static analyzers, site report generation, and verification that every expected URL remains in the report. It does not measure crawling, remote latency, browser rendering, or HTML/CSV/XLSX export.
 
 ```sh
