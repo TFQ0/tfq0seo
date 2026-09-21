@@ -1,0 +1,1947 @@
+{
+  "benchmark_schema_version": 2,
+  "status": "complete",
+  "benchmarks": [
+    {
+      "type": "offline",
+      "fixture_version": 1,
+      "scenario": "basic",
+      "requested_pages": 500,
+      "network_access": false,
+      "config": {
+        "crawler": {
+          "max_concurrent": 20,
+          "max_connections_per_host": 5,
+          "timeout": 30,
+          "connect_timeout": 10,
+          "read_timeout": 30,
+          "user_agent": "tfq0seo/3.0.0 (+https://github.com/TFQ0/tfq0seo)",
+          "custom_headers": {},
+          "follow_redirects": true,
+          "max_redirects": 10,
+          "max_pages": 500,
+          "max_depth": 5,
+          "max_page_size": 10485760,
+          "max_crawl_time": 3600,
+          "delay_between_requests": 0.0,
+          "adaptive_delay": true,
+          "min_delay": 0.0,
+          "max_delay": 5.0,
+          "rate_limit_per_second": null,
+          "respect_robots_txt": true,
+          "robots_cache_ttl": 86400,
+          "crawl_delay_factor": 1.0,
+          "allowed_domains": [],
+          "allowed_schemes": [
+            "http",
+            "https"
+          ],
+          "excluded_patterns": [
+            "\\.pdf$",
+            "\\.zip$",
+            "\\.exe$",
+            "\\.dmg$",
+            "/wp-admin",
+            "/admin",
+            "/login",
+            "\\?.*session",
+            "\\?.*utm_"
+          ],
+          "store_html": false,
+          "max_retries": 3,
+          "retry_on_status": [
+            429,
+            500,
+            502,
+            503,
+            504
+          ],
+          "retry_backoff_factor": 2.0,
+          "cache_enabled": false,
+          "cache_ttl": 3600,
+          "cache_size_mb": 100,
+          "use_sitemap": true,
+          "discover_sitemaps": true,
+          "use_connection_pooling": true,
+          "dns_cache_ttl": 300,
+          "verify_ssl": true,
+          "proxy": null
+        },
+        "analysis": {
+          "enabled_analyzers": [
+            "seo",
+            "content",
+            "technical",
+            "performance",
+            "links"
+          ],
+          "analysis_mode": "standard",
+          "parallel_analysis": true,
+          "max_analysis_threads": 4,
+          "check_external_links": false,
+          "check_internal_links": true,
+          "check_broken_links": true,
+          "max_external_links_per_page": 100,
+          "external_link_timeout": 10,
+          "target_keywords": [],
+          "check_content_uniqueness": true,
+          "score_weights": {
+            "seo": 0.3,
+            "content": 0.25,
+            "technical": 0.2,
+            "performance": 0.15,
+            "links": 0.1
+          }
+        },
+        "export": {
+          "formats": [
+            "html"
+          ],
+          "primary_format": "html",
+          "html_template": "optimized",
+          "output_directory": "./reports",
+          "filename_pattern": "{domain}_{timestamp}_{format}"
+        },
+        "profile": "standard",
+        "version": "3.0.0",
+        "debug": false,
+        "continue_on_error": true,
+        "max_memory_mb": 1024
+      },
+      "fixture": {
+        "version": 1,
+        "generated_pages": 500,
+        "html_bytes": 209670,
+        "dom_elements": 5000,
+        "href_references": 500,
+        "image_elements": 0,
+        "analyzed_word_count": 8500,
+        "pages_with_word_count": 500,
+        "variants": {
+          "basic": 500,
+          "content-heavy": 0,
+          "link-dense": 0
+        },
+        "sha256": "6353532d2488bb21abd01d87b3a94c596b050d10e120e9ab48a79baf07d01884"
+      },
+      "timeout_seconds": 360.0,
+      "timed_out": false,
+      "timeout_scope": "Cooperative checks between pages and after reporting; synchronous work can overrun the deadline.",
+      "report_completeness": {
+        "expected_pages": 500,
+        "retained_rows": 500,
+        "unique_urls": 500,
+        "missing_urls": 0,
+        "unexpected_urls": 0,
+        "duplicate_rows": 0,
+        "complete": true
+      },
+      "readability": {
+        "status_counts": {
+          "not_requested": 500
+        },
+        "missing_resources": []
+      },
+      "workload": "Fixture generation, HTML parsing, static analysis, site report aggregation and retained-URL verification; no HTTP, browser or export measurement",
+      "analysis_duration_seconds": 24.186609499971382,
+      "report_duration_seconds": 16.15168629999971,
+      "report_pages": 500,
+      "report_status": "complete",
+      "report_summary": {
+        "total_pages": 500,
+        "successful_pages": 500,
+        "partial_pages": 0,
+        "failed_pages": 0,
+        "skipped_pages": 0,
+        "analysis_mode": "standard",
+        "analysis_timestamp": 1789962562.9254942,
+        "analysis_duration": 0,
+        "crawl_complete": false,
+        "limits_reached": [],
+        "discovery_errors": [],
+        "scope_note": "Results describe fetched pages; unvisited targets remain unchecked."
+      },
+      "rule_coverage": {
+        "counts": {
+          "pass": 18000,
+          "fail": 0,
+          "informational": 2000,
+          "unknown": 1000,
+          "not_applicable": 13000,
+          "error": 0
+        },
+        "assessed": 20000,
+        "total": 34000,
+        "ratio": 0.9523809523809523,
+        "scope": "Counts are unique rule evaluations per page, not a complete site inventory."
+      },
+      "site_analysis": {
+        "version": "1.0",
+        "coverage": {
+          "inventory_pages": 500,
+          "pages_with_facts": 500,
+          "complete_html_pages": 500,
+          "crawl_complete": false,
+          "note": "A completed crawl still obeys its configured scope. Missing targets and paths remain unverified."
+        },
+        "node_count": 500,
+        "edge_count": 500,
+        "finding_count": 0
+      },
+      "status": "complete",
+      "successful_pages": 500,
+      "partial_pages": 0,
+      "failed_pages": 0,
+      "skipped_pages": 0,
+      "observed_results": 500,
+      "missing_results": 0,
+      "pages_analyzed": 500,
+      "pages_per_second": 12.366761225640792,
+      "avg_time_per_page": 0.08086191540001891,
+      "duration_seconds": 40.43095770000946,
+      "clock": "perf_counter",
+      "memory_rss_start_mb": 76.902,
+      "memory_rss_end_mb": 321.105,
+      "memory_rss_delta_mb": 244.203,
+      "memory_sampled_peak_mb": 431.445,
+      "memory_sample_count": 553,
+      "memory_sampling_interval_seconds": 0.05,
+      "memory_measurement": "Sampled process RSS; allocations between samples may be missed.",
+      "memory_used_mb": 244.203,
+      "errors": [],
+      "timestamp": "2026-09-21T03:49:25.429868+00:00",
+      "repetition": 1,
+      "run_order": 1
+    },
+    {
+      "type": "offline",
+      "fixture_version": 1,
+      "scenario": "basic",
+      "requested_pages": 500,
+      "network_access": false,
+      "config": {
+        "crawler": {
+          "max_concurrent": 20,
+          "max_connections_per_host": 5,
+          "timeout": 30,
+          "connect_timeout": 10,
+          "read_timeout": 30,
+          "user_agent": "tfq0seo/3.0.0 (+https://github.com/TFQ0/tfq0seo)",
+          "custom_headers": {},
+          "follow_redirects": true,
+          "max_redirects": 10,
+          "max_pages": 500,
+          "max_depth": 5,
+          "max_page_size": 10485760,
+          "max_crawl_time": 3600,
+          "delay_between_requests": 0.0,
+          "adaptive_delay": true,
+          "min_delay": 0.0,
+          "max_delay": 5.0,
+          "rate_limit_per_second": null,
+          "respect_robots_txt": true,
+          "robots_cache_ttl": 86400,
+          "crawl_delay_factor": 1.0,
+          "allowed_domains": [],
+          "allowed_schemes": [
+            "http",
+            "https"
+          ],
+          "excluded_patterns": [
+            "\\.pdf$",
+            "\\.zip$",
+            "\\.exe$",
+            "\\.dmg$",
+            "/wp-admin",
+            "/admin",
+            "/login",
+            "\\?.*session",
+            "\\?.*utm_"
+          ],
+          "store_html": false,
+          "max_retries": 3,
+          "retry_on_status": [
+            429,
+            500,
+            502,
+            503,
+            504
+          ],
+          "retry_backoff_factor": 2.0,
+          "cache_enabled": false,
+          "cache_ttl": 3600,
+          "cache_size_mb": 100,
+          "use_sitemap": true,
+          "discover_sitemaps": true,
+          "use_connection_pooling": true,
+          "dns_cache_ttl": 300,
+          "verify_ssl": true,
+          "proxy": null
+        },
+        "analysis": {
+          "enabled_analyzers": [
+            "seo",
+            "content",
+            "technical",
+            "performance",
+            "links"
+          ],
+          "analysis_mode": "standard",
+          "parallel_analysis": true,
+          "max_analysis_threads": 4,
+          "check_external_links": false,
+          "check_internal_links": true,
+          "check_broken_links": true,
+          "max_external_links_per_page": 100,
+          "external_link_timeout": 10,
+          "target_keywords": [],
+          "check_content_uniqueness": true,
+          "score_weights": {
+            "seo": 0.3,
+            "content": 0.25,
+            "technical": 0.2,
+            "performance": 0.15,
+            "links": 0.1
+          }
+        },
+        "export": {
+          "formats": [
+            "html"
+          ],
+          "primary_format": "html",
+          "html_template": "optimized",
+          "output_directory": "./reports",
+          "filename_pattern": "{domain}_{timestamp}_{format}"
+        },
+        "profile": "standard",
+        "version": "3.0.0",
+        "debug": false,
+        "continue_on_error": true,
+        "max_memory_mb": 1024
+      },
+      "fixture": {
+        "version": 1,
+        "generated_pages": 500,
+        "html_bytes": 209670,
+        "dom_elements": 5000,
+        "href_references": 500,
+        "image_elements": 0,
+        "analyzed_word_count": 8500,
+        "pages_with_word_count": 500,
+        "variants": {
+          "basic": 500,
+          "content-heavy": 0,
+          "link-dense": 0
+        },
+        "sha256": "6353532d2488bb21abd01d87b3a94c596b050d10e120e9ab48a79baf07d01884"
+      },
+      "timeout_seconds": 360.0,
+      "timed_out": false,
+      "timeout_scope": "Cooperative checks between pages and after reporting; synchronous work can overrun the deadline.",
+      "report_completeness": {
+        "expected_pages": 500,
+        "retained_rows": 500,
+        "unique_urls": 500,
+        "missing_urls": 0,
+        "unexpected_urls": 0,
+        "duplicate_rows": 0,
+        "complete": true
+      },
+      "readability": {
+        "status_counts": {
+          "not_requested": 500
+        },
+        "missing_resources": []
+      },
+      "workload": "Fixture generation, HTML parsing, static analysis, site report aggregation and retained-URL verification; no HTTP, browser or export measurement",
+      "analysis_duration_seconds": 26.558759699983057,
+      "report_duration_seconds": 15.826399100013077,
+      "report_pages": 500,
+      "report_status": "complete",
+      "report_summary": {
+        "total_pages": 500,
+        "successful_pages": 500,
+        "partial_pages": 0,
+        "failed_pages": 0,
+        "skipped_pages": 0,
+        "analysis_mode": "standard",
+        "analysis_timestamp": 1789962605.4694152,
+        "analysis_duration": 0,
+        "crawl_complete": false,
+        "limits_reached": [],
+        "discovery_errors": [],
+        "scope_note": "Results describe fetched pages; unvisited targets remain unchecked."
+      },
+      "rule_coverage": {
+        "counts": {
+          "pass": 18000,
+          "fail": 0,
+          "informational": 2000,
+          "unknown": 1000,
+          "not_applicable": 13000,
+          "error": 0
+        },
+        "assessed": 20000,
+        "total": 34000,
+        "ratio": 0.9523809523809523,
+        "scope": "Counts are unique rule evaluations per page, not a complete site inventory."
+      },
+      "site_analysis": {
+        "version": "1.0",
+        "coverage": {
+          "inventory_pages": 500,
+          "pages_with_facts": 500,
+          "complete_html_pages": 500,
+          "crawl_complete": false,
+          "note": "A completed crawl still obeys its configured scope. Missing targets and paths remain unverified."
+        },
+        "node_count": 500,
+        "edge_count": 500,
+        "finding_count": 0
+      },
+      "status": "complete",
+      "successful_pages": 500,
+      "partial_pages": 0,
+      "failed_pages": 0,
+      "skipped_pages": 0,
+      "observed_results": 500,
+      "missing_results": 0,
+      "pages_analyzed": 500,
+      "pages_per_second": 11.77114630579592,
+      "avg_time_per_page": 0.08495349340001121,
+      "duration_seconds": 42.476746700005606,
+      "clock": "perf_counter",
+      "memory_rss_start_mb": 245.605,
+      "memory_rss_end_mb": 322.59,
+      "memory_rss_delta_mb": 76.984,
+      "memory_sampled_peak_mb": 430.887,
+      "memory_sample_count": 583,
+      "memory_sampling_interval_seconds": 0.05,
+      "memory_measurement": "Sampled process RSS; allocations between samples may be missed.",
+      "memory_used_mb": 76.984,
+      "errors": [],
+      "timestamp": "2026-09-21T03:50:07.998789+00:00",
+      "repetition": 2,
+      "run_order": 2
+    },
+    {
+      "type": "offline",
+      "fixture_version": 1,
+      "scenario": "content-heavy",
+      "requested_pages": 500,
+      "network_access": false,
+      "config": {
+        "crawler": {
+          "max_concurrent": 20,
+          "max_connections_per_host": 5,
+          "timeout": 30,
+          "connect_timeout": 10,
+          "read_timeout": 30,
+          "user_agent": "tfq0seo/3.0.0 (+https://github.com/TFQ0/tfq0seo)",
+          "custom_headers": {},
+          "follow_redirects": true,
+          "max_redirects": 10,
+          "max_pages": 500,
+          "max_depth": 5,
+          "max_page_size": 10485760,
+          "max_crawl_time": 3600,
+          "delay_between_requests": 0.0,
+          "adaptive_delay": true,
+          "min_delay": 0.0,
+          "max_delay": 5.0,
+          "rate_limit_per_second": null,
+          "respect_robots_txt": true,
+          "robots_cache_ttl": 86400,
+          "crawl_delay_factor": 1.0,
+          "allowed_domains": [],
+          "allowed_schemes": [
+            "http",
+            "https"
+          ],
+          "excluded_patterns": [
+            "\\.pdf$",
+            "\\.zip$",
+            "\\.exe$",
+            "\\.dmg$",
+            "/wp-admin",
+            "/admin",
+            "/login",
+            "\\?.*session",
+            "\\?.*utm_"
+          ],
+          "store_html": false,
+          "max_retries": 3,
+          "retry_on_status": [
+            429,
+            500,
+            502,
+            503,
+            504
+          ],
+          "retry_backoff_factor": 2.0,
+          "cache_enabled": false,
+          "cache_ttl": 3600,
+          "cache_size_mb": 100,
+          "use_sitemap": true,
+          "discover_sitemaps": true,
+          "use_connection_pooling": true,
+          "dns_cache_ttl": 300,
+          "verify_ssl": true,
+          "proxy": null
+        },
+        "analysis": {
+          "enabled_analyzers": [
+            "seo",
+            "content",
+            "technical",
+            "performance",
+            "links"
+          ],
+          "analysis_mode": "standard",
+          "parallel_analysis": true,
+          "max_analysis_threads": 4,
+          "check_external_links": false,
+          "check_internal_links": true,
+          "check_broken_links": true,
+          "max_external_links_per_page": 100,
+          "external_link_timeout": 10,
+          "target_keywords": [],
+          "check_content_uniqueness": true,
+          "score_weights": {
+            "seo": 0.3,
+            "content": 0.25,
+            "technical": 0.2,
+            "performance": 0.15,
+            "links": 0.1
+          }
+        },
+        "export": {
+          "formats": [
+            "html"
+          ],
+          "primary_format": "html",
+          "html_template": "optimized",
+          "output_directory": "./reports",
+          "filename_pattern": "{domain}_{timestamp}_{format}"
+        },
+        "profile": "standard",
+        "version": "3.0.0",
+        "debug": false,
+        "continue_on_error": true,
+        "max_memory_mb": 1024
+      },
+      "fixture": {
+        "version": 1,
+        "generated_pages": 500,
+        "html_bytes": 4739555,
+        "dom_elements": 76000,
+        "href_references": 500,
+        "image_elements": 4000,
+        "analyzed_word_count": 600500,
+        "pages_with_word_count": 500,
+        "variants": {
+          "basic": 0,
+          "content-heavy": 500,
+          "link-dense": 0
+        },
+        "sha256": "4fe8906021560317f0a1f36139b78b9f3ffd62d163f2d064b070b70746386946"
+      },
+      "timeout_seconds": 360.0,
+      "timed_out": false,
+      "timeout_scope": "Cooperative checks between pages and after reporting; synchronous work can overrun the deadline.",
+      "report_completeness": {
+        "expected_pages": 500,
+        "retained_rows": 500,
+        "unique_urls": 500,
+        "missing_urls": 0,
+        "unexpected_urls": 0,
+        "duplicate_rows": 0,
+        "complete": true
+      },
+      "readability": {
+        "status_counts": {
+          "unavailable": 500
+        },
+        "missing_resources": [
+          "nltk:corpora/cmudict"
+        ]
+      },
+      "workload": "Fixture generation, HTML parsing, static analysis, site report aggregation and retained-URL verification; no HTTP, browser or export measurement",
+      "analysis_duration_seconds": 38.38801830000011,
+      "report_duration_seconds": 18.198708300013095,
+      "report_pages": 500,
+      "report_status": "complete",
+      "report_summary": {
+        "total_pages": 500,
+        "successful_pages": 500,
+        "partial_pages": 0,
+        "failed_pages": 0,
+        "skipped_pages": 0,
+        "analysis_mode": "standard",
+        "analysis_timestamp": 1789962661.7445223,
+        "analysis_duration": 0,
+        "crawl_complete": false,
+        "limits_reached": [],
+        "discovery_errors": [],
+        "scope_note": "Results describe fetched pages; unvisited targets remain unchecked."
+      },
+      "rule_coverage": {
+        "counts": {
+          "pass": 20500,
+          "fail": 0,
+          "informational": 3000,
+          "unknown": 1500,
+          "not_applicable": 9000,
+          "error": 0
+        },
+        "assessed": 23500,
+        "total": 34000,
+        "ratio": 0.94,
+        "scope": "Counts are unique rule evaluations per page, not a complete site inventory."
+      },
+      "site_analysis": {
+        "version": "1.0",
+        "coverage": {
+          "inventory_pages": 500,
+          "pages_with_facts": 500,
+          "complete_html_pages": 500,
+          "crawl_complete": false,
+          "note": "A completed crawl still obeys its configured scope. Missing targets and paths remain unverified."
+        },
+        "node_count": 500,
+        "edge_count": 500,
+        "finding_count": 0
+      },
+      "status": "complete",
+      "successful_pages": 500,
+      "partial_pages": 0,
+      "failed_pages": 0,
+      "skipped_pages": 0,
+      "observed_results": 500,
+      "missing_results": 0,
+      "pages_analyzed": 500,
+      "pages_per_second": 8.816645281778309,
+      "avg_time_per_page": 0.11342182519997004,
+      "duration_seconds": 56.71091259998502,
+      "clock": "perf_counter",
+      "memory_rss_start_mb": 266.5,
+      "memory_rss_end_mb": 385.672,
+      "memory_rss_delta_mb": 119.172,
+      "memory_sampled_peak_mb": 503.48,
+      "memory_sample_count": 746,
+      "memory_sampling_interval_seconds": 0.05,
+      "memory_measurement": "Sampled process RSS; allocations between samples may be missed.",
+      "memory_used_mb": 119.172,
+      "errors": [],
+      "timestamp": "2026-09-21T03:51:04.801500+00:00",
+      "repetition": 1,
+      "run_order": 3
+    },
+    {
+      "type": "offline",
+      "fixture_version": 1,
+      "scenario": "content-heavy",
+      "requested_pages": 500,
+      "network_access": false,
+      "config": {
+        "crawler": {
+          "max_concurrent": 20,
+          "max_connections_per_host": 5,
+          "timeout": 30,
+          "connect_timeout": 10,
+          "read_timeout": 30,
+          "user_agent": "tfq0seo/3.0.0 (+https://github.com/TFQ0/tfq0seo)",
+          "custom_headers": {},
+          "follow_redirects": true,
+          "max_redirects": 10,
+          "max_pages": 500,
+          "max_depth": 5,
+          "max_page_size": 10485760,
+          "max_crawl_time": 3600,
+          "delay_between_requests": 0.0,
+          "adaptive_delay": true,
+          "min_delay": 0.0,
+          "max_delay": 5.0,
+          "rate_limit_per_second": null,
+          "respect_robots_txt": true,
+          "robots_cache_ttl": 86400,
+          "crawl_delay_factor": 1.0,
+          "allowed_domains": [],
+          "allowed_schemes": [
+            "http",
+            "https"
+          ],
+          "excluded_patterns": [
+            "\\.pdf$",
+            "\\.zip$",
+            "\\.exe$",
+            "\\.dmg$",
+            "/wp-admin",
+            "/admin",
+            "/login",
+            "\\?.*session",
+            "\\?.*utm_"
+          ],
+          "store_html": false,
+          "max_retries": 3,
+          "retry_on_status": [
+            429,
+            500,
+            502,
+            503,
+            504
+          ],
+          "retry_backoff_factor": 2.0,
+          "cache_enabled": false,
+          "cache_ttl": 3600,
+          "cache_size_mb": 100,
+          "use_sitemap": true,
+          "discover_sitemaps": true,
+          "use_connection_pooling": true,
+          "dns_cache_ttl": 300,
+          "verify_ssl": true,
+          "proxy": null
+        },
+        "analysis": {
+          "enabled_analyzers": [
+            "seo",
+            "content",
+            "technical",
+            "performance",
+            "links"
+          ],
+          "analysis_mode": "standard",
+          "parallel_analysis": true,
+          "max_analysis_threads": 4,
+          "check_external_links": false,
+          "check_internal_links": true,
+          "check_broken_links": true,
+          "max_external_links_per_page": 100,
+          "external_link_timeout": 10,
+          "target_keywords": [],
+          "check_content_uniqueness": true,
+          "score_weights": {
+            "seo": 0.3,
+            "content": 0.25,
+            "technical": 0.2,
+            "performance": 0.15,
+            "links": 0.1
+          }
+        },
+        "export": {
+          "formats": [
+            "html"
+          ],
+          "primary_format": "html",
+          "html_template": "optimized",
+          "output_directory": "./reports",
+          "filename_pattern": "{domain}_{timestamp}_{format}"
+        },
+        "profile": "standard",
+        "version": "3.0.0",
+        "debug": false,
+        "continue_on_error": true,
+        "max_memory_mb": 1024
+      },
+      "fixture": {
+        "version": 1,
+        "generated_pages": 500,
+        "html_bytes": 4739555,
+        "dom_elements": 76000,
+        "href_references": 500,
+        "image_elements": 4000,
+        "analyzed_word_count": 600500,
+        "pages_with_word_count": 500,
+        "variants": {
+          "basic": 0,
+          "content-heavy": 500,
+          "link-dense": 0
+        },
+        "sha256": "4fe8906021560317f0a1f36139b78b9f3ffd62d163f2d064b070b70746386946"
+      },
+      "timeout_seconds": 360.0,
+      "timed_out": false,
+      "timeout_scope": "Cooperative checks between pages and after reporting; synchronous work can overrun the deadline.",
+      "report_completeness": {
+        "expected_pages": 500,
+        "retained_rows": 500,
+        "unique_urls": 500,
+        "missing_urls": 0,
+        "unexpected_urls": 0,
+        "duplicate_rows": 0,
+        "complete": true
+      },
+      "readability": {
+        "status_counts": {
+          "unavailable": 500
+        },
+        "missing_resources": [
+          "nltk:corpora/cmudict"
+        ]
+      },
+      "workload": "Fixture generation, HTML parsing, static analysis, site report aggregation and retained-URL verification; no HTTP, browser or export measurement",
+      "analysis_duration_seconds": 38.643274099973496,
+      "report_duration_seconds": 18.205546300043352,
+      "report_pages": 500,
+      "report_status": "complete",
+      "report_summary": {
+        "total_pages": 500,
+        "successful_pages": 500,
+        "partial_pages": 0,
+        "failed_pages": 0,
+        "skipped_pages": 0,
+        "analysis_mode": "standard",
+        "analysis_timestamp": 1789962719.008702,
+        "analysis_duration": 0,
+        "crawl_complete": false,
+        "limits_reached": [],
+        "discovery_errors": [],
+        "scope_note": "Results describe fetched pages; unvisited targets remain unchecked."
+      },
+      "rule_coverage": {
+        "counts": {
+          "pass": 20500,
+          "fail": 0,
+          "informational": 3000,
+          "unknown": 1500,
+          "not_applicable": 9000,
+          "error": 0
+        },
+        "assessed": 23500,
+        "total": 34000,
+        "ratio": 0.94,
+        "scope": "Counts are unique rule evaluations per page, not a complete site inventory."
+      },
+      "site_analysis": {
+        "version": "1.0",
+        "coverage": {
+          "inventory_pages": 500,
+          "pages_with_facts": 500,
+          "complete_html_pages": 500,
+          "crawl_complete": false,
+          "note": "A completed crawl still obeys its configured scope. Missing targets and paths remain unverified."
+        },
+        "node_count": 500,
+        "edge_count": 500,
+        "finding_count": 0
+      },
+      "status": "complete",
+      "successful_pages": 500,
+      "partial_pages": 0,
+      "failed_pages": 0,
+      "skipped_pages": 0,
+      "observed_results": 500,
+      "missing_results": 0,
+      "pages_analyzed": 500,
+      "pages_per_second": 8.777253043750113,
+      "avg_time_per_page": 0.11393086139997467,
+      "duration_seconds": 56.96543069998734,
+      "clock": "perf_counter",
+      "memory_rss_start_mb": 304.891,
+      "memory_rss_end_mb": 402.797,
+      "memory_rss_delta_mb": 97.906,
+      "memory_sampled_peak_mb": 503.594,
+      "memory_sample_count": 750,
+      "memory_sampling_interval_seconds": 0.05,
+      "memory_measurement": "Sampled process RSS; allocations between samples may be missed.",
+      "memory_used_mb": 97.906,
+      "errors": [],
+      "timestamp": "2026-09-21T03:52:01.905169+00:00",
+      "repetition": 2,
+      "run_order": 4
+    },
+    {
+      "type": "offline",
+      "fixture_version": 1,
+      "scenario": "link-dense",
+      "requested_pages": 500,
+      "network_access": false,
+      "config": {
+        "crawler": {
+          "max_concurrent": 20,
+          "max_connections_per_host": 5,
+          "timeout": 30,
+          "connect_timeout": 10,
+          "read_timeout": 30,
+          "user_agent": "tfq0seo/3.0.0 (+https://github.com/TFQ0/tfq0seo)",
+          "custom_headers": {},
+          "follow_redirects": true,
+          "max_redirects": 10,
+          "max_pages": 500,
+          "max_depth": 5,
+          "max_page_size": 10485760,
+          "max_crawl_time": 3600,
+          "delay_between_requests": 0.0,
+          "adaptive_delay": true,
+          "min_delay": 0.0,
+          "max_delay": 5.0,
+          "rate_limit_per_second": null,
+          "respect_robots_txt": true,
+          "robots_cache_ttl": 86400,
+          "crawl_delay_factor": 1.0,
+          "allowed_domains": [],
+          "allowed_schemes": [
+            "http",
+            "https"
+          ],
+          "excluded_patterns": [
+            "\\.pdf$",
+            "\\.zip$",
+            "\\.exe$",
+            "\\.dmg$",
+            "/wp-admin",
+            "/admin",
+            "/login",
+            "\\?.*session",
+            "\\?.*utm_"
+          ],
+          "store_html": false,
+          "max_retries": 3,
+          "retry_on_status": [
+            429,
+            500,
+            502,
+            503,
+            504
+          ],
+          "retry_backoff_factor": 2.0,
+          "cache_enabled": false,
+          "cache_ttl": 3600,
+          "cache_size_mb": 100,
+          "use_sitemap": true,
+          "discover_sitemaps": true,
+          "use_connection_pooling": true,
+          "dns_cache_ttl": 300,
+          "verify_ssl": true,
+          "proxy": null
+        },
+        "analysis": {
+          "enabled_analyzers": [
+            "seo",
+            "content",
+            "technical",
+            "performance",
+            "links"
+          ],
+          "analysis_mode": "standard",
+          "parallel_analysis": true,
+          "max_analysis_threads": 4,
+          "check_external_links": false,
+          "check_internal_links": true,
+          "check_broken_links": true,
+          "max_external_links_per_page": 100,
+          "external_link_timeout": 10,
+          "target_keywords": [],
+          "check_content_uniqueness": true,
+          "score_weights": {
+            "seo": 0.3,
+            "content": 0.25,
+            "technical": 0.2,
+            "performance": 0.15,
+            "links": 0.1
+          }
+        },
+        "export": {
+          "formats": [
+            "html"
+          ],
+          "primary_format": "html",
+          "html_template": "optimized",
+          "output_directory": "./reports",
+          "filename_pattern": "{domain}_{timestamp}_{format}"
+        },
+        "profile": "standard",
+        "version": "3.0.0",
+        "debug": false,
+        "continue_on_error": true,
+        "max_memory_mb": 1024
+      },
+      "fixture": {
+        "version": 1,
+        "generated_pages": 500,
+        "html_bytes": 1139540,
+        "dom_elements": 26500,
+        "href_references": 19500,
+        "image_elements": 0,
+        "analyzed_word_count": 65000,
+        "pages_with_word_count": 500,
+        "variants": {
+          "basic": 0,
+          "content-heavy": 0,
+          "link-dense": 500
+        },
+        "sha256": "9de529c73969d8330328f2ddc650ceb4053feab22bde3d77f07efc648efd2dc2"
+      },
+      "timeout_seconds": 360.0,
+      "timed_out": false,
+      "timeout_scope": "Cooperative checks between pages and after reporting; synchronous work can overrun the deadline.",
+      "report_completeness": {
+        "expected_pages": 500,
+        "retained_rows": 500,
+        "unique_urls": 500,
+        "missing_urls": 0,
+        "unexpected_urls": 0,
+        "duplicate_rows": 0,
+        "complete": true
+      },
+      "readability": {
+        "status_counts": {
+          "unavailable": 500
+        },
+        "missing_resources": [
+          "nltk:corpora/cmudict"
+        ]
+      },
+      "workload": "Fixture generation, HTML parsing, static analysis, site report aggregation and retained-URL verification; no HTTP, browser or export measurement",
+      "analysis_duration_seconds": 33.71322609996423,
+      "report_duration_seconds": 19.14739220001502,
+      "report_pages": 500,
+      "report_status": "complete",
+      "report_summary": {
+        "total_pages": 500,
+        "successful_pages": 500,
+        "partial_pages": 0,
+        "failed_pages": 0,
+        "skipped_pages": 0,
+        "analysis_mode": "standard",
+        "analysis_timestamp": 1789962771.9639814,
+        "analysis_duration": 0,
+        "crawl_complete": false,
+        "limits_reached": [],
+        "discovery_errors": [],
+        "scope_note": "Results describe fetched pages; unvisited targets remain unchecked."
+      },
+      "rule_coverage": {
+        "counts": {
+          "pass": 19500,
+          "fail": 0,
+          "informational": 2000,
+          "unknown": 1500,
+          "not_applicable": 11000,
+          "error": 0
+        },
+        "assessed": 21500,
+        "total": 34000,
+        "ratio": 0.9347826086956522,
+        "scope": "Counts are unique rule evaluations per page, not a complete site inventory."
+      },
+      "site_analysis": {
+        "version": "1.0",
+        "coverage": {
+          "inventory_pages": 500,
+          "pages_with_facts": 500,
+          "complete_html_pages": 500,
+          "crawl_complete": false,
+          "note": "A completed crawl still obeys its configured scope. Missing targets and paths remain unverified."
+        },
+        "node_count": 500,
+        "edge_count": 16500,
+        "finding_count": 0
+      },
+      "status": "complete",
+      "successful_pages": 500,
+      "partial_pages": 0,
+      "failed_pages": 0,
+      "skipped_pages": 0,
+      "observed_results": 500,
+      "missing_results": 0,
+      "pages_analyzed": 500,
+      "pages_per_second": 9.438788530436288,
+      "avg_time_per_page": 0.10594579979998525,
+      "duration_seconds": 52.972899899992626,
+      "clock": "perf_counter",
+      "memory_rss_start_mb": 304.648,
+      "memory_rss_end_mb": 403.016,
+      "memory_rss_delta_mb": 98.367,
+      "memory_sampled_peak_mb": 514.043,
+      "memory_sample_count": 736,
+      "memory_sampling_interval_seconds": 0.05,
+      "memory_measurement": "Sampled process RSS; allocations between samples may be missed.",
+      "memory_used_mb": 98.367,
+      "errors": [],
+      "timestamp": "2026-09-21T03:52:55.004628+00:00",
+      "repetition": 1,
+      "run_order": 5
+    },
+    {
+      "type": "offline",
+      "fixture_version": 1,
+      "scenario": "link-dense",
+      "requested_pages": 500,
+      "network_access": false,
+      "config": {
+        "crawler": {
+          "max_concurrent": 20,
+          "max_connections_per_host": 5,
+          "timeout": 30,
+          "connect_timeout": 10,
+          "read_timeout": 30,
+          "user_agent": "tfq0seo/3.0.0 (+https://github.com/TFQ0/tfq0seo)",
+          "custom_headers": {},
+          "follow_redirects": true,
+          "max_redirects": 10,
+          "max_pages": 500,
+          "max_depth": 5,
+          "max_page_size": 10485760,
+          "max_crawl_time": 3600,
+          "delay_between_requests": 0.0,
+          "adaptive_delay": true,
+          "min_delay": 0.0,
+          "max_delay": 5.0,
+          "rate_limit_per_second": null,
+          "respect_robots_txt": true,
+          "robots_cache_ttl": 86400,
+          "crawl_delay_factor": 1.0,
+          "allowed_domains": [],
+          "allowed_schemes": [
+            "http",
+            "https"
+          ],
+          "excluded_patterns": [
+            "\\.pdf$",
+            "\\.zip$",
+            "\\.exe$",
+            "\\.dmg$",
+            "/wp-admin",
+            "/admin",
+            "/login",
+            "\\?.*session",
+            "\\?.*utm_"
+          ],
+          "store_html": false,
+          "max_retries": 3,
+          "retry_on_status": [
+            429,
+            500,
+            502,
+            503,
+            504
+          ],
+          "retry_backoff_factor": 2.0,
+          "cache_enabled": false,
+          "cache_ttl": 3600,
+          "cache_size_mb": 100,
+          "use_sitemap": true,
+          "discover_sitemaps": true,
+          "use_connection_pooling": true,
+          "dns_cache_ttl": 300,
+          "verify_ssl": true,
+          "proxy": null
+        },
+        "analysis": {
+          "enabled_analyzers": [
+            "seo",
+            "content",
+            "technical",
+            "performance",
+            "links"
+          ],
+          "analysis_mode": "standard",
+          "parallel_analysis": true,
+          "max_analysis_threads": 4,
+          "check_external_links": false,
+          "check_internal_links": true,
+          "check_broken_links": true,
+          "max_external_links_per_page": 100,
+          "external_link_timeout": 10,
+          "target_keywords": [],
+          "check_content_uniqueness": true,
+          "score_weights": {
+            "seo": 0.3,
+            "content": 0.25,
+            "technical": 0.2,
+            "performance": 0.15,
+            "links": 0.1
+          }
+        },
+        "export": {
+          "formats": [
+            "html"
+          ],
+          "primary_format": "html",
+          "html_template": "optimized",
+          "output_directory": "./reports",
+          "filename_pattern": "{domain}_{timestamp}_{format}"
+        },
+        "profile": "standard",
+        "version": "3.0.0",
+        "debug": false,
+        "continue_on_error": true,
+        "max_memory_mb": 1024
+      },
+      "fixture": {
+        "version": 1,
+        "generated_pages": 500,
+        "html_bytes": 1139540,
+        "dom_elements": 26500,
+        "href_references": 19500,
+        "image_elements": 0,
+        "analyzed_word_count": 65000,
+        "pages_with_word_count": 500,
+        "variants": {
+          "basic": 0,
+          "content-heavy": 0,
+          "link-dense": 500
+        },
+        "sha256": "9de529c73969d8330328f2ddc650ceb4053feab22bde3d77f07efc648efd2dc2"
+      },
+      "timeout_seconds": 360.0,
+      "timed_out": false,
+      "timeout_scope": "Cooperative checks between pages and after reporting; synchronous work can overrun the deadline.",
+      "report_completeness": {
+        "expected_pages": 500,
+        "retained_rows": 500,
+        "unique_urls": 500,
+        "missing_urls": 0,
+        "unexpected_urls": 0,
+        "duplicate_rows": 0,
+        "complete": true
+      },
+      "readability": {
+        "status_counts": {
+          "unavailable": 500
+        },
+        "missing_resources": [
+          "nltk:corpora/cmudict"
+        ]
+      },
+      "workload": "Fixture generation, HTML parsing, static analysis, site report aggregation and retained-URL verification; no HTTP, browser or export measurement",
+      "analysis_duration_seconds": 34.6492362000281,
+      "report_duration_seconds": 19.69594499998493,
+      "report_pages": 500,
+      "report_status": "complete",
+      "report_summary": {
+        "total_pages": 500,
+        "successful_pages": 500,
+        "partial_pages": 0,
+        "failed_pages": 0,
+        "skipped_pages": 0,
+        "analysis_mode": "standard",
+        "analysis_timestamp": 1789962826.5033512,
+        "analysis_duration": 0,
+        "crawl_complete": false,
+        "limits_reached": [],
+        "discovery_errors": [],
+        "scope_note": "Results describe fetched pages; unvisited targets remain unchecked."
+      },
+      "rule_coverage": {
+        "counts": {
+          "pass": 19500,
+          "fail": 0,
+          "informational": 2000,
+          "unknown": 1500,
+          "not_applicable": 11000,
+          "error": 0
+        },
+        "assessed": 21500,
+        "total": 34000,
+        "ratio": 0.9347826086956522,
+        "scope": "Counts are unique rule evaluations per page, not a complete site inventory."
+      },
+      "site_analysis": {
+        "version": "1.0",
+        "coverage": {
+          "inventory_pages": 500,
+          "pages_with_facts": 500,
+          "complete_html_pages": 500,
+          "crawl_complete": false,
+          "note": "A completed crawl still obeys its configured scope. Missing targets and paths remain unverified."
+        },
+        "node_count": 500,
+        "edge_count": 16500,
+        "finding_count": 0
+      },
+      "status": "complete",
+      "successful_pages": 500,
+      "partial_pages": 0,
+      "failed_pages": 0,
+      "skipped_pages": 0,
+      "observed_results": 500,
+      "missing_results": 0,
+      "pages_analyzed": 500,
+      "pages_per_second": 9.181063967421467,
+      "avg_time_per_page": 0.10891983800008893,
+      "duration_seconds": 54.459919000044465,
+      "clock": "perf_counter",
+      "memory_rss_start_mb": 329.891,
+      "memory_rss_end_mb": 399.477,
+      "memory_rss_delta_mb": 69.586,
+      "memory_sampled_peak_mb": 511.332,
+      "memory_sample_count": 745,
+      "memory_sampling_interval_seconds": 0.05,
+      "memory_measurement": "Sampled process RSS; allocations between samples may be missed.",
+      "memory_used_mb": 69.586,
+      "errors": [],
+      "timestamp": "2026-09-21T03:53:49.585114+00:00",
+      "repetition": 2,
+      "run_order": 6
+    },
+    {
+      "type": "offline",
+      "fixture_version": 1,
+      "scenario": "mixed",
+      "requested_pages": 500,
+      "network_access": false,
+      "config": {
+        "crawler": {
+          "max_concurrent": 20,
+          "max_connections_per_host": 5,
+          "timeout": 30,
+          "connect_timeout": 10,
+          "read_timeout": 30,
+          "user_agent": "tfq0seo/3.0.0 (+https://github.com/TFQ0/tfq0seo)",
+          "custom_headers": {},
+          "follow_redirects": true,
+          "max_redirects": 10,
+          "max_pages": 500,
+          "max_depth": 5,
+          "max_page_size": 10485760,
+          "max_crawl_time": 3600,
+          "delay_between_requests": 0.0,
+          "adaptive_delay": true,
+          "min_delay": 0.0,
+          "max_delay": 5.0,
+          "rate_limit_per_second": null,
+          "respect_robots_txt": true,
+          "robots_cache_ttl": 86400,
+          "crawl_delay_factor": 1.0,
+          "allowed_domains": [],
+          "allowed_schemes": [
+            "http",
+            "https"
+          ],
+          "excluded_patterns": [
+            "\\.pdf$",
+            "\\.zip$",
+            "\\.exe$",
+            "\\.dmg$",
+            "/wp-admin",
+            "/admin",
+            "/login",
+            "\\?.*session",
+            "\\?.*utm_"
+          ],
+          "store_html": false,
+          "max_retries": 3,
+          "retry_on_status": [
+            429,
+            500,
+            502,
+            503,
+            504
+          ],
+          "retry_backoff_factor": 2.0,
+          "cache_enabled": false,
+          "cache_ttl": 3600,
+          "cache_size_mb": 100,
+          "use_sitemap": true,
+          "discover_sitemaps": true,
+          "use_connection_pooling": true,
+          "dns_cache_ttl": 300,
+          "verify_ssl": true,
+          "proxy": null
+        },
+        "analysis": {
+          "enabled_analyzers": [
+            "seo",
+            "content",
+            "technical",
+            "performance",
+            "links"
+          ],
+          "analysis_mode": "standard",
+          "parallel_analysis": true,
+          "max_analysis_threads": 4,
+          "check_external_links": false,
+          "check_internal_links": true,
+          "check_broken_links": true,
+          "max_external_links_per_page": 100,
+          "external_link_timeout": 10,
+          "target_keywords": [],
+          "check_content_uniqueness": true,
+          "score_weights": {
+            "seo": 0.3,
+            "content": 0.25,
+            "technical": 0.2,
+            "performance": 0.15,
+            "links": 0.1
+          }
+        },
+        "export": {
+          "formats": [
+            "html"
+          ],
+          "primary_format": "html",
+          "html_template": "optimized",
+          "output_directory": "./reports",
+          "filename_pattern": "{domain}_{timestamp}_{format}"
+        },
+        "profile": "standard",
+        "version": "3.0.0",
+        "debug": false,
+        "continue_on_error": true,
+        "max_memory_mb": 1024
+      },
+      "fixture": {
+        "version": 1,
+        "generated_pages": 500,
+        "html_bytes": 2031413,
+        "dom_elements": 35852,
+        "href_references": 6808,
+        "image_elements": 1336,
+        "analyzed_word_count": 224986,
+        "pages_with_word_count": 500,
+        "variants": {
+          "basic": 167,
+          "content-heavy": 167,
+          "link-dense": 166
+        },
+        "sha256": "8159d57ed4cd52f09f9903ef580de5a7baabb8a4a5fe0403e15f95bbf1aa8e0b"
+      },
+      "timeout_seconds": 360.0,
+      "timed_out": false,
+      "timeout_scope": "Cooperative checks between pages and after reporting; synchronous work can overrun the deadline.",
+      "report_completeness": {
+        "expected_pages": 500,
+        "retained_rows": 500,
+        "unique_urls": 500,
+        "missing_urls": 0,
+        "unexpected_urls": 0,
+        "duplicate_rows": 0,
+        "complete": true
+      },
+      "readability": {
+        "status_counts": {
+          "not_requested": 167,
+          "unavailable": 333
+        },
+        "missing_resources": [
+          "nltk:corpora/cmudict"
+        ]
+      },
+      "workload": "Fixture generation, HTML parsing, static analysis, site report aggregation and retained-URL verification; no HTTP, browser or export measurement",
+      "analysis_duration_seconds": 32.74250110000139,
+      "report_duration_seconds": 18.548192699963693,
+      "report_pages": 500,
+      "report_status": "complete",
+      "report_summary": {
+        "total_pages": 500,
+        "successful_pages": 500,
+        "partial_pages": 0,
+        "failed_pages": 0,
+        "skipped_pages": 0,
+        "analysis_mode": "standard",
+        "analysis_timestamp": 1789962878.1674123,
+        "analysis_duration": 0,
+        "crawl_complete": false,
+        "limits_reached": [],
+        "discovery_errors": [],
+        "scope_note": "Results describe fetched pages; unvisited targets remain unchecked."
+      },
+      "rule_coverage": {
+        "counts": {
+          "pass": 19333,
+          "fail": 0,
+          "informational": 2334,
+          "unknown": 1333,
+          "not_applicable": 11000,
+          "error": 0
+        },
+        "assessed": 21667,
+        "total": 34000,
+        "ratio": 0.9420434782608695,
+        "scope": "Counts are unique rule evaluations per page, not a complete site inventory."
+      },
+      "site_analysis": {
+        "version": "1.0",
+        "coverage": {
+          "inventory_pages": 500,
+          "pages_with_facts": 500,
+          "complete_html_pages": 500,
+          "crawl_complete": false,
+          "note": "A completed crawl still obeys its configured scope. Missing targets and paths remain unverified."
+        },
+        "node_count": 500,
+        "edge_count": 5812,
+        "finding_count": 0
+      },
+      "status": "complete",
+      "successful_pages": 500,
+      "partial_pages": 0,
+      "failed_pages": 0,
+      "skipped_pages": 0,
+      "observed_results": 500,
+      "missing_results": 0,
+      "pages_analyzed": 500,
+      "pages_per_second": 9.724673639562882,
+      "avg_time_per_page": 0.10283121440000832,
+      "duration_seconds": 51.41560720000416,
+      "clock": "perf_counter",
+      "memory_rss_start_mb": 344.445,
+      "memory_rss_end_mb": 411.102,
+      "memory_rss_delta_mb": 66.656,
+      "memory_sampled_peak_mb": 484.855,
+      "memory_sample_count": 706,
+      "memory_sampling_interval_seconds": 0.05,
+      "memory_measurement": "Sampled process RSS; allocations between samples may be missed.",
+      "memory_used_mb": 66.656,
+      "errors": [],
+      "timestamp": "2026-09-21T03:54:41.123237+00:00",
+      "repetition": 1,
+      "run_order": 7
+    },
+    {
+      "type": "offline",
+      "fixture_version": 1,
+      "scenario": "mixed",
+      "requested_pages": 500,
+      "network_access": false,
+      "config": {
+        "crawler": {
+          "max_concurrent": 20,
+          "max_connections_per_host": 5,
+          "timeout": 30,
+          "connect_timeout": 10,
+          "read_timeout": 30,
+          "user_agent": "tfq0seo/3.0.0 (+https://github.com/TFQ0/tfq0seo)",
+          "custom_headers": {},
+          "follow_redirects": true,
+          "max_redirects": 10,
+          "max_pages": 500,
+          "max_depth": 5,
+          "max_page_size": 10485760,
+          "max_crawl_time": 3600,
+          "delay_between_requests": 0.0,
+          "adaptive_delay": true,
+          "min_delay": 0.0,
+          "max_delay": 5.0,
+          "rate_limit_per_second": null,
+          "respect_robots_txt": true,
+          "robots_cache_ttl": 86400,
+          "crawl_delay_factor": 1.0,
+          "allowed_domains": [],
+          "allowed_schemes": [
+            "http",
+            "https"
+          ],
+          "excluded_patterns": [
+            "\\.pdf$",
+            "\\.zip$",
+            "\\.exe$",
+            "\\.dmg$",
+            "/wp-admin",
+            "/admin",
+            "/login",
+            "\\?.*session",
+            "\\?.*utm_"
+          ],
+          "store_html": false,
+          "max_retries": 3,
+          "retry_on_status": [
+            429,
+            500,
+            502,
+            503,
+            504
+          ],
+          "retry_backoff_factor": 2.0,
+          "cache_enabled": false,
+          "cache_ttl": 3600,
+          "cache_size_mb": 100,
+          "use_sitemap": true,
+          "discover_sitemaps": true,
+          "use_connection_pooling": true,
+          "dns_cache_ttl": 300,
+          "verify_ssl": true,
+          "proxy": null
+        },
+        "analysis": {
+          "enabled_analyzers": [
+            "seo",
+            "content",
+            "technical",
+            "performance",
+            "links"
+          ],
+          "analysis_mode": "standard",
+          "parallel_analysis": true,
+          "max_analysis_threads": 4,
+          "check_external_links": false,
+          "check_internal_links": true,
+          "check_broken_links": true,
+          "max_external_links_per_page": 100,
+          "external_link_timeout": 10,
+          "target_keywords": [],
+          "check_content_uniqueness": true,
+          "score_weights": {
+            "seo": 0.3,
+            "content": 0.25,
+            "technical": 0.2,
+            "performance": 0.15,
+            "links": 0.1
+          }
+        },
+        "export": {
+          "formats": [
+            "html"
+          ],
+          "primary_format": "html",
+          "html_template": "optimized",
+          "output_directory": "./reports",
+          "filename_pattern": "{domain}_{timestamp}_{format}"
+        },
+        "profile": "standard",
+        "version": "3.0.0",
+        "debug": false,
+        "continue_on_error": true,
+        "max_memory_mb": 1024
+      },
+      "fixture": {
+        "version": 1,
+        "generated_pages": 500,
+        "html_bytes": 2031413,
+        "dom_elements": 35852,
+        "href_references": 6808,
+        "image_elements": 1336,
+        "analyzed_word_count": 224986,
+        "pages_with_word_count": 500,
+        "variants": {
+          "basic": 167,
+          "content-heavy": 167,
+          "link-dense": 166
+        },
+        "sha256": "8159d57ed4cd52f09f9903ef580de5a7baabb8a4a5fe0403e15f95bbf1aa8e0b"
+      },
+      "timeout_seconds": 360.0,
+      "timed_out": false,
+      "timeout_scope": "Cooperative checks between pages and after reporting; synchronous work can overrun the deadline.",
+      "report_completeness": {
+        "expected_pages": 500,
+        "retained_rows": 500,
+        "unique_urls": 500,
+        "missing_urls": 0,
+        "unexpected_urls": 0,
+        "duplicate_rows": 0,
+        "complete": true
+      },
+      "readability": {
+        "status_counts": {
+          "not_requested": 167,
+          "unavailable": 333
+        },
+        "missing_resources": [
+          "nltk:corpora/cmudict"
+        ]
+      },
+      "workload": "Fixture generation, HTML parsing, static analysis, site report aggregation and retained-URL verification; no HTTP, browser or export measurement",
+      "analysis_duration_seconds": 32.458557199977804,
+      "report_duration_seconds": 17.584410300012678,
+      "report_pages": 500,
+      "report_status": "complete",
+      "report_summary": {
+        "total_pages": 500,
+        "successful_pages": 500,
+        "partial_pages": 0,
+        "failed_pages": 0,
+        "skipped_pages": 0,
+        "analysis_mode": "standard",
+        "analysis_timestamp": 1789962928.5882554,
+        "analysis_duration": 0,
+        "crawl_complete": false,
+        "limits_reached": [],
+        "discovery_errors": [],
+        "scope_note": "Results describe fetched pages; unvisited targets remain unchecked."
+      },
+      "rule_coverage": {
+        "counts": {
+          "pass": 19333,
+          "fail": 0,
+          "informational": 2334,
+          "unknown": 1333,
+          "not_applicable": 11000,
+          "error": 0
+        },
+        "assessed": 21667,
+        "total": 34000,
+        "ratio": 0.9420434782608695,
+        "scope": "Counts are unique rule evaluations per page, not a complete site inventory."
+      },
+      "site_analysis": {
+        "version": "1.0",
+        "coverage": {
+          "inventory_pages": 500,
+          "pages_with_facts": 500,
+          "complete_html_pages": 500,
+          "crawl_complete": false,
+          "note": "A completed crawl still obeys its configured scope. Missing targets and paths remain unverified."
+        },
+        "node_count": 500,
+        "edge_count": 5812,
+        "finding_count": 0
+      },
+      "status": "complete",
+      "successful_pages": 500,
+      "partial_pages": 0,
+      "failed_pages": 0,
+      "skipped_pages": 0,
+      "observed_results": 500,
+      "missing_results": 0,
+      "pages_analyzed": 500,
+      "pages_per_second": 9.970011402092945,
+      "avg_time_per_page": 0.10030078800010961,
+      "duration_seconds": 50.1503940000548,
+      "clock": "perf_counter",
+      "memory_rss_start_mb": 334.938,
+      "memory_rss_end_mb": 416.07,
+      "memory_rss_delta_mb": 81.133,
+      "memory_sampled_peak_mb": 483.355,
+      "memory_sample_count": 696,
+      "memory_sampling_interval_seconds": 0.05,
+      "memory_measurement": "Sampled process RSS; allocations between samples may be missed.",
+      "memory_used_mb": 81.133,
+      "errors": [],
+      "timestamp": "2026-09-21T03:55:31.409435+00:00",
+      "repetition": 2,
+      "run_order": 8
+    }
+  ],
+  "summaries": [
+    {
+      "scenario": "basic",
+      "requested_pages": 500,
+      "runs": 2,
+      "complete_runs": 2,
+      "partial_runs": 0,
+      "failed_runs": 0,
+      "metrics_scope": "Only complete runs; inspect raw outcomes for excluded failed or partial runs.",
+      "metrics": {
+        "duration_seconds": {
+          "median": 41.45385220000753,
+          "min": 40.43095770000946,
+          "max": 42.476746700005606
+        },
+        "analysis_duration_seconds": {
+          "median": 25.37268459997722,
+          "min": 24.186609499971382,
+          "max": 26.558759699983057
+        },
+        "report_duration_seconds": {
+          "median": 15.989042700006394,
+          "min": 15.826399100013077,
+          "max": 16.15168629999971
+        },
+        "pages_per_second": {
+          "median": 12.068953765718355,
+          "min": 11.77114630579592,
+          "max": 12.366761225640792
+        },
+        "memory_rss_delta_mb": {
+          "median": 160.5935,
+          "min": 76.984,
+          "max": 244.203
+        },
+        "memory_sampled_peak_mb": {
+          "median": 431.166,
+          "min": 430.887,
+          "max": 431.445
+        }
+      }
+    },
+    {
+      "scenario": "content-heavy",
+      "requested_pages": 500,
+      "runs": 2,
+      "complete_runs": 2,
+      "partial_runs": 0,
+      "failed_runs": 0,
+      "metrics_scope": "Only complete runs; inspect raw outcomes for excluded failed or partial runs.",
+      "metrics": {
+        "duration_seconds": {
+          "median": 56.83817164998618,
+          "min": 56.71091259998502,
+          "max": 56.96543069998734
+        },
+        "analysis_duration_seconds": {
+          "median": 38.515646199986804,
+          "min": 38.38801830000011,
+          "max": 38.643274099973496
+        },
+        "report_duration_seconds": {
+          "median": 18.202127300028224,
+          "min": 18.198708300013095,
+          "max": 18.205546300043352
+        },
+        "pages_per_second": {
+          "median": 8.79694916276421,
+          "min": 8.777253043750113,
+          "max": 8.816645281778309
+        },
+        "memory_rss_delta_mb": {
+          "median": 108.539,
+          "min": 97.906,
+          "max": 119.172
+        },
+        "memory_sampled_peak_mb": {
+          "median": 503.53700000000003,
+          "min": 503.48,
+          "max": 503.594
+        }
+      }
+    },
+    {
+      "scenario": "link-dense",
+      "requested_pages": 500,
+      "runs": 2,
+      "complete_runs": 2,
+      "partial_runs": 0,
+      "failed_runs": 0,
+      "metrics_scope": "Only complete runs; inspect raw outcomes for excluded failed or partial runs.",
+      "metrics": {
+        "duration_seconds": {
+          "median": 53.716409450018546,
+          "min": 52.972899899992626,
+          "max": 54.459919000044465
+        },
+        "analysis_duration_seconds": {
+          "median": 34.181231149996165,
+          "min": 33.71322609996423,
+          "max": 34.6492362000281
+        },
+        "report_duration_seconds": {
+          "median": 19.421668599999975,
+          "min": 19.14739220001502,
+          "max": 19.69594499998493
+        },
+        "pages_per_second": {
+          "median": 9.309926248928878,
+          "min": 9.181063967421467,
+          "max": 9.438788530436288
+        },
+        "memory_rss_delta_mb": {
+          "median": 83.9765,
+          "min": 69.586,
+          "max": 98.367
+        },
+        "memory_sampled_peak_mb": {
+          "median": 512.6875,
+          "min": 511.332,
+          "max": 514.043
+        }
+      }
+    },
+    {
+      "scenario": "mixed",
+      "requested_pages": 500,
+      "runs": 2,
+      "complete_runs": 2,
+      "partial_runs": 0,
+      "failed_runs": 0,
+      "metrics_scope": "Only complete runs; inspect raw outcomes for excluded failed or partial runs.",
+      "metrics": {
+        "duration_seconds": {
+          "median": 50.78300060002948,
+          "min": 50.1503940000548,
+          "max": 51.41560720000416
+        },
+        "analysis_duration_seconds": {
+          "median": 32.6005291499896,
+          "min": 32.458557199977804,
+          "max": 32.74250110000139
+        },
+        "report_duration_seconds": {
+          "median": 18.066301499988185,
+          "min": 17.584410300012678,
+          "max": 18.548192699963693
+        },
+        "pages_per_second": {
+          "median": 9.847342520827914,
+          "min": 9.724673639562882,
+          "max": 9.970011402092945
+        },
+        "memory_rss_delta_mb": {
+          "median": 73.8945,
+          "min": 66.656,
+          "max": 81.133
+        },
+        "memory_sampled_peak_mb": {
+          "median": 484.105,
+          "min": 483.355,
+          "max": 484.855
+        }
+      }
+    }
+  ],
+  "system_info": {
+    "os": {
+      "system": "Windows",
+      "release": "11",
+      "version": "10.0.26200"
+    },
+    "architecture": "AMD64",
+    "cpu_model": "AMD Ryzen 7 7735HS with Radeon Graphics",
+    "cpu_count": 16,
+    "physical_cpu_count": 8,
+    "memory_total_gb": 63.21,
+    "python_version": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+    "python_implementation": "CPython",
+    "package_version": "3.0.0",
+    "installed_distribution_version": "3.0.0",
+    "schema_version": "1.0",
+    "ruleset_version": "2026.09.21",
+    "scoring_version": "2.0",
+    "facts_version": "1.1",
+    "direct_dependencies": {
+      "aiohttp": "3.14.3",
+      "beautifulsoup4": "4.15.0",
+      "click": "8.5.0",
+      "jinja2": "3.1.6",
+      "rich": "15.0.0",
+      "textstat": "0.7.13",
+      "validators": "0.35.0",
+      "pyyaml": "6.0.3",
+      "python-dateutil": "2.9.0.post0",
+      "urllib3": "2.7.0",
+      "psutil": "7.2.2"
+    },
+    "optional_dependencies": {
+      "lxml": "6.1.3",
+      "openpyxl": "3.1.5",
+      "pandas": "3.0.5"
+    },
+    "readability_dependencies": {
+      "nltk": "3.10.3",
+      "pyphen": "0.18.1",
+      "cmudict": null
+    },
+    "source_fingerprint": {
+      "algorithm": "sha256",
+      "scope": "package Python source paths and bytes",
+      "file_count": 23,
+      "digest": "077a203b8b1c65de3022f4001a48cc6a1897e89624e9e7e8f967d20f525f4893"
+    },
+    "timestamp": "2026-09-21T03:48:44.996515+00:00"
+  },
+  "source_unchanged_during_suite": true,
+  "errors": [],
+  "suite": {
+    "scenarios": [
+      "basic",
+      "content-heavy",
+      "link-dense",
+      "mixed"
+    ],
+    "page_counts": [
+      500
+    ],
+    "repetitions": 2,
+    "timeout_seconds": 360.0,
+    "order": "Page counts, then scenarios, then repetitions, in supplied order.",
+    "isolation": "Same process; fresh analyzer per run, disabled page cache; library caches and allocator state may remain warm."
+  },
+  "execution_guard": {
+    "dns_attempts": 0,
+    "external_connection_attempts": 0,
+    "network_policy": "DNS and non-loopback TCP connects blocked; loopback allowed for asyncio internals.",
+    "parent_hard_timeout_seconds": 1200
+  }
+}

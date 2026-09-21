@@ -110,7 +110,13 @@ rate limits, retry statuses/backoff, domain/scheme/exclusion filters, sitemap
 discovery, proxy, connection pooling, DNS/robots cache TTLs, and bounded analysis
 cache size/TTL. Analysis supports weighted category scores and bounded optional
 external link checks. `Config.SUPPORTED_FIELDS` lists the active component
-settings in [config.py](tfq0seo/core/config.py).
+settings in [config.py](https://github.com/TFQ0/tfq0seo/blob/main/tfq0seo/core/config.py).
+
+`max_memory_mb` is a sampled process-RSS guard checked during page-analysis
+progress, not a hard allocation limit. Synchronous report assembly can exceed
+it; the recorded 2,000-page workload peaked above the default 1,024 MiB value.
+Budget memory for the complete report and use an external process limit when
+a hard bound is required. See the scale validation results below.
 
 Unknown keys, invalid types, conflicting aliases, and retired configuration
 fields fail validation. Active dataclasses and saved configurations expose
@@ -119,7 +125,7 @@ monitoring, webhooks, email delivery, PDF export, and `dry_run` remain
 unimplemented. Use the explicit `Config.migrate_dict()` migration for older
 configuration files; it removes only retired values matching their historical
 defaults and rejects unsupported requested behavior. See the
-[configuration migration guide](docs/configuration-migration.md) before upgrading.
+[configuration migration guide](https://github.com/TFQ0/tfq0seo/blob/main/docs/configuration-migration.md) before upgrading.
 
 ## Python API
 
@@ -152,7 +158,7 @@ while retaining its bounded analysis cache.
 ## Interpreting results
 
 Results carry `schema_version: "1.0"`; compatible dictionary contracts are
-defined in [models.py](tfq0seo/core/models.py).
+defined in [models.py](https://github.com/TFQ0/tfq0seo/blob/main/tfq0seo/core/models.py).
 
 - Page `status` is `complete`, `partial`, `error`, or `skipped`. Fetch failures
   retain their URL, status, and error. Analyzer failures have an error and a
@@ -179,6 +185,8 @@ defined in [models.py](tfq0seo/core/models.py).
   Readability never downloads dictionaries at runtime. If the installed
   textstat backend needs unavailable local NLTK `corpora/cmudict` data, estimates
   remain `null`, with an explicit unavailable status and missing-resource reason.
+  Provision the `cmudict` corpus during environment setup if you need those
+  estimates; see [NLTK's data installation guide](https://www.nltk.org/data.html).
 
 HTML escapes page-supplied text and restricts clickable URLs to HTTP(S). CSV and
 XLSX neutralize formula-like text. The enhanced HTML report uses optional
@@ -255,7 +263,7 @@ provenance, hashes, counts, and shared observations. Its default export omits ra
 response-header values, full HTML/text, and script bodies. The extraction
 version also participates in cache identity.
 
-[models.py](tfq0seo/core/models.py) defines fetch, rule, analyzer, page, and site
+[models.py](https://github.com/TFQ0/tfq0seo/blob/main/tfq0seo/core/models.py) defines fetch, rule, analyzer, page, and site
 contracts and re-exports `PageFacts`. Malformed supplied fields raise
 `ContractError` with a field path before analysis or export. Invalid analyzer
 outputs become explicit analyzer errors with unavailable scores and are not
@@ -268,11 +276,11 @@ checks. Non-finite numbers and unsupported Python objects are rejected rather
 than silently converted to strings; invalid reports are rejected before opening
 an output file. JSON schema version `1.0` and existing report layouts remain
 supported. Validators are available in
-[report_contracts.py](tfq0seo/core/report_contracts.py).
+[report_contracts.py](https://github.com/TFQ0/tfq0seo/blob/main/tfq0seo/core/report_contracts.py).
 
 ## Rules, applicability, and scoring
 
-The rule registry in [rules.py](tfq0seo/rules.py) contains immutable definitions
+The rule registry in [rules.py](https://github.com/TFQ0/tfq0seo/blob/main/tfq0seo/rules.py) contains immutable definitions
 registered by each analyzer. Every active rule has a stable ID, a category owner,
 severity, recommendation, applicability description, supporting reference URLs,
 and a review date. The reference supports the observation or guidance; numeric
@@ -352,7 +360,7 @@ they are not browser-performance measurements or a production-site capacity
 guarantee. Basic, content-heavy, link-dense, and mixed scenarios retain every
 raw measurement, workload/source fingerprints, full effective configuration,
 dependency versions, and per-case summaries. See the
-[scale validation guide and recorded measurements](docs/scale-validation.md)
+[scale validation guide and recorded measurements](https://github.com/TFQ0/tfq0seo/blob/main/docs/scale-validation.md)
 for workload definitions, resource limits, and measured results. Network
 benchmark functions remain explicit opt-in Python APIs.
 
@@ -411,4 +419,3 @@ publisher, compare the repository owner, repository name, workflow filename,
 and environment against the values above before retrying. PyPI does not allow
 an uploaded distribution filename to be reused, so retries after a successful
 upload require checking what was already published.
-
