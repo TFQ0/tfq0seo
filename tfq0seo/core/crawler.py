@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse, urlunparse
-from urllib.robotparser import RobotFileParser
 from xml.etree import ElementTree
 
 import aiohttp
@@ -21,6 +20,7 @@ from aiohttp import ClientError, ClientTimeout
 from bs4 import BeautifulSoup, FeatureNotFound, UnicodeDammit
 from ..urls import resolve_url
 from .models import FetchResult, normalize_fetch_result
+from .robots import RobotsRules
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +203,12 @@ class EnhancedCrawler:
         self.visited_urls: Set[str] = set()
         self.failed_urls: Dict[str, str] = {}
         self.results: List[Dict[str, Any]] = []
-        self.robots_cache: Dict[str, Tuple[RobotFileParser, float]] = {}
+        self.result_buffer_capacity = None
+        self.result_buffer_peak = 0
+        self._result_slots = None
+        self._buffer_in_use = 0
+        self._buffered_results = set()
+        self.robots_cache: Dict[str, Tuple[RobotsRules, float]] = {}
         self._robots_locks = defaultdict(asyncio.Lock)
         self._robots_sitemaps = {}
         self.session: Optional[aiohttp.ClientSession] = None
@@ -549,7 +554,7 @@ class EnhancedCrawler:
                 return cached[0]
             response = await self._request(robots_url, self._base_url or url, kind='robots',
                                            max_bytes=min(self.max_content_length, 512000))
-            rp = RobotFileParser()
+            rp = RobotsRules()
             status = response['status_code']
             if status == 200 and not response.get('error'):
                 rp.parse(response['content'].decode('utf-8-sig', errors='replace').splitlines())
@@ -673,6 +678,44 @@ class EnhancedCrawler:
         elif parent_url is not None:
             self._parents[normalized] = parent_url
 
+    def set_result_buffer_limit(self, limit):
+        """Bound queued fetches through analysis; consumers must release results.
+
+        Standalone crawls retain their usual list behavior. The application
+        enables this handoff before starting a site crawl and releases a slot
+        only after it discards that result's parsed HTML.
+        """
+        if type(limit) is not int or limit <= 0:
+            raise ValueError('result buffer limit must be a positive integer')
+        if self._buffer_in_use:
+            raise RuntimeError('Cannot resize an active result buffer')
+        self.result_buffer_capacity = limit
+        self.result_buffer_peak = 0
+        self._result_slots = asyncio.Semaphore(limit)
+
+    def release_result(self, result):
+        if id(result) in self._buffered_results:
+            self._buffered_results.remove(id(result))
+            self._buffer_in_use -= 1
+            self._result_slots.release()
+
+    async def _fetch_queued_page(self, url):
+        if self._result_slots is None:
+            return await self.fetch_page(url)
+        await self._result_slots.acquire()
+        self._buffer_in_use += 1
+        self.result_buffer_peak = max(self.result_buffer_peak, self._buffer_in_use)
+        result = None
+        try:
+            result = await self.fetch_page(url)
+            if result is not None:
+                self._buffered_results.add(id(result))
+            return result
+        finally:
+            if result is None:  # Duplicate, failed coroutine, or cancellation.
+                self._buffer_in_use -= 1
+                self._result_slots.release()
+
     async def _run_queue(self, max_pages, follow_links):
         initial_count = len(self.results)
         active = {}
@@ -687,7 +730,7 @@ class EnhancedCrawler:
                     _, depth, url = self.url_queue.get()
                     if depth > self.max_depth:
                         continue
-                    task = asyncio.create_task(self.fetch_page(url))
+                    task = asyncio.create_task(self._fetch_queued_page(url))
                     active[task] = (url, depth)
                 if not active:
                     break
@@ -724,6 +767,9 @@ class EnhancedCrawler:
                 task.cancel()
             if active:
                 await asyncio.gather(*active, return_exceptions=True)
+                for task in active:
+                    if not task.cancelled() and task.exception() is None:
+                        self.release_result(task.result())
                 if self._interrupted_fetches is not None:
                     # wait_for can cancel before a separately sampled clock reaches
                     # its deadline. The caller decides whether this was a timeout.

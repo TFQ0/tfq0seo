@@ -7,6 +7,7 @@ import json
 import math
 import platform
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -56,15 +57,15 @@ def _cpu_model():
 
 
 def _source_fingerprint():
-    """Identify the measured Python implementation without recording local paths."""
+    """Identify measured code and packaged templates without local paths."""
     root = Path(__file__).resolve().parent
     digest = hashlib.sha256()
     count = 0
-    for path in sorted(root.rglob('*.py')):
+    for path in sorted(path for path in root.rglob('*') if path.suffix in ('.py', '.html')):
         digest.update(path.relative_to(root).as_posix().encode('utf-8') + b'\0')
         digest.update(path.read_bytes())
         count += 1
-    return {'algorithm': 'sha256', 'scope': 'package Python source paths and bytes',
+    return {'algorithm': 'sha256', 'scope': 'package Python and HTML template paths and bytes',
             'file_count': count, 'digest': digest.hexdigest()}
 
 
@@ -400,6 +401,142 @@ def compare_with_targets() -> Dict[str, Any]:
     return {}
 
 
+async def benchmark_pipeline(page_count: int = 500, scenario: str = 'basic',
+                             timeout_seconds: Optional[float] = None) -> Dict[str, Any]:
+    """Measure real loopback HTTP crawling, analysis, reporting, and file exports.
+
+    The seed links to every fixture so depth does not truncate a large site.
+    Referenced assets and off-site destinations are excluded from crawling.
+    Files live in a temporary directory; their sizes and hashes are retained.
+    """
+    from aiohttp import web
+    from .exporters.base import ExportManager, OPENPYXL_AVAILABLE
+
+    _check_offline_options(page_count, scenario, timeout_seconds)
+    config = Config.from_dict({
+        'crawler': {'cache_enabled': False, 'max_pages': page_count, 'max_depth': 2,
+                    'use_sitemap': False, 'delay_between_requests': 0, 'adaptive_delay': False,
+                    'excluded_patterns': [r'/assets/'],
+                    'max_crawl_time': max(1, math.ceil(timeout_seconds or 3600))},
+        'export': {'html_template': 'optimized'},
+    })
+    formats = ['json', 'html', 'csv'] + (['xlsx'] if OPENPYXL_AVAILABLE else [])
+    metadata = {
+        'scenario': scenario, 'requested_pages': page_count, 'fixture_version': 1,
+        'network_access': 'loopback HTTP only', 'config': config.to_dict(),
+        'timeout_seconds': timeout_seconds, 'timed_out': False,
+        'timeout_scope': 'Cooperative crawl deadline and checks between synchronous report/export stages.',
+        'workload': 'Loopback HTTP including robots, bounded crawling, static analysis, report generation, atomic exports, and file hashing. No browser or remote requests.',
+        'exports': [], 'unavailable_exports': [] if OPENPYXL_AVAILABLE else ['xlsx'],
+        'report_completeness': None,
+        'readability': {'status_counts': {}, 'missing_resources': []},
+    }
+
+    async def operation(record):
+        started = time.perf_counter()
+
+        def check_deadline():
+            if timeout_seconds is not None and time.perf_counter() - started > timeout_seconds:
+                metadata['timed_out'] = True
+                raise TimeoutError('Pipeline benchmark exceeded its cooperative deadline')
+
+        requests = {}
+        base = ''
+
+        def fixture(index, origin):
+            html, variant = _fixture_html(index, page_count, scenario)
+            html = html.replace('https://benchmark.test', origin)
+            if index == 0:
+                fanout = ''.join(f'<a href="/page/{i}">Fixture {i}</a>' for i in range(1, page_count))
+                html = html.replace('</body>', '<nav>' + fanout + '</nav></body>')
+            return html, variant
+
+        digest = hashlib.sha256()
+        for index in range(page_count):
+            html, _ = fixture(index, 'https://benchmark.test')
+            digest.update(str(index).encode() + b'\0' + html.encode('utf-8'))
+        metadata['fixture_sha256'] = digest.hexdigest()
+        metadata['fixture_transform'] = 'Canonical origin replaced by loopback origin; seed fanout to all fixture pages. Hash uses benchmark.test before origin substitution.'
+
+        async def handler(request):
+            requests[request.path] = requests.get(request.path, 0) + 1
+            if request.path == '/robots.txt':
+                return web.Response(text='User-agent: *\nDisallow: /assets/\n')
+            try:
+                index = int(request.match_info['index'])
+            except (KeyError, ValueError):
+                raise web.HTTPNotFound()
+            if not 0 <= index < page_count:
+                raise web.HTTPNotFound()
+            html, _ = fixture(index, base)
+            return web.Response(text=html, content_type='text/html')
+
+        application = web.Application()
+        application.router.add_get('/robots.txt', handler)
+        application.router.add_get('/page/{index}', handler)
+        runner = web.AppRunner(application)
+        await runner.setup()
+        try:
+            site = web.TCPSite(runner, '127.0.0.1', 0)
+            await site.start()
+            base = 'http://127.0.0.1:' + str(runner.addresses[0][1])
+            analyzer = SEOAnalyzer(config)
+            iterator = analyzer.crawl_site(base + '/page/0')
+            try:
+                async for result in iterator:
+                    record(result)
+                    readability = result.get('content', {}).get('data', {}).get('readability', {})
+                    status = readability.get('status', 'not_requested')
+                    counts = metadata['readability']['status_counts']
+                    counts[status] = counts.get(status, 0) + 1
+                    metadata['readability']['missing_resources'] = sorted(set(
+                        metadata['readability']['missing_resources'] + readability.get('missing_resources', [])))
+                    check_deadline()
+            finally:
+                await iterator.aclose()
+            metadata['analysis_duration_seconds'] = time.perf_counter() - started
+            metadata['http_requests'] = {'total': sum(requests.values()),
+                                         'robots': requests.get('/robots.txt', 0),
+                                         'pages': sum(count for path, count in requests.items() if path.startswith('/page/'))}
+            metadata['result_buffer'] = {'capacity': analyzer.crawler.result_buffer_capacity,
+                                          'peak': analyzer.crawler.result_buffer_peak}
+            stage = time.perf_counter()
+            report = analyzer.generate_site_report()
+            metadata['report_duration_seconds'] = time.perf_counter() - stage
+            rows = [row for group in ('detailed', 'failed', 'skipped') for row in report['pages'][group]]
+            urls = {row['url'] for row in rows}
+            expected = {base + f'/page/{index}' for index in range(page_count)}
+            metadata['report_completeness'] = {
+                'expected_pages': page_count, 'retained_rows': len(rows), 'unique_urls': len(urls),
+                'missing_urls': len(expected - urls), 'unexpected_urls': len(urls - expected),
+                'duplicate_rows': len(rows) - len(urls), 'complete': len(rows) == page_count and urls == expected,
+            }
+            metadata['report_status'] = report['status']
+            metadata['report_summary'] = report['summary']
+            if not metadata['report_completeness']['complete']:
+                raise RuntimeError('Pipeline report did not retain every expected fixture URL exactly once')
+            check_deadline()
+            with tempfile.TemporaryDirectory(prefix='tfq0seo-pipeline-') as directory:
+                exporter = ExportManager({'output_directory': directory, 'html_template': 'optimized'})
+                for format in formats:
+                    stage = time.perf_counter()
+                    path = Path(exporter.export(report, format, str(Path(directory, 'report.' + format))))
+                    duration = time.perf_counter() - stage
+                    digest = hashlib.sha256()
+                    with path.open('rb') as stream:
+                        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                            digest.update(chunk)
+                    metadata['exports'].append({'format': format, 'bytes': path.stat().st_size,
+                                                 'sha256': digest.hexdigest(), 'duration_seconds': duration})
+                    check_deadline()
+            metadata['export_duration_seconds'] = sum(item['duration_seconds'] for item in metadata['exports'])
+            return {'report_status': report['status']}
+        finally:
+            await runner.cleanup()
+
+    return await _measure('pipeline', operation, metadata, expected_results=page_count)
+
+
 def _summarize_runs(runs):
     groups = {}
     for run in runs:
@@ -408,7 +545,7 @@ def _summarize_runs(runs):
     for (scenario, page_count), group in groups.items():
         complete = [run for run in group if run['status'] == 'complete']
         metrics = {}
-        for name in ('duration_seconds', 'analysis_duration_seconds', 'report_duration_seconds',
+        for name in ('duration_seconds', 'analysis_duration_seconds', 'report_duration_seconds', 'export_duration_seconds',
                      'pages_per_second', 'memory_rss_delta_mb', 'memory_sampled_peak_mb'):
             values = [run[name] for run in complete if isinstance(run.get(name), (int, float))]
             if values:
@@ -425,7 +562,7 @@ def _summarize_runs(runs):
 
 async def run_all_benchmarks(page_count: int = 500, output_file: Optional[str] = None, *,
                              scenarios=None, repetitions: int = 1, page_counts=None,
-                             timeout_seconds: Optional[float] = None):
+                             timeout_seconds: Optional[float] = None, pipeline: bool = False):
     """Save offline runs and summaries; default remains one basic 500-page run.
 
     Repetitions run in the same process, with a fresh analyzer and disabled page
@@ -448,7 +585,9 @@ async def run_all_benchmarks(page_count: int = 500, output_file: Optional[str] =
         for scenario in selected:
             for repetition in range(1, repetitions + 1):
                 # Preserve the original default call shape for API wrappers.
-                if scenario == 'basic' and timeout_seconds is None:
+                if pipeline:
+                    run = await benchmark_pipeline(size, scenario=scenario, timeout_seconds=timeout_seconds)
+                elif scenario == 'basic' and timeout_seconds is None:
                     run = await benchmark_offline(size)
                 else:
                     run = await benchmark_offline(size, scenario=scenario, timeout_seconds=timeout_seconds)
@@ -465,8 +604,9 @@ async def run_all_benchmarks(page_count: int = 500, output_file: Optional[str] =
         'summaries': _summarize_runs(benchmarks),
         'system_info': environment,
         'source_unchanged_during_suite': source_unchanged,
-        'errors': [] if source_unchanged else ['Package Python source changed during measurement; repeat on a stable checkout.'],
+        'errors': [] if source_unchanged else ['Package source changed during measurement; repeat on a stable checkout.'],
         'suite': {'scenarios': selected, 'page_counts': sizes, 'repetitions': repetitions,
+                  'workload': 'pipeline' if pipeline else 'offline',
                   'timeout_seconds': timeout_seconds,
                   'order': 'Page counts, then scenarios, then repetitions, in supplied order.',
                   'isolation': 'Same process; fresh analyzer per run, disabled page cache; library caches and allocator state may remain warm.'},
@@ -514,12 +654,15 @@ def main(argv=None):
     parser.add_argument('--timeout-seconds', type=_positive_float,
                         help='cooperative deadline per run; synchronous work may overrun it')
     parser.add_argument('--output', help='JSON results path (default: timestamped file)')
+    parser.add_argument('--pipeline', action='store_true',
+                        help='measure loopback HTTP crawling through atomic JSON/HTML/CSV exports (also XLSX when installed)')
     args = parser.parse_args(argv)
     try:
         results = asyncio.run(run_all_benchmarks(
             args.pages[0], args.output, page_counts=args.pages,
             scenarios=SCENARIOS if args.suite else [args.scenario],
-            repetitions=args.repetitions, timeout_seconds=args.timeout_seconds))
+            repetitions=args.repetitions, timeout_seconds=args.timeout_seconds,
+            **({'pipeline': True} if args.pipeline else {})))
         return 0 if results['status'] == 'complete' else 1
     except KeyboardInterrupt:
         print('Benchmark interrupted.', file=sys.stderr)

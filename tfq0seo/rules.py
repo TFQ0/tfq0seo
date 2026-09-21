@@ -146,7 +146,7 @@ class RuleCollector:
 
 
 def rule_coverage(results):
-    merged = merge_rule_results(results)
+    merged = merge_rule_results(results, copy_evidence=False)
     counts = Counter(result['status'] for result in merged)
     has_errors = any(observation.get('status') == 'error' for result in merged
                      for observation in result.get('observations', [result]))
@@ -158,8 +158,12 @@ def rule_coverage(results):
             'scope': 'Evaluations actually attempted; disabled rules and analyzers are not assumed to pass.'}
 
 
-def merge_rule_results(results):
-    """Merge duplicate evaluations without discarding their evidence or observers."""
+def merge_rule_results(results, *, copy_evidence=True):
+    """Merge evaluations, copying evidence by default for independent callers.
+
+    Internal read-only aggregation can share evidence that it already owns.
+    Neither mode changes input records or their nested values.
+    """
     from .core.models import validate_rule_result
     merged = OrderedDict()
     precedence = {'not_applicable': 0, 'pass': 1, 'informational': 2, 'unknown': 3, 'error': 4, 'fail': 5}
@@ -167,10 +171,10 @@ def merge_rule_results(results):
         validate_rule_result(original)
         rule_id = original.get('rule_id')
         get_rule(rule_id)
-        result = copy.deepcopy(original)
+        result = copy.deepcopy(original) if copy_evidence else dict(original)
         if result.get('status') not in STATUSES:
             raise ValueError('Invalid rule evaluation status')
-        observation = {key: copy.deepcopy(result.get(key)) for key in
+        observation = {key: result.get(key) for key in
                        ('status', 'applicability', 'evidence', 'source', 'reason', 'reported_by')}
         if rule_id not in merged:
             result['observations'] = result.get('observations') or [observation]

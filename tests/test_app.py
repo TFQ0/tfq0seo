@@ -20,6 +20,21 @@ def config(**crawler):
                                          'max_retries': 0, **crawler}})
 
 
+def test_report_evidence_remains_independent_of_supplied_pages():
+    async def run():
+        analyzer = SEOAnalyzer(config(cache_enabled=False))
+        source = await analyzer.analyze_page(page(body='<h1>Example</h1><img src="/image.png">'))
+        before = copy.deepcopy(source)
+        report = analyzer.generate_site_report([source])
+        detail = report['pages']['detailed'][0]
+        issue = next(item for item in detail['issues'] if item['rule_id'] == 'images.missing_alt')
+        issue['evidence']['test_extension'] = ['owned by report']
+        assert source == before
+        source['page_facts']['test_extension'] = 'owned by source'
+        assert 'test_extension' not in detail['page_facts']
+    asyncio.run(run())
+
+
 def test_analysis_mode_and_enabled_selection():
     cfg = Config.from_dict({'profile': 'quick'})
     analyzer = SEOAnalyzer(cfg)
