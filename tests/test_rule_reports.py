@@ -3,7 +3,6 @@
 import asyncio
 import copy
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -119,10 +118,9 @@ def test_rule_metadata_does_not_drop_paginated_pages(tmp_path, analyzed_page, te
     report = SEOAnalyzer().generate_site_report(pages)
     soup, html, exporter = render(tmp_path, template, report)
     assert len(exporter._prepare_html_data(report)['pages_summary']) == 25
-    if template == 'optimized':
-        embedded = re.search(r'const pagesData = (.*);', html).group(1)
-        assert len(json.loads(embedded)) == 25
-        assert 'Page 1 of 2' in soup.get_text()
-    else:
-        assert len(soup.select('.pages-table tbody tr')) == 25
+    embedded = json.loads(soup.select_one('#pages-data').string)
+    assert len(embedded) == 25
+    assert {page['url'] for page in embedded} == {page['url'] for page in pages}
+    assert 'Page 1 of 2' in soup.select_one('#pageInfo').get_text()
+    assert len(soup.select('#pagesTable tbody tr')) == 20
     assert soup.select('.rule-metadata')

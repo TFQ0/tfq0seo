@@ -476,7 +476,8 @@
         
         <!-- Overview Tab -->
         <div class="tab-panel active" id="overview">
-            {{ rule_overview(scoring_policies, scoring_versions, rule_coverage) }}
+            {% include "audit_summary.html" %}
+        {{ rule_overview(scoring_policies, scoring_versions, rule_coverage) }}
             {% include "site_analysis.html" %}
             <div class="score-grid">
                 <div class="score-card">
@@ -676,20 +677,7 @@
     </div>
     
 
-        {% if pages_summary|length > 1 or summary %}
-        <section class="pages-section">
-            <h2>Pages ({{ pages_summary|length }})</h2>
-            <table class="pages-table">
-                <thead><tr><th>URL</th><th>Score</th><th>Status</th><th>Load time</th><th>Issues</th><th>Analysis status</th></tr></thead>
-                <tbody>{% for page in pages_summary %}
-                <tr><td>{{ page.url }}</td><td>{{ page.score|number }}</td>
-                <td>{{ page.status_code if page.status_code is not none else 'Unavailable' }}</td>
-                <td>{{ page.load_time|number(2, 's') }}</td><td>{{ page.issue_count }}</td>
-                <td>{{ page.error or page.status or '' }}</td></tr>
-                {% endfor %}</tbody>
-            </table>
-        </section>
-        {% endif %}
+        {% include "page_inventory.html" %}
 
     <script>
         // Dark mode toggle

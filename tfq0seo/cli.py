@@ -50,6 +50,13 @@ def create_summary_table(results: dict) -> Table:
     for name in ('total_pages', 'successful_pages', 'partial_pages', 'failed_pages', 'skipped_pages'):
         if name in results.get('summary', {}):
             table.add_row(name.replace('_', ' ').title(), str(results['summary'][name]))
+    summary = results.get('summary', {})
+    if summary.get('page_limit') is not None:
+        table.add_row('Page Limit (Maximum)', str(summary['page_limit']))
+    if summary.get('analysis_duration') is not None:
+        table.add_row('Crawl + Analysis Elapsed', f"{summary['analysis_duration']:.2f}s")
+    if results.get('crawl_stats', {}).get('requests_made') is not None:
+        table.add_row('HTTP Requests (Including Discovery)', str(results['crawl_stats']['requests_made']))
     table.add_row('Status', results.get('status', 'complete'))
     return table
 

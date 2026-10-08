@@ -92,7 +92,8 @@ async def main():
         assert site['links']['node_count'] == 2 and site['links']['edge_count'] == 1
         assert {'site.canonical_chain', 'site.canonical_target_redirect'} <= {
             item['rule_id'] for item in site['findings']}
-        for filename in ('rule_metadata.html', 'site_analysis.html'):
+        for filename in ('rule_metadata.html', 'site_analysis.html', 'audit_summary.html',
+                         'page_inventory.html', 'findings.html'):
             assert (Path(tfq0seo.__file__).resolve().parent / 'templates' / filename).is_file()
             exporter.jinja_env.get_template(filename)
         templates = {'report': 'report.html', 'enhanced': 'enhanced_report.html', 'optimized': 'optimized_report.html'}

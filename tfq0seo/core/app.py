@@ -179,13 +179,23 @@ class SEOAnalyzer:
         self._run_limits = []
         self._discovery_errors = []
         self._site_start_url = None
+        self._run_started = None
+        self._run_duration = None
+        self._network_stats = []
 
     def _begin_run(self) -> None:
         self.config.require_valid()
         self._reset_state()
         self._start_time = time.time()
         self.stats.analysis_start = self._start_time
+        self._run_started = time.perf_counter()
         self._semaphore = asyncio.Semaphore(self.config.analysis.max_analysis_threads)
+
+    def _track_crawler(self, crawler):
+        # Keep only the small counters, including discovery and external checks.
+        stats = getattr(crawler, 'stats', None)
+        if stats is not None:
+            self._network_stats.append(stats)
 
     def _get_page_priority(self, url: str, depth: int = 0) -> PagePriority:
         try:
@@ -479,9 +489,9 @@ class SEOAnalyzer:
         self._update_progress()
 
     def _update_progress(self):
-        if self._start_time:
-            elapsed = max(time.time() - self._start_time, 0.000001)
-            self.progress.speed_pages_per_sec = self.progress.pages_analyzed / elapsed
+        if self._run_started is not None:
+            elapsed = max(time.perf_counter() - self._run_started, 0.000001)
+            self.progress.speed_pages_per_sec = self.stats.successful_analyses / elapsed
         memory = psutil.Process().memory_info().rss / 1024 / 1024
         self.stats.memory_peak_mb = max(self.stats.memory_peak_mb, memory)
         if memory > self.config.max_memory_mb:
@@ -492,6 +502,7 @@ class SEOAnalyzer:
         try:
             async with Crawler(self.config.crawler.as_dict()) as crawler:
                 self.crawler = crawler
+                self._track_crawler(crawler)
                 raw = await crawler.fetch_page(url)
                 result = await self.analyze_page(raw or {'url': url, 'error': 'No fetch result'})
                 self.results.append(result)
@@ -505,6 +516,7 @@ class SEOAnalyzer:
         try:
             async with Crawler(self.config.crawler.as_dict()) as crawler:
                 self.crawler = crawler
+                self._track_crawler(crawler)
                 iterator = self._analyze_url_list(crawler, urls)
                 try:
                     async for result in iterator:
@@ -543,6 +555,7 @@ class SEOAnalyzer:
         self._begin_run()
         try:
             async with Crawler(self.config.crawler.as_dict()) as discovery:
+                self._track_crawler(discovery)
                 urls = await discovery.parse_sitemap(sitemap_url, self.config.crawler.max_pages)
                 self._run_limits.extend(discovery.limit_reasons)
                 self._discovery_errors.extend(copy.deepcopy(discovery.discovery_errors))
@@ -555,6 +568,7 @@ class SEOAnalyzer:
                     return self.results
             async with Crawler(self.config.crawler.as_dict()) as crawler:
                 self.crawler = crawler
+                self._track_crawler(crawler)
                 async for _ in self._analyze_url_list(crawler, urls):
                     pass
             await self._complete_run()
@@ -569,6 +583,7 @@ class SEOAnalyzer:
         try:
             async with Crawler(self.config.crawler.as_dict()) as crawler:
                 self.crawler = crawler
+                self._track_crawler(crawler)
                 crawler.set_result_buffer_limit(
                     self.config.crawler.effective_concurrency + self.config.analysis.max_analysis_threads)
                 producer = asyncio.create_task(crawler.crawl_site(start_url, self.config.crawler.max_pages))
@@ -645,6 +660,7 @@ class SEOAnalyzer:
         settings = self.config.crawler.as_dict()
         settings.update(timeout=self.config.analysis.external_link_timeout, use_sitemap=False)
         async with Crawler(settings) as checker:
+            self._track_crawler(checker)
             for start in range(0, len(targets), self.config.crawler.effective_concurrency):
                 tasks = [asyncio.create_task(checker.fetch_page(url)) for url in
                          targets[start:start + self.config.crawler.effective_concurrency]]
@@ -731,6 +747,10 @@ class SEOAnalyzer:
 
     def _calculate_final_stats(self):
         self.stats.analysis_end = time.time()
+        if self._run_started is not None:
+            self._run_duration = max(0, time.perf_counter() - self._run_started)
+            self.progress.speed_pages_per_sec = (
+                self.stats.successful_analyses / self._run_duration if self._run_duration else 0)
         self.stats.total_pages = len(self.results)
         if self._page_times:
             self.stats.avg_analysis_time = sum(self._page_times) / len(self._page_times)
@@ -811,6 +831,14 @@ class SEOAnalyzer:
         observations = self._observed_statuses(pages + link_checks)
         broken = sorted({page['url'] for page in pages + link_checks
                          if observations.get(self._url_identity(page['url']), 0) >= 400})
+        network_stats = self._network_stats if current_run else []
+        request_counts = Counter()
+        robots_delays = {}
+        for network in network_stats:
+            request_counts.update(network.requests_by_kind)
+            for origin, delay in network.robots_delays.items():
+                robots_delays[origin] = max(delay, robots_delays.get(origin, 0))
+        duration = self._run_duration if current_run else None
         report = {
             'schema_version': SCHEMA_VERSION,
             'site_analysis': site_analysis,
@@ -819,8 +847,15 @@ class SEOAnalyzer:
             'summary': {'total_pages': len(pages), 'successful_pages': len(usable) - len(partial_pages),
                         'partial_pages': len(partial_pages), 'failed_pages': len(failed), 'skipped_pages': len(skipped),
                         'analysis_mode': self.mode.value, 'analysis_timestamp': time.time(),
-                        'analysis_duration': max(0, self.stats.analysis_end - self.stats.analysis_start)
-                        if current_run and self.stats.analysis_end else 0,
+                        'analysis_duration': duration,
+                        'duration_scope': 'Crawl, pacing, discovery, and analysis; excludes report assembly and export.',
+                        'html_pages_analyzed': len(usable),
+                        'unique_urls': len({self._url_identity(page['url']) for page in pages}),
+                        'page_limit': self.config.crawler.max_pages if current_run else None,
+                        'completion_reason': ('not_recorded' if not current_run else
+                                              'limits_reached' if run_limits else
+                                              'discovery_errors' if discovery_errors else
+                                              'queue_exhausted' if self._site_start_url else 'input_processed'),
                         'crawl_complete': crawl_complete,
                         'limits_reached': run_limits,
                         'discovery_errors': discovery_errors,
@@ -844,6 +879,13 @@ class SEOAnalyzer:
                                  'link_checks': copy.deepcopy(link_checks)},
             'performance_metrics': generate_performance_metrics(pages),
             'crawl_stats': {'pages_per_second': self.progress.speed_pages_per_sec if current_run else 0,
+                            'throughput_scope': 'Analyzed HTML pages (complete or partial) per elapsed crawl/analysis second; excludes failed and skipped URLs.',
+                            'requests_made': sum(stats.requests_made for stats in network_stats) if network_stats else None,
+                            'requests_by_kind': dict(request_counts),
+                            'robots_delays': robots_delays,
+                            'bytes_downloaded': sum(stats.bytes_downloaded for stats in network_stats) if network_stats else None,
+                            'unique_content_count': len({page['content_hash'] for page in pages if page.get('content_hash')})
+                            if any(page.get('content_hash') for page in pages) else None,
                             'result_buffer_capacity': getattr(self.crawler, 'result_buffer_capacity', None) if current_run else None,
                             'result_buffer_peak': getattr(self.crawler, 'result_buffer_peak', 0) if current_run else 0,
                             'avg_analysis_time': self.stats.avg_analysis_time if current_run else 0,
@@ -857,8 +899,12 @@ class SEOAnalyzer:
                                    'depth': page.get('context', {}).get('depth')} for page in usable],
                       'detailed': usable, 'failed': failed, 'skipped': skipped},
             'metadata': {'analyzer_version': self.config.version, 'schema_version': SCHEMA_VERSION,
+                         'start_url': self._site_start_url if current_run else None,
                          'config': {'max_pages': self.config.crawler.max_pages, 'analysis_mode': self.mode.value,
                                     'concurrent_requests': self.config.crawler.effective_concurrency,
+                                    'max_depth': self.config.crawler.max_depth,
+                                    'respect_robots_txt': self.config.crawler.respect_robots_txt,
+                                    'delay_between_requests': self.config.crawler.delay_between_requests,
                                     'enabled_analyzers': self._enabled_analyzers()}},
         }
         recommendations = generate_specific_recommendations(report)

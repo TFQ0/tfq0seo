@@ -385,6 +385,37 @@ and browse 20 findings per page. Details expose complete evidence on demand.
 This view runs locally in the report and requires JavaScript, without Chart.js
 or network access. JSON retains every finding as well.
 
+All three HTML templates include **Crawl coverage & timing** and a **Pages &
+response times** inventory. They distinguish the configured page limit from
+recorded URLs and complete/partial/failed/skipped outcomes. Search by URL,
+title, description, or error; filter outcomes; sort by fetch time, score, or
+finding count; and paginate every record. Expand **Page details** for metadata,
+word/link counts, headings, canonical/robots observations, category scores,
+findings, recommendations, and individual timing measurements. The optimized
+template's performance charts work offline without external scripts.
+
+`summary.analysis_duration` uses a monotonic clock and covers discovery, pacing,
+fetching, and analysis, excluding report assembly/export. `crawl_stats` records
+HTTP requests by kind (including retries), applied robots crawl delays, and
+analysis cache hits. Its page throughput counts analyzed HTML pages, excluding
+failed/skipped URLs. Imported reports without run context keep these measurements
+unavailable. Per-page `load_time` is network time; `timings.total_seconds` also
+includes fetch waiting/pacing, while headers and download timings describe the
+final response. Concurrent timings overlap and should not be added to estimate
+total elapsed time.
+
+A fast command exit is not evidence of a completed crawl. For example, this
+command must include the URL; omitting it produces a usage error (exit code 2)
+without creating a report:
+
+```bash
+tfq0seo crawl https://example.com --depth 5 --max-pages 500 --concurrent 5 --format json --output audit.json
+```
+
+`--max-pages 500` sets a ceiling; fewer discoverable pages can produce a smaller
+report. Inspect the actual counts, discovery gaps, and completion reason. See
+[the live-site verification](docs/report-validation.md) for a measured example.
+
 JSON, HTML, CSV, and XLSX exports write a temporary file beside the destination,
 close it successfully, and then atomically replace the destination. Rendering,
 serialization, write, and replacement failures preserve an existing report and

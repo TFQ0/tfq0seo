@@ -1,0 +1,67 @@
+<style>
+    .audit-panel { background: var(--bg-secondary, #fff); color: var(--color-dark, #202124); border: 1px solid #d9e1eb; border-radius: 12px; padding: 24px; margin: 24px 0; }
+    .audit-panel h2, .audit-panel h3 { margin-bottom: 12px; }
+    .audit-panel p { margin: 10px 0; }
+    .audit-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 14px; margin: 18px 0; }
+    .audit-card { border: 1px solid #e1e7ef; border-radius: 8px; padding: 16px; background: #f8fafc; color: #202124; }
+    .audit-card strong { display: block; font-size: 28px; font-variant-numeric: tabular-nums; }
+    .audit-card span { display: block; font-size: 13px; color: #45546a; }
+    .audit-outcomes { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+    .audit-outcomes span { padding: 5px 10px; border-radius: 5px; background: #edf2f7; color: #202124; }
+    .audit-warning { padding: 14px; border-left: 4px solid #b7791f; background: #fff8e6; color: #513c0d; overflow-wrap: anywhere; }
+    .audit-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px 24px; margin: 14px 0; }
+    .audit-facts dt { font-size: 13px; color: #536079; }
+    .audit-facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+    .audit-panel ul { padding-left: 22px; }
+    .audit-panel a { overflow-wrap: anywhere; }
+    [data-theme="dark"] .audit-panel { color: #e8eaed; }
+    [data-theme="dark"] .audit-facts dt { color: #bbc8dd; }
+</style>
+<section class="audit-panel" aria-labelledby="audit-heading" id="audit-summary">
+    <h2 id="audit-heading">Crawl coverage &amp; timing</h2>
+    <p>{% if url|safe_url %}<a href="{{ url|safe_url }}" target="_blank" rel="noopener noreferrer">{{ url }}</a>{% else %}{{ url }}{% endif %}</p>
+    <div class="audit-cards">
+        <div class="audit-card"><strong data-metric="recorded">{{ audit.recorded }}</strong><span>URL records in this report</span></div>
+        <div class="audit-card"><strong data-metric="analyzed">{{ audit.analyzed }}</strong><span>HTML pages analyzed (complete + partial)</span></div>
+        <div class="audit-card"><strong data-metric="page-limit">{{ audit.page_limit|number }}</strong><span>Configured page limit</span></div>
+        <div class="audit-card"><strong data-metric="duration">{{ audit.duration|number(2, ' s') }}</strong><span>Crawl + analysis elapsed time</span></div>
+    </div>
+    <div class="audit-outcomes" aria-label="Page outcomes">
+        <span>Complete: <strong>{{ audit.complete }}</strong></span><span>Partial: <strong>{{ audit.partial }}</strong></span>
+        <span>Failed: <strong>{{ audit.failed }}</strong></span><span>Skipped: <strong>{{ audit.skipped }}</strong></span>
+        {% if audit.unknown %}<span>Status not recorded: <strong>{{ audit.unknown }}</strong></span>{% endif %}
+    </div>
+    <p><code>--max-pages</code> is an upper limit, not the number of pages found on the site.
+       Counts cover the URLs discovered or supplied for this run. JavaScript-generated routes and content are not rendered.</p>
+    <dl class="audit-facts">
+        <div><dt>HTTP requests (including discovery / retries)</dt><dd>{{ audit.requests|number }}</dd></div>
+        <div><dt>Analyzed HTML pages / second</dt><dd>{{ audit.throughput|number(2) }}</dd></div>
+        <div><dt>Analysis cache hits</dt><dd>{{ audit.cache_hits|number }}</dd></div>
+        <div><dt>Distinct recorded text hashes</dt><dd>{{ audit.unique_content|number }}</dd></div>
+        {% for kind, count in audit.requests_by_kind.items() %}<div><dt>{{ kind|title }} HTTP requests</dt><dd>{{ count }}</dd></div>{% endfor %}
+        {% for origin, delay in audit.robots_delays.items() %}<div><dt>Applied robots crawl delay — {{ origin }}</dt><dd>{{ delay|number(2, ' s') }}</dd></div>{% endfor %}
+        {% if audit.config %}
+        <div><dt>Configured concurrent requests</dt><dd>{{ audit.config.get('concurrent_requests')|number }}</dd></div>
+        {% if audit.config.get('max_depth') is not none %}<div><dt>Configured link depth limit</dt><dd>{{ audit.config.max_depth }}</dd></div>{% endif %}
+        <div><dt>Enabled analyzers</dt><dd>{{ audit.config.get('enabled_analyzers', [])|join(', ') }}</dd></div>
+        {% endif %}
+    </dl>
+    <p><strong>Completion:</strong>
+        {% if audit.completion_reason == 'queue_exhausted' %}No more eligible URLs remained in the discovered queue. This does not prove that every page on the website was found.
+        {% elif audit.completion_reason == 'input_processed' %}The supplied URL list was processed.
+        {% elif audit.completion_reason == 'limits_reached' %}A configured limit stopped coverage.
+        {% elif audit.completion_reason == 'discovery_errors' %}The discovered queue finished with discovery gaps; review the details below.
+        {% else %}The crawl completion reason was not recorded in this report.{% endif %}
+    </p>
+    {% if audit.failed or audit.skipped or audit.partial or audit.limits or audit.discovery_errors %}
+    <div class="audit-warning" role="status">
+        <strong>Coverage needs review.</strong> Failed, skipped, partial, and undiscovered pages are not successful full analyses.
+        {% if audit.limits %}<p>Limits reached: {{ audit.limits|join(', ') }}</p>{% endif %}
+        {% if audit.discovery_errors %}<details><summary>Discovery gaps ({{ audit.discovery_errors|length }})</summary>
+            <ul>{% for item in audit.discovery_errors %}<li>{{ item.url }} — {{ item.error }}</li>{% endfor %}</ul>
+        </details>{% endif %}
+    </div>
+    {% endif %}
+    <p>Elapsed time includes fetching, robots pacing, discovery, and analysis; it excludes report assembly and export.
+       Parallel requests overlap, so adding per-page timings does not give the run's elapsed time.</p>
+</section>

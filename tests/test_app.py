@@ -126,6 +126,66 @@ def test_http_statuses_and_even_median_are_preserved():
     assert metrics['load_time_stats']['median'] == 2
 
 
+def test_over_100_page_run_counts_real_requests_and_excludes_failures_from_speed(http_site):
+    import time
+    base, routes, requests = http_site
+    count = 110
+    routes['/robots.txt'] = (200, {'Content-Type': 'text/plain'}, 'User-agent: *\nAllow: /')
+    routes['/'] = (200, {'Content-Type': 'text/html'}, '<html><title>Start</title><h1>Start</h1>' +
+                  ''.join(f'<a href="/page/{i}">Page {i}</a>' for i in range(1, count)) + '</html>')
+    for i in range(1, count):
+        routes[f'/page/{i}'] = (200, {'Content-Type': 'text/html'}, f'<html><title>Page {i}</title><h1>Page {i}</h1></html>')
+    routes['/page/1'] = (404, {'Content-Type': 'text/html'}, 'Missing')
+    routes['/page/2'] = (200, {'Content-Type': 'application/json'}, '{}')
+    cfg = Config.from_dict({'crawler': {'max_pages': 150, 'max_concurrent': 5, 'use_sitemap': False,
+                                        'adaptive_delay': False, 'cache_enabled': False, 'max_retries': 0},
+                            'analysis': {'enabled_analyzers': ['seo', 'technical']}})
+    async def run():
+        analyzer = SEOAnalyzer(cfg)
+        started = time.perf_counter()
+        pages = [item async for item in analyzer.crawl_site(base + '/')]
+        elapsed = time.perf_counter() - started
+        report = analyzer.generate_site_report(pages)
+        summary, stats = report['summary'], report['crawl_stats']
+        assert len(pages) == summary['total_pages'] == summary['unique_urls'] == count
+        assert summary['html_pages_analyzed'] == summary['successful_pages'] == count - 2
+        assert summary['failed_pages'] == summary['skipped_pages'] == 1
+        assert summary['page_limit'] == 150
+        assert 0 < summary['analysis_duration'] <= elapsed
+        assert stats['pages_per_second'] == pytest.approx((count - 2) / summary['analysis_duration'])
+        assert stats['requests_made'] == len(requests) == count + 1
+        assert stats['requests_by_kind'] == {'robots': 1, 'page': count}
+        assert len(set(requests)) == len(requests)
+        assert stats['cache_hits'] == 0
+        assert summary['completion_reason'] == 'queue_exhausted'
+        assert all(page['load_time'] is not None for page in pages)
+        assert all(page['timings']['total_seconds'] >= page['load_time'] for page in pages)
+        assert report['metadata']['start_url'] == base + '/'
+        assert report['metadata']['config']['max_depth'] == cfg.crawler.max_depth
+        assert report['metadata']['config']['respect_robots_txt'] is True
+        imported = SEOAnalyzer(cfg).generate_site_report(pages)
+        assert imported['summary']['analysis_duration'] is None
+        assert imported['summary']['page_limit'] is None
+        assert imported['crawl_stats']['requests_made'] is None
+    asyncio.run(run())
+
+
+def test_request_counters_include_separate_sitemap_discovery_session(http_site):
+    base, routes, requests = http_site
+    routes['/robots.txt'] = (200, {}, 'User-agent: *\nAllow: /\nCrawl-delay: 0')
+    routes['/sitemap.xml'] = (200, {'Content-Type': 'application/xml'},
+                              f'<urlset><url><loc>{base}/page</loc></url></urlset>')
+    routes['/page'] = (200, {'Content-Type': 'text/html'}, '<html><title>Page</title><h1>Page</h1></html>')
+    async def run():
+        analyzer = SEOAnalyzer(Config.from_dict({'crawler': {'adaptive_delay': False}}))
+        await analyzer.analyze_sitemap(base + '/sitemap.xml')
+        stats = analyzer.generate_site_report()['crawl_stats']
+        assert stats['requests_made'] == len(requests) == 4
+        assert stats['requests_by_kind'] == {'robots': 2, 'sitemap': 1, 'page': 1}
+        assert stats['robots_delays'] == {base: 0}
+    asyncio.run(run())
+
+
 def test_rule_aggregation_retains_unique_page_evidence():
     issues = [{'rule_id': 'seo.title', 'message': str(i), 'category': 'SEO', 'severity': 'warning',
                'url': f'https://example.test/{i}'} for i in range(8)]
