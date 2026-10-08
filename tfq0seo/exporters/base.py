@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound, select_autoescape
 from markupsafe import Markup
 from ..core.report_contracts import validate_report
+from ..core.report_optimizer import generate_performance_metrics
 
 try:
     from openpyxl import Workbook
@@ -348,15 +349,64 @@ class ExportManager:
         counts = self._issue_counts(data, issues)
         recs = self._recommendations(data)
         recommendations = data.get('recommendations', {}) if isinstance(data.get('recommendations'), dict) else {}
-        pages = self._page_records(data)
+        pages = self._page_records(data) if 'pages' in data or 'url' in data else []
         summaries = []
         for page in pages:
             count_data = page.get('issue_counts', page.get('issues', {}))
             issue_count = count_data.get('total', 0) if isinstance(count_data, dict) else len(count_data)
+            flat = self._flatten_page_data(page)
+            facts = page.get('page_facts', {})
+            timings = page.get('timings', {})
+            context = page.get('context', {})
+            site = page.get('site_analysis', {})
+            links = page.get('links', {}).get('data', {})
+            status = page.get('status') or ('error' if page.get('error') else
+                                           'skipped' if page.get('skipped') else 'not_recorded')
             summaries.append({'url': str(page.get('url', '')), 'score': self._number(page.get('overall_score', page.get('score'))),
                               'status_code': page.get('status_code'), 'load_time': self._number(page.get('load_time')),
-                              'issue_count': issue_count, 'error': page.get('error'), 'status': page.get('status')})
+                              'issue_count': issue_count, 'error': page.get('error'), 'status': status,
+                              'reason': page.get('reason'), 'title': flat['title'], 'description': flat['description'],
+                              'word_count': flat['word_count'], 'content_length': page.get('content_length'),
+                              'requested_url': page.get('requested_url'), 'depth': context.get('depth', page.get('depth')),
+                              'parent_url': context.get('parent_url'), 'cached': page.get('cached', False),
+                              'headers_seconds': self._number(timings.get('headers_seconds')),
+                              'download_seconds': self._number(timings.get('download_seconds')),
+                              'fetch_elapsed_seconds': self._number(timings.get('total_seconds')),
+                              'analysis_time': self._number(page.get('analysis_time')),
+                              'category_scores': self._scores(page)[1], 'coverage': page.get('coverage', {}),
+                              'analyzer_errors': page.get('analyzer_errors', {}),
+                              'canonical_status': site.get('canonical_status'),
+                              'canonical_targets': site.get('canonical_targets'),
+                              'robots': facts.get('robots', {}), 'language': facts.get('language'),
+                              'h1': [heading.get('text', '') for heading in facts.get('headings', {}).get('headings', {}).get('h1', [])],
+                              'internal_links': len(links['internal_links']) if isinstance(links.get('internal_links'), list) else None,
+                              'external_links': len(links['external_links']) if isinstance(links.get('external_links'), list) else None,
+                              'redirect_chain': page.get('redirect_chain', []),
+                              'findings': [{key: issue.get(key) for key in ('rule_id', 'severity', 'message', 'recommendation')}
+                                           for issue in self._issues(page)],
+                              'recommendations': [self._recommendation_text(rec) for rec in self._recommendations(page)]})
         summary = data.get('summary', {})
+        crawl_stats = data.get('crawl_stats', {})
+        states = {status: sum(page['status'] == status for page in summaries)
+                  for status in ('complete', 'partial', 'error', 'skipped', 'not_recorded')}
+        observed_duration = self._number(summary.get('analysis_duration'))
+        # Old imported reports used zero for missing run timing. Do not call it a fast crawl.
+        if observed_duration == 0 and not summary.get('duration_scope'):
+            observed_duration = None
+        audit = {'recorded': len(summaries), 'analyzed': states['complete'] + states['partial'],
+                 'complete': states['complete'], 'partial': states['partial'], 'failed': states['error'],
+                 'skipped': states['skipped'], 'unknown': states['not_recorded'],
+                 'page_limit': summary.get('page_limit'), 'duration': observed_duration,
+                 'requests': crawl_stats.get('requests_made'),
+                 'requests_by_kind': crawl_stats.get('requests_by_kind', {}),
+                 'robots_delays': crawl_stats.get('robots_delays', {}),
+                 'cache_hits': crawl_stats.get('cache_hits'),
+                 'throughput': crawl_stats.get('pages_per_second') if observed_duration is not None else None,
+                 'unique_content': crawl_stats.get('unique_content_count'),
+                 'limits': summary.get('limits_reached', []),
+                 'discovery_errors': summary.get('discovery_errors', []),
+                 'config': data.get('metadata', {}).get('config', {}) if summary.get('page_limit') is not None else {},
+                 'completion_reason': summary.get('completion_reason', 'not_recorded')}
         executive_defaults = {
             'overview': {'total_pages_analyzed': summary.get('total_pages', len(pages)),
                          'successful_pages': summary.get('successful_pages', sum(not page.get('error') for page in pages)),
@@ -406,9 +456,19 @@ class ExportManager:
         aggregation_stats = issue_data.get('stats', data.get('aggregation_stats', {}))
         if self._number(aggregation_stats.get('reduction_ratio')) is None:
             aggregation_stats = {}
+        performance_metrics = data.get('performance_metrics') or generate_performance_metrics(pages)
+        fetch_distribution = {label: 0 for label in ('Under 0.1 s', '0.1–0.5 s', '0.5–1 s', '1–3 s', '3 s or more')}
+        for item in performance_metrics.get('load_times', []):
+            seconds = self._number(item.get('time'))
+            if seconds is not None:
+                bucket = sum(seconds >= threshold for threshold in (0.1, 0.5, 1, 3))
+                fetch_distribution[list(fetch_distribution)[bucket]] += 1
         return {
             'data': data,
-            'url': data.get('url', 'Multiple Pages'), 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'url': data.get('url') or data.get('metadata', {}).get('start_url') or
+                   (pages[0].get('url') if pages else None) or 'Multiple Pages',
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'audit': audit,
             'error': data.get('error'), 'overall_score': overall, 'category_scores': categories,
             'report_status': data.get('status'),
             'scoring_policies': scoring_policies, 'scoring_versions': scoring_versions,
@@ -425,7 +485,7 @@ class ExportManager:
             'executive_summary': executive,
             'aggregated_issues': issue_data.get('aggregated', data.get('aggregated_issues', [])),
             'aggregation_stats': aggregation_stats,
-            'performance_metrics': data.get('performance_metrics', {}),
+            'performance_metrics': performance_metrics, 'fetch_distribution': fetch_distribution,
             'pages': pages, 'pages_summary': summaries, 'pages_truncated': data.get('pages_truncated', False),
             'pages_truncated_count': data.get('pages_truncated_count', 0), 'summary': summary,
             'seo_data': seo, 'content_data': content, 'technical_data': technical,

@@ -100,6 +100,62 @@ def test_complete_findings_data_survives_pagination_and_escapes_untrusted_text(t
     assert not soup.find('img')
 
 
+@pytest.mark.parametrize('template', ['report', 'enhanced', 'optimized'])
+def test_html_inventory_exposes_timings_outcomes_and_complete_safe_details(tmp_path, template):
+    payload = '</script><img src=x onerror=alert(1)>'
+    complete = {'url': 'https://example.test/good', 'status': 'complete', 'status_code': 200,
+                'load_time': 0.123456, 'analysis_time': 0.25, 'content_length': 2048, 'overall_score': 75,
+                'timings': {'headers_seconds': 0.1, 'download_seconds': 0.023456, 'total_seconds': 5.5},
+                'seo': {'score': 75, 'data': {'title': {'text': payload}, 'description': {'text': 'Full description'}}},
+                'content': {'data': {'metrics': {'word_count': 321}}},
+                'context': {'depth': 2, 'parent_url': 'https://example.test/'},
+                'issues': [{'message': payload, 'severity': 'warning', 'category': 'SEO'}]}
+    records = [complete,
+               dict(complete, url='https://example.test/partial', status='partial'),
+               {'url': 'https://example.test/failed', 'status': 'error', 'error': 'Timed out', 'load_time': None},
+               {'url': 'https://example.test/skip', 'status': 'skipped', 'skipped': True, 'reason': 'Blocked by robots.txt'}]
+    data = {'pages': records, 'summary': {'page_limit': 500, 'analysis_duration': 12.5, 'completion_reason': 'queue_exhausted'},
+            'crawl_stats': {'requests_made': 5, 'cache_hits': 0, 'pages_per_second': 2 / 12.5,
+                            'requests_by_kind': {'page': 4, 'robots': 1}, 'robots_delays': {'https://example.test': 5}}}
+    original = copy.deepcopy(data)
+    exporter = ExportManager({'output_directory': str(tmp_path), 'html_template': template})
+    soup = BeautifulSoup(Path(exporter.export(data, 'html')).read_text(encoding='utf-8'), 'html.parser')
+    inventory = json.loads(soup.select_one('#pages-data').string)
+    assert len(inventory) == 4
+    assert inventory[0]['load_time'] == 0.123456
+    assert inventory[0]['headers_seconds'] == 0.1
+    assert inventory[0]['fetch_elapsed_seconds'] == 5.5
+    assert inventory[0]['title'] == inventory[0]['findings'][0]['message'] == payload
+    assert inventory[0]['word_count'] == 321
+    assert inventory[0]['depth'] == 2
+    assert inventory[2]['load_time'] is None
+    assert inventory[3]['reason'] == 'Blocked by robots.txt'
+    assert soup.select_one('[data-metric="recorded"]').get_text() == '4'
+    assert soup.select_one('[data-metric="analyzed"]').get_text() == '2'
+    assert soup.select_one('[data-metric="page-limit"]').get_text() == '500'
+    assert soup.select_one('[data-metric="duration"]').get_text() == '12.50 s'
+    assert soup.select_one('#page-search') and soup.select_one('#page-sort') and soup.select_one('#page-outcome')
+    assert not soup.select('[onerror]')
+    assert not soup.find('img')
+    if template == 'optimized':
+        assert not soup.select('script[src]')
+        assert '0.123 s' in soup.select_one('#performance').get_text()
+    assert data == original
+
+
+def test_imported_report_does_not_invent_fast_crawl_or_page_budget(exporter):
+    prepared = exporter._prepare_html_data({'pages': [{'url': 'https://example.test'}],
+                                            'summary': {'analysis_duration': 0}})
+    assert prepared['audit']['duration'] is None
+    assert prepared['audit']['throughput'] is None
+    assert prepared['audit']['page_limit'] is None
+    assert prepared['audit']['requests'] is None
+    assert prepared['audit']['unknown'] == 1
+    empty = exporter._prepare_html_data({'status': 'error', 'error': 'No pages to analyze'})
+    assert empty['audit']['recorded'] == 0
+    assert empty['pages_summary'] == []
+
+
 @pytest.fixture
 def page():
     html = '''<html lang="en"><head><title>A useful title for the local export fixture</title>
@@ -239,12 +295,11 @@ def test_every_page_survives_large_report_export(tmp_path, page, template):
     assert len(prepared['pages_summary']) == 506
     assert prepared['pages_summary'][-1]['error'] == 'Timed out'
     html = Path(exporter.export(report, 'html')).read_text(encoding='utf-8')
-    if template == 'optimized':
-        embedded = re.search(r'const pagesData = (.*);', html).group(1)
-        assert len(json.loads(embedded)) == 506
-    else:
-        soup = BeautifulSoup(html, 'html.parser')
-        assert len(soup.select('.pages-table tbody tr')) == 506
+    soup = BeautifulSoup(html, 'html.parser')
+    embedded = json.loads(soup.select_one('#pages-data').string)
+    assert len(embedded) == 506
+    assert embedded[-1]['error'] == 'Timed out'
+    assert len(soup.select('#pagesTable tbody tr')) == 20
     with Path(exporter.export(report, 'csv')).open(encoding='utf-8', newline='') as stream:
         rows = list(csv.DictReader(stream))
     assert len(rows) == 506

@@ -6,6 +6,15 @@ from click.testing import CliRunner
 from tfq0seo.cli import cli
 
 
+def test_crawl_without_url_reports_usage_error_and_creates_no_report(tmp_path):
+    output = tmp_path / 'audit.json'
+    result = CliRunner().invoke(cli, ['crawl', '--depth', '5', '--max-pages', '500',
+                                      '--concurrent', '5', '--format', 'json', '--output', str(output)])
+    assert result.exit_code == 2
+    assert "Missing argument 'URL'" in result.output
+    assert not output.exists()
+
+
 def write_config(tmp_path, **crawler):
     path = tmp_path / 'config.json'
     path.write_text(json.dumps({'profile': 'quick', 'crawler': {

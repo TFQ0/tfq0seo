@@ -1,0 +1,172 @@
+<style>
+    #page-inventory { scroll-margin-top: 6rem; }
+    .page-controls { display: flex; flex-wrap: wrap; gap: 14px; margin: 18px 0; }
+    .page-controls label { display: block; font-size: 13px; margin-bottom: 5px; }
+    .page-controls input, .page-controls select, .page-navigation button { font: inherit; padding: 9px 12px; border: 1px solid #b6c2d2; border-radius: 6px; background: white; color: #202124; max-width: 100%; }
+    #page-search { width: 24rem; }
+    #page-inventory table { border-collapse: collapse; width: 100%; font-size: 14px; }
+    #page-inventory th, #page-inventory td { padding: 12px; border-bottom: 1px solid #dce3eb; text-align: left; vertical-align: top; }
+    #page-inventory th { color: #45546a; background: #f1f5f9; white-space: nowrap; }
+    #page-inventory td:first-child { min-width: 220px; max-width: 440px; overflow-wrap: anywhere; }
+    #page-inventory small { display: block; margin-top: 5px; }
+    .page-navigation { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+    .page-navigation button { cursor: pointer; }
+    .page-navigation button:disabled { opacity: .45; cursor: default; }
+    .page-outcome { display: inline-block; padding: 3px 8px; background: #edf2f7; border-radius: 5px; color: #27364b; }
+    .page-outcome[data-state="complete"] { background: #e2f4ea; color: #15633e; }
+    .page-outcome[data-state="error"], .page-outcome[data-state="partial"] { background: #fff0df; color: #834300; }
+    .page-detail-row { background: #f8fafc; color: #202124; }
+    .page-detail-row details > summary { cursor: pointer; font-weight: 600; }
+    .page-detail-row details { max-width: calc(100vw - 130px); }
+    .page-detail-row details[open] > summary { margin-bottom: 14px; }
+    .page-detail-row h4 { margin: 16px 0 8px; }
+    .page-detail-row li { margin: 6px 0; overflow-wrap: anywhere; }
+    .page-detail-row .audit-facts dd { white-space: pre-wrap; }
+    @media (max-width: 600px) { .page-controls > div { width: 100%; } #page-search { width: 100%; } }
+</style>
+<section class="audit-panel" id="page-inventory" aria-labelledby="page-inventory-heading">
+    <h2 id="page-inventory-heading">Pages &amp; response times ({{ pages_summary|length }})</h2>
+    <p>Search every recorded URL, including failures and skips. Open a page's details for metadata, category scores, findings, and timing breakdowns.</p>
+    <div class="page-controls">
+        <div><label for="page-search">Search pages</label><input id="page-search" type="search" placeholder="URL, title, description, or error"></div>
+        <div><label for="page-outcome">Analysis outcome</label><select id="page-outcome">
+            <option value="">All outcomes</option><option value="complete">Complete</option><option value="partial">Partial</option>
+            <option value="error">Failed</option><option value="skipped">Skipped</option><option value="not_recorded">Not recorded</option>
+        </select></div>
+        <div><label for="page-sort">Sort pages</label><select id="page-sort">
+            <option value="original">Report order</option><option value="slowest">Slowest HTML fetch</option>
+            <option value="lowest-score">Lowest score</option><option value="most-issues">Most findings</option><option value="url">URL</option>
+        </select></div>
+    </div>
+    <p id="page-results" role="status" aria-live="polite"></p>
+    <div style="overflow-x:auto"><table class="pages-table" id="pagesTable">
+        <thead><tr><th scope="col">Page / title</th><th scope="col">Outcome</th><th scope="col">HTTP</th>
+            <th scope="col">HTML fetch</th><th scope="col">Score</th><th scope="col">Findings</th><th scope="col">Words</th></tr></thead>
+        <tbody>{% for page in pages_summary[:20] %}<tr>
+            <td>{{ page.url }}<small dir="auto">{{ page.title }}</small></td><td>{{ page.status }}</td>
+            <td>{{ page.status_code if page.status_code else 'No response' }}</td><td>{{ page.load_time|number(3, ' s') }}</td>
+            <td>{{ page.score|number }}</td><td>{{ page.issue_count }}</td><td>{{ page.word_count|number }}</td>
+        </tr>{% endfor %}</tbody>
+    </table></div>
+    <div class="page-navigation" aria-label="Page inventory pagination">
+        <button id="pages-previous" type="button" disabled>Previous pages</button>
+        <span id="pageInfo">Page 1 of {{ [1, (pages_summary|length / 20)|round(0, 'ceil')|int]|max }}</span>
+        <button id="pages-next" type="button"{% if pages_summary|length <= 20 %} disabled{% endif %}>Next pages</button>
+    </div>
+    <p><strong>HTML fetch</strong> is recorded network time for the HTML request, including redirects/retries, excluding pacing and analysis.
+       Details separate final-response headers and body download from total fetch elapsed time (which includes waiting).
+       These are HTTP observations, not browser load time, TTFB, or Core Web Vitals. Missing timings remain “Not measured”.</p>
+    <noscript>JavaScript is required to search, sort, view details, and paginate all {{ pages_summary|length }} records. The first 20 are shown above; JSON/CSV exports retain every page.</noscript>
+</section>
+<script type="application/json" id="pages-data">{% for chunk in pages_summary|json_chunks %}{{ chunk }}{% endfor %}</script>
+<script>
+(() => {
+    const pages = JSON.parse(document.getElementById('pages-data').textContent);
+    const search = document.getElementById('page-search');
+    const outcome = document.getElementById('page-outcome');
+    const sort = document.getElementById('page-sort');
+    const body = document.querySelector('#pagesTable tbody');
+    const previous = document.getElementById('pages-previous');
+    const next = document.getElementById('pages-next');
+    const size = 20;
+    let pageNumber = 1, filtered = pages;
+    const number = (value, digits = 0, suffix = '') => Number.isFinite(value) ? value.toFixed(digits) + suffix : 'Not measured';
+    const text = value => value === null || value === undefined || value === '' ? 'Not recorded' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+    function node(tag, value, parent) {
+        const element = document.createElement(tag);
+        if (value !== undefined) element.textContent = text(value);
+        if (parent) parent.appendChild(element);
+        return element;
+    }
+    function field(list, label, value) {
+        const item = node('div', undefined, list);
+        node('dt', label, item); node('dd', value, item);
+    }
+    function detailsFor(page, details) {
+        const list = node('dl', undefined, details); list.className = 'audit-facts';
+        [['Requested URL', page.requested_url], ['Final URL', page.url], ['Title', page.title], ['Description', page.description],
+         ['Language', page.language], ['H1 headings', page.h1.join('\n')], ['Words', number(page.word_count)],
+         ['HTML bytes recorded', number(page.content_length)], ['Link depth', number(page.depth)], ['Discovered from', page.parent_url],
+         ['Internal links', number(page.internal_links)], ['External links', number(page.external_links)],
+         ['Canonical status', page.canonical_status], ['Canonical targets', page.canonical_targets],
+         ['Robots observation', page.robots.indexability], ['Analysis cache', page.cached ? 'Hit' : 'No hit recorded'],
+         ['Failure / skip reason', page.error || page.reason], ['Analyzer errors', Object.keys(page.analyzer_errors).length ? page.analyzer_errors : 'None recorded']
+        ].forEach(([label, value]) => field(list, label, value));
+        node('h4', 'Timing breakdown', details);
+        const timing = node('dl', undefined, details); timing.className = 'audit-facts';
+        [['Final response headers', page.headers_seconds], ['Final body download', page.download_seconds],
+         ['HTML network time', page.load_time], ['Total fetch elapsed (including waiting)', page.fetch_elapsed_seconds],
+         ['Rule analysis elapsed', page.analysis_time]].forEach(([label, value]) => field(timing, label, number(value, 3, ' s')));
+        node('h4', 'Category scores & coverage', details);
+        const scores = node('dl', undefined, details); scores.className = 'audit-facts';
+        Object.entries(page.category_scores).forEach(([name, value]) => field(scores, name, number(value, 1, ' / 100')));
+        field(scores, 'Completed analyzers', (page.coverage.completed_analyzers || []).join(', '));
+        field(scores, 'Failed analyzers', (page.coverage.failed_analyzers || []).join(', ') || 'None recorded');
+        if (page.redirect_chain.length) {
+            node('h4', 'Observed redirects', details);
+            const chain = node('ul', undefined, details);
+            page.redirect_chain.forEach(hop => node('li', `${hop.status_code}: ${hop.url} → ${hop.location}`, chain));
+        }
+        node('h4', `Page findings (${page.findings.length})`, details);
+        const findings = node('ul', undefined, details);
+        page.findings.forEach(item => node('li', `[${item.severity || 'unspecified'}] ${item.rule_id || ''} ${item.message || ''}`, findings));
+        if (!page.findings.length) node('p', 'No page findings recorded. Check the outcome and coverage before interpreting this as a clean result.', details);
+        if (page.recommendations.length) {
+            node('h4', 'Recommendations', details);
+            const recommendations = node('ul', undefined, details);
+            page.recommendations.forEach(item => node('li', item, recommendations));
+        }
+    }
+    function render() {
+        const count = Math.max(1, Math.ceil(filtered.length / size));
+        pageNumber = Math.min(pageNumber, count);
+        const start = (pageNumber - 1) * size;
+        body.replaceChildren();
+        filtered.slice(start, start + size).forEach(page => {
+            const row = node('tr', undefined, body);
+            const linkCell = node('td', undefined, row);
+            // All audited strings remain text; only absolute HTTP(S) links are clickable.
+            try {
+                const url = new URL(page.url);
+                if (!['http:', 'https:'].includes(url.protocol) || /[\u0000-\u001f]/.test(page.url)) throw new Error('Unsafe URL');
+                const link = node('a', page.url, linkCell);
+                link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
+            } catch (_) { node('span', page.url, linkCell); }
+            const title = node('small', page.title, linkCell); title.dir = 'auto';
+            const badge = node('span', page.status, node('td', undefined, row));
+            badge.className = 'page-outcome'; badge.dataset.state = page.status;
+            [page.status_code || 'No response', number(page.load_time, 3, ' s'), number(page.score, 1), page.issue_count, number(page.word_count)]
+                .forEach(value => node('td', value, row));
+            const detailRow = node('tr', undefined, body); detailRow.className = 'page-detail-row';
+            const cell = node('td', undefined, detailRow); cell.colSpan = 7;
+            const details = node('details', undefined, cell);
+            node('summary', 'Page details', details);
+            details.addEventListener('toggle', () => { if (details.open && !details.querySelector('dl')) detailsFor(page, details); });
+        });
+        if (!filtered.length) { const cell = node('td', 'No matching pages.', node('tr', undefined, body)); cell.colSpan = 7; }
+        document.getElementById('page-results').textContent = filtered.length
+            ? `Showing ${start + 1}–${Math.min(start + size, filtered.length)} of ${filtered.length} matching pages (${pages.length} total)`
+            : `No matching pages (${pages.length} total)`;
+        document.getElementById('pageInfo').textContent = `Page ${pageNumber} of ${count}`;
+        previous.disabled = pageNumber === 1; next.disabled = pageNumber === count;
+    }
+    function filter() {
+        const query = search.value.trim().toLowerCase();
+        filtered = pages.filter(page => (!outcome.value || page.status === outcome.value) &&
+            [page.url, page.title, page.description, page.error, page.reason].some(value => String(value ?? '').toLowerCase().includes(query)));
+        const numeric = {slowest: ['load_time', -1], 'lowest-score': ['score', 1], 'most-issues': ['issue_count', -1]}[sort.value];
+        if (numeric) filtered.sort((a, b) => {
+            const [key, direction] = numeric;
+            if (!Number.isFinite(a[key])) return Number.isFinite(b[key]) ? 1 : 0;
+            if (!Number.isFinite(b[key])) return -1;
+            return direction * (a[key] - b[key]);
+        });
+        else if (sort.value === 'url') filtered.sort((a, b) => a.url.localeCompare(b.url));
+        pageNumber = 1; render();
+    }
+    search.addEventListener('input', filter); outcome.addEventListener('change', filter); sort.addEventListener('change', filter);
+    previous.addEventListener('click', () => { if (pageNumber > 1) { pageNumber--; render(); } });
+    next.addEventListener('click', () => { if (pageNumber * size < filtered.length) { pageNumber++; render(); } });
+    render();
+})();
+</script>

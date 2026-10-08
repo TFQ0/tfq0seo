@@ -42,6 +42,8 @@ class CrawlStats:
     rate_limit_hits: int = 0
     robots_blocked: int = 0
     redirects_followed: int = 0
+    requests_by_kind: Dict[str, int] = field(default_factory=dict)
+    robots_delays: Dict[str, float] = field(default_factory=dict)
 
     def get_summary(self) -> Dict[str, Any]:
         elapsed = max(0, time.time() - self.start_time)
@@ -468,6 +470,7 @@ class EnhancedCrawler:
                 request_started = time.monotonic()
                 try:
                     self.stats.requests_made += 1
+                    self.stats.requests_by_kind[kind] = self.stats.requests_by_kind.get(kind, 0) + 1
                     async with self.session.get(current, allow_redirects=False,
                                                 ssl=self.verify_ssl, proxy=self.proxy) as response:
                         headers_seconds = time.monotonic() - request_started
@@ -566,6 +569,7 @@ class EnhancedCrawler:
             self._robots_sitemaps[origin] = rp.site_maps() or []
             delay = rp.crawl_delay(self.user_agent)
             if delay is not None:
+                self.stats.robots_delays[origin] = delay * self.crawl_delay_factor
                 self.rate_limiter.set_minimum_delay(origin, delay * self.crawl_delay_factor)
             rate = rp.request_rate(self.user_agent)
             if rate and rate.requests:
